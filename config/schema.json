@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "speech-rate SG0 config",
+  "type": "object",
+  "required": [
+    "paths",
+    "dataset",
+    "events",
+    "evoked_trf",
+    "induced_trf",
+    "ddc",
+    "reporting"
+  ],
+  "properties": {
+    "paths": {
+      "type": "object",
+      "required": [
+        "out_dir"
+      ],
+      "properties": {
+        "out_dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logs_dir": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "dataset": {
+      "type": "object"
+    },
+    "events": {
+      "type": "object"
+    },
+    "evoked_trf": {
+      "type": "object"
+    },
+    "induced_trf": {
+      "type": "object"
+    },
+    "ddc": {
+      "type": "object"
+    },
+    "reporting": {
+      "type": "object"
+    },
+    "random_seed": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": true
+}

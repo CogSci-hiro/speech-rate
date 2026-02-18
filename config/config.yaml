@@ -1,0 +1,11 @@
+paths:
+  out_dir: "/Volumes/work-4T/speech-rate-testing"
+
+dataset: {}
+events: {}
+evoked_trf: {}
+induced_trf: {}
+ddc: {}
+reporting: {}
+
+random_seed: 1729
