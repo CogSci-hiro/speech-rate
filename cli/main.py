@@ -6,7 +6,7 @@ import logging
 from argparse import ArgumentParser
 from typing import Sequence
 
-from cli.commands import run_tests, validate_config, write_manifest
+from cli.commands import dataset_index, run_tests, validate_config, write_manifest
 
 LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
 
@@ -18,6 +18,7 @@ def build_parser() -> ArgumentParser:
 
     validate_config.register_subparser(subparsers)
     write_manifest.register_subparser(subparsers)
+    dataset_index.register_subparser(subparsers)
     run_tests.register_subparser(subparsers)
 
     return parser

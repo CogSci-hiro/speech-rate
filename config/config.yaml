@@ -1,7 +1,17 @@
 paths:
-  out_dir: "/Volumes/work-4T/speech-rate-testing"
+  out_dir: /tmp/speech-rate-out
+  bids_dir: /tmp/speech-rate-input/bids
+  eeg_dir: /tmp/speech-rate-input/eeg
+  annotations_dir: /tmp/speech-rate-input/annotations
 
-dataset: {}
+dataset:
+  tasks:
+    - dialogue
+  runs:
+    - 1
+    - 2
+  missing_runs: []
+  exclude_runs: []
 events: {}
 evoked_trf: {}
 induced_trf: {}

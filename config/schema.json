@@ -22,6 +22,18 @@
           "type": "string",
           "minLength": 1
         },
+        "bids_dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eeg_dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "annotations_dir": {
+          "type": "string",
+          "minLength": 1
+        },
         "logs_dir": {
           "type": "string",
           "minLength": 1
@@ -30,7 +42,106 @@
       "additionalProperties": true
     },
     "dataset": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ]
+          }
+        },
+        "missing_runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "dyad_id",
+              "run"
+            ],
+            "properties": {
+              "dyad_id": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "run": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "exclude_runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "dyad_id",
+              "run",
+              "reason"
+            ],
+            "properties": {
+              "dyad_id": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "run": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": true
     },
     "events": {
       "type": "object"
