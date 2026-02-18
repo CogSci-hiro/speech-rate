@@ -1,7 +1,5 @@
 """Configuration loading, defaulting, and schema validation."""
 
-from __future__ import annotations
-
 import copy
 import json
 import logging
@@ -14,6 +12,11 @@ from jsonschema import Draft202012Validator
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_LOGS_SUBDIR = "logs"
+DEFAULT_IPU_MIN_DURATION_S = 0.30
+DEFAULT_IPU_MIN_SYLLABLES = 3
+DEFAULT_TIME_WITHIN_RUN_NORMALIZE = True
+DEFAULT_TIME_WITHIN_RUN_METHOD = "run_duration"
+DEFAULT_MATCHING_ABSDIFF_WINDOW_S = 1.0
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config" / "schema.json"
 
 
@@ -77,6 +80,24 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
     if out_dir and not logs_dir:
         paths_value["logs_dir"] = str(Path(out_dir) / DEFAULT_LOGS_SUBDIR)
 
+    events_value = resolved.setdefault("events", {})
+    if not isinstance(events_value, dict):
+        raise ConfigValidationError("`events` must be a mapping.")
+
+    events_value.setdefault("ipu_min_duration_s", DEFAULT_IPU_MIN_DURATION_S)
+    events_value.setdefault("ipu_min_syllables", DEFAULT_IPU_MIN_SYLLABLES)
+
+    time_value = events_value.setdefault("time_within_run", {})
+    if not isinstance(time_value, dict):
+        raise ConfigValidationError("`events.time_within_run` must be a mapping.")
+    time_value.setdefault("normalize", DEFAULT_TIME_WITHIN_RUN_NORMALIZE)
+    time_value.setdefault("method", DEFAULT_TIME_WITHIN_RUN_METHOD)
+
+    matching_value = events_value.setdefault("matching", {})
+    if not isinstance(matching_value, dict):
+        raise ConfigValidationError("`events.matching` must be a mapping.")
+    matching_value.setdefault("absdiff_window_s", DEFAULT_MATCHING_ABSDIFF_WINDOW_S)
+
     return resolved
 
 
@@ -100,6 +121,11 @@ def validate_config(config: Mapping[str, Any], schema_path: Path | str = DEFAULT
         Resolved configuration mapping.
     schema_path
         Schema file path.
+
+    Returns
+    -------
+    None
+        Returns when validation succeeds.
     """
     schema = _load_schema(schema_path)
     validator = Draft202012Validator(schema)

@@ -144,7 +144,44 @@
       "additionalProperties": true
     },
     "events": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "ipu_min_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "ipu_min_syllables": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_within_run": {
+          "type": "object",
+          "properties": {
+            "normalize": {
+              "type": "boolean"
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "run_duration",
+                "minmax_0_1"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "matching": {
+          "type": "object",
+          "properties": {
+            "absdiff_window_s": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
     },
     "evoked_trf": {
       "type": "object"

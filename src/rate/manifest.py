@@ -1,7 +1,5 @@
 """Run manifest creation helpers."""
 
-from __future__ import annotations
-
 import json
 import logging
 from datetime import datetime, timezone
@@ -9,10 +7,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from rate.config import ConfigValidationError, apply_config_defaults
+from rate.paths import ensure_parent_dir
 from rate.util import (
     DEFAULT_RANDOM_SEED,
     KEY_PACKAGES,
-    ensure_parent_dir,
     get_git_commit_hash,
     get_package_versions,
     get_python_version,

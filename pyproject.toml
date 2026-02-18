@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel", "backports.tarfile>=1.2.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rate"
+version = "0.1.0"
+description = "Speech-rate analysis scaffolding package."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "PyYAML>=6.0",
+  "jsonschema>=4.19",
+  "pandas>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "snakemake>=9.0",
+]
+docs = [
+  "sphinx",
+  "pydata-sphinx-theme",
+  "numpydoc",
+  "sphinx-gallery",
+  "sphinx-copybutton",
+  "sphinx-design",
+  "sphinxcontrib-bibtex",
+  "matplotlib",
+]
+parquet = [
+  "pyarrow>=14.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rate*"]

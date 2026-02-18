@@ -1,7 +1,5 @@
 """Unit tests for SG0 config loading and run manifest scaffolding."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 
@@ -41,6 +39,16 @@ def test_schema_validates_known_good_config(tmp_path: Path) -> None:
     resolved = load_and_validate_config(cfg_path, schema_path=Path("config/schema.json"))
 
     assert resolved["paths"]["out_dir"] == str(tmp_path / "outputs")
+
+
+def test_repository_config_validates() -> None:
+    resolved = load_and_validate_config(
+        Path("config/config.yaml"),
+        schema_path=Path("config/schema.json"),
+    )
+
+    expected_logs = str(Path(resolved["paths"]["out_dir"]) / "logs")
+    assert resolved["paths"]["logs_dir"] == expected_logs
 
 
 def test_schema_rejects_missing_required_key(tmp_path: Path) -> None:

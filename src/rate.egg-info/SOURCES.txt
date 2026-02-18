@@ -1,0 +1,12 @@
+pyproject.toml
+src/rate/__init__.py
+src/rate/config.py
+src/rate/dataset.py
+src/rate/events.py
+src/rate/manifest.py
+src/rate/util.py
+src/rate.egg-info/PKG-INFO
+src/rate.egg-info/SOURCES.txt
+src/rate.egg-info/dependency_links.txt
+src/rate.egg-info/requires.txt
+src/rate.egg-info/top_level.txt

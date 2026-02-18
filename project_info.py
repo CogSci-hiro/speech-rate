@@ -78,15 +78,47 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _get_out_dir(cfg: dict[str, Any]) -> Optional[Path]:
-    # Prefer your real schema location: io.out_dir
-    io = cfg.get("io", {})
-    if isinstance(io, dict) and "out_dir" in io:
-        return Path(str(io["out_dir"]))
-    # Fallback: paths.out_dir if present
     paths = cfg.get("paths", {})
     if isinstance(paths, dict) and "out_dir" in paths:
         return Path(str(paths["out_dir"]))
+    # Legacy fallback
+    io = cfg.get("io", {})
+    if isinstance(io, dict) and "out_dir" in io:
+        return Path(str(io["out_dir"]))
     return None
+
+
+def _load_config_with_validation(
+    root: Path,
+    cfg_path: Path,
+    schema_path: Path,
+) -> tuple[dict[str, Any], str]:
+    """Load and validate config, returning config and status text."""
+    if not cfg_path.exists():
+        return {}, f"MISSING (not found: {cfg_path})"
+
+    src_path = root / "src"
+    if src_path.exists() and str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+
+    try:
+        from rate.config import ConfigValidationError, load_and_validate_config
+    except Exception as exc:
+        try:
+            cfg = _load_yaml(cfg_path)
+            return cfg, f"UNVALIDATED (could not import rate.config: {exc})"
+        except Exception as yaml_exc:
+            return {}, f"INVALID (YAML load failed: {yaml_exc})"
+
+    try:
+        cfg = load_and_validate_config(cfg_path, schema_path=schema_path)
+        return cfg, "VALID"
+    except ConfigValidationError as exc:
+        try:
+            cfg = _load_yaml(cfg_path)
+        except Exception:
+            cfg = {}
+        return cfg, f"INVALID ({exc})"
 
 
 # ##################################################################################################
@@ -200,9 +232,17 @@ def _probe_mne_evokeds(path: Path) -> Optional[dict[str, Any]]:
 # ##################################################################################################
 
 def main() -> None:
+    """Collect a project snapshot report and write it to Markdown.
+
+    Returns
+    -------
+    None
+        This function writes output to disk and exits without returning data.
+    """
     parser = argparse.ArgumentParser(description="Collect project snapshot for reproducibility/debugging.")
     parser.add_argument("--root", type=str, default=".", help="Project root (default: .)")
-    parser.add_argument("--config", type=str, default="workflow/config.yaml", help="Path to config.yaml")
+    parser.add_argument("--config", type=str, default="config/config.yaml", help="Path to config YAML")
+    parser.add_argument("--schema", type=str, default="config/schema.json", help="Path to config schema JSON")
     parser.add_argument("--out", type=str, default="project_snapshot.md", help="Output markdown file")
     parser.add_argument("--probe", action="store_true", help="Probe known artifacts (e.g., MNE fif) if possible.")
     parser.add_argument("--max_tree_items", type=int, default=150)
@@ -211,12 +251,12 @@ def main() -> None:
 
     root = Path(args.root).resolve()
     cfg_path = (root / args.config).resolve()
+    schema_path = (root / args.schema).resolve()
     out_path = (root / args.out).resolve()
     workflow_dir = root / "workflow"
 
-    cfg: dict[str, Any] = {}
-    if cfg_path.exists():
-        cfg = _load_yaml(cfg_path)
+    cfg, config_status = _load_config_with_validation(root=root, cfg_path=cfg_path, schema_path=schema_path)
+    config_is_valid = config_status == "VALID"
 
     out_dir = _get_out_dir(cfg)
 
@@ -268,7 +308,10 @@ def main() -> None:
     lines.append(f"# Project Snapshot\n")
     lines.append(f"- Generated: `{_now_iso()}`\n")
     lines.append(f"- Root: `{root}`\n")
-    lines.append(f"- Config: `{cfg_path if cfg_path.exists() else 'MISSING'}`\n")
+    lines.append(f"- Config path: `{cfg_path}`\n")
+    lines.append(f"- Schema path: `{schema_path}`\n")
+    status_one_line = config_status.replace("\n", " | ")
+    lines.append(f"- Config status: `{status_one_line}`\n")
 
     lines.append("## Environment\n")
     lines.append("```json")
@@ -305,7 +348,10 @@ def main() -> None:
             lines.append(yaml.safe_dump({"viz": cfg["viz"]}, sort_keys=False))
             lines.append("```\n")
     else:
-        lines.append("_Config not found or invalid._\n")
+        if config_is_valid:
+            lines.append("_Config loaded but empty._\n")
+        else:
+            lines.append("_Config missing or invalid. See Config status above for details._\n")
 
     lines.append("## Repository File Summary\n")
     lines.append(f"Top {len(tree_items)} files by size (excluding .git/.venv/__pycache__/.snakemake):\n")

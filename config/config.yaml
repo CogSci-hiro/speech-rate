@@ -12,7 +12,14 @@ dataset:
     - 2
   missing_runs: []
   exclude_runs: []
-events: {}
+events:
+  ipu_min_duration_s: 0.3
+  ipu_min_syllables: 3
+  time_within_run:
+    normalize: true
+    method: run_duration
+  matching:
+    absdiff_window_s: 1.0
 evoked_trf: {}
 induced_trf: {}
 ddc: {}

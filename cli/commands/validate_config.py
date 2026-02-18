@@ -1,20 +1,29 @@
 """`validate-config` CLI subcommand."""
 
-from __future__ import annotations
-
 import json
 import logging
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 from pathlib import Path
 
 from rate.config import ConfigValidationError, load_and_validate_config
-from rate.util import ensure_parent_dir
+from rate.paths import ensure_parent_dir
 
 LOGGER = logging.getLogger(__name__)
 
 
-def register_subparser(subparsers: _SubParsersAction[ArgumentParser]) -> ArgumentParser:
-    """Register the `validate-config` subcommand."""
+def register_subparser(subparsers: _SubParsersAction) -> ArgumentParser:
+    """Register the `validate-config` subcommand.
+
+    Parameters
+    ----------
+    subparsers
+        Parent subparser collection from the root CLI parser.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        Parser configured for the ``validate-config`` command.
+    """
     parser = subparsers.add_parser("validate-config", help="Validate config against JSON schema.")
     parser.add_argument("--config", default="config/config.yaml", help="Path to YAML config file.")
     parser.add_argument("--schema", default="config/schema.json", help="Path to JSON schema file.")
@@ -24,7 +33,18 @@ def register_subparser(subparsers: _SubParsersAction[ArgumentParser]) -> Argumen
 
 
 def run(args: Namespace) -> int:
-    """Execute the `validate-config` command."""
+    """Execute configuration validation.
+
+    Parameters
+    ----------
+    args
+        Parsed CLI namespace for this command.
+
+    Returns
+    -------
+    int
+        Process exit code (``0`` on success, ``1`` on validation failure).
+    """
     try:
         resolved = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))
     except ConfigValidationError as exc:

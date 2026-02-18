@@ -1,0 +1,11 @@
+numpy>=1.26
+PyYAML>=6.0
+jsonschema>=4.19
+pandas>=2.1
+
+[dev]
+pytest>=8.0
+snakemake>=9.0
+
+[parquet]
+pyarrow>=14.0
