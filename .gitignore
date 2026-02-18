@@ -1,2 +1,9 @@
 .idea/
 dev
+__pycache__/
+*.pyc
+.pytest_cache/
+.snakemake/
+*.egg-info/
+.DS_Store
+docs/_build/
