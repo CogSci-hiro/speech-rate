@@ -1,0 +1,7 @@
+configfile: "config/config.yaml"
+
+include: "rules/common.smk"
+include: "rules/dataset.smk"
+include: "rules/events.smk"
+include: "rules/evoked_trf.smk"
+include: "rules/tests.smk"
