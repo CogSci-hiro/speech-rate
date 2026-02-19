@@ -17,6 +17,7 @@ src/rate/cli/commands/__init__.py
 src/rate/cli/commands/clean.py
 src/rate/cli/commands/dataset_index.py
 src/rate/cli/commands/events_table.py
+src/rate/cli/commands/evoked_trf_scores.py
 src/rate/cli/commands/run_tests.py
 src/rate/cli/commands/validate_config.py
 src/rate/cli/commands/write_manifest.py

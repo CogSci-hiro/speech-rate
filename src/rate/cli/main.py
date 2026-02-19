@@ -26,6 +26,7 @@ import rate.cli.commands.events_table as cmd_events_table
 import rate.cli.commands.run_tests as cmd_run_tests
 import rate.cli.commands.validate_config as cmd_validate_config
 import rate.cli.commands.write_manifest as cmd_write_manifest
+import rate.cli.commands.evoked_trf_scores as cmd_evoked_trf_scores
 
 LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
 LOGGER = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ _COMMANDS = {
     "write-manifest": cmd_write_manifest,
     "dataset-index": cmd_dataset_index,
     "events-table": cmd_events_table,
+    "evoked-trf-scores": cmd_evoked_trf_scores,
     "clean": cmd_clean,
     "run-tests": cmd_run_tests,
 }

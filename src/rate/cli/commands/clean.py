@@ -1,10 +1,8 @@
 """`clean` CLI subcommand for local cache cleanup."""
 
-from __future__ import annotations
-
 import logging
 import shutil
-from argparse import ArgumentParser, Namespace, _SubParsersAction
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -18,7 +16,7 @@ PYTEST_CACHE_NAME = ".pytest_cache"
 SNAKEMAKE_CACHE_NAME = ".snakemake"
 
 
-def add_subparser(subparsers: _SubParsersAction) -> ArgumentParser:
+def add_subparser(subparsers) -> ArgumentParser:
     """Register the `clean` subcommand."""
     parser = subparsers.add_parser("clean", help="Remove local cache/generated metadata in this repository.")
     parser.add_argument("--root", default=".", help="Repository root directory.")
@@ -32,7 +30,7 @@ def add_subparser(subparsers: _SubParsersAction) -> ArgumentParser:
     return parser
 
 
-def register_subparser(subparsers: _SubParsersAction) -> ArgumentParser:
+def register_subparser(subparsers) -> ArgumentParser:
     """Backward-compatible alias for CLI registration."""
     return add_subparser(subparsers)
 

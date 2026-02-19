@@ -1,9 +1,7 @@
 """`events-table` CLI subcommand."""
 
-from __future__ import annotations
-
 import logging
-from argparse import ArgumentParser, Namespace, _SubParsersAction
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,7 +12,7 @@ LOGGER = logging.getLogger(__name__)
 REQUIRES_CONFIG = True
 
 
-def add_subparser(subparsers: _SubParsersAction) -> ArgumentParser:
+def add_subparser(subparsers) -> ArgumentParser:
     """Register the `events-table` subcommand."""
     parser = subparsers.add_parser("events-table", help="Build canonical events parquet and QC CSV outputs.")
     parser.add_argument("--config", default="config/config.yaml", help="Path to YAML config file.")
@@ -26,7 +24,7 @@ def add_subparser(subparsers: _SubParsersAction) -> ArgumentParser:
     return parser
 
 
-def register_subparser(subparsers: _SubParsersAction) -> ArgumentParser:
+def register_subparser(subparsers) -> ArgumentParser:
     """Backward-compatible alias for CLI registration."""
     return add_subparser(subparsers)
 

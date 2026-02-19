@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from rate.evoked_trf.cv import BlockedWithinRunCV, bins_to_sample_mask
 from rate.evoked_trf.fit import (
@@ -388,7 +389,7 @@ def dyad_subject_loro_scores(
     rows: list[dict[str, object]] = []
     split_rows: list[dict[str, object]] = []
 
-    for fold_id, test_run in enumerate(runs):
+    for fold_id, test_run in tqdm(list(enumerate(runs)), desc=f"{dyad_id}/{subject} folds", leave=False):
         train_runs = [r for r in runs if r != test_run]
 
         # CV audit table (new schema, see below)
@@ -505,7 +506,7 @@ def compute_scores_and_splits(
     all_splits: list[pd.DataFrame] = []
 
     grouped = events.groupby(["dyad_id", "subject_id"], sort=True)
-    for (dyad_id, subject), _ in grouped:
+    for (dyad_id, subject), _ in tqdm(grouped, desc="evoked_trf dyad×subject"):
         rows, splits = dyad_subject_loro_scores(
             dyad_id=str(dyad_id),
             subject=str(subject),

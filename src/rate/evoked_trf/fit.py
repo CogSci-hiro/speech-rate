@@ -132,8 +132,12 @@ def _events_to_continuous_regressor(
 
     if np.any(~np.isfinite(times_s)):
         raise ValueError(f"Non-finite event times for regressor {reg.name}")
-    if np.any(~np.isfinite(amps)):
-        raise ValueError(f"Non-finite event amplitudes for regressor {reg.name}")
+
+    finite_amp = np.isfinite(amps)
+    if not np.all(finite_amp):
+        # Drop events with missing/inf amplitudes for this regressor.
+        times_s = times_s[finite_amp]
+        amps = amps[finite_amp]
 
     idx = np.round(times_s * sfreq_hz).astype(int)
     idx = np.clip(idx, 0, n_samples - 1)

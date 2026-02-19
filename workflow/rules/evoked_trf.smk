@@ -1,9 +1,6 @@
 OUT_DIR = config["paths"]["out_dir"]
 
 rule evoked_trf_scores:
-    """
-    Compute evoked TRF score tables with blocked within-run CV.
-    """
     input:
         events=f"{OUT_DIR}/events/events.parquet",
         dataset_index=f"{OUT_DIR}/dataset/index.parquet",
@@ -17,13 +14,5 @@ rule evoked_trf_scores:
     shell:
         r"""
         set -euo pipefail
-        python - <<'PY' > {log} 2>&1
-        from pathlib import Path
-        from rate.config import load_and_validate_config
-        from rate.evoked_trf.score import write_outputs
-        
-        cfg = load_and_validate_config()
-        out_dir = Path(cfg["paths"]["out_dir"])
-        write_outputs(cfg=cfg, out_dir=out_dir)
-        PY
+        python -m rate.cli.main evoked-trf-scores --config config/config.yaml --schema config/schema.json > {log} 2>&1
         """
