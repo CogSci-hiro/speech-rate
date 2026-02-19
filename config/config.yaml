@@ -1,28 +1,234 @@
+# ============================================================
+# speech-rate — Master Configuration
+# ============================================================
+
+project:
+  name: "speech-rate"
+  version: "v1"
+  random_seed: 1234
+
+# ============================================================
+# PATHS
+# ============================================================
 paths:
   out_dir: "/Volumes/work-4T/speech-rate-testing"
   bids_dir: "/Volumes/work-4T/hyperscanning-bids"
   eeg_dir: "/Volumes/work-4T/hyperscanning/derived/eeg"
   annotations_dir: "/Users/hiro/PycharmProjects/hyperscanning-working/data/annotations"
 
+
+# ============================================================
+# DATASET
+# ============================================================
+
 dataset:
-  tasks:
-    - dialogue
-  runs:
-    - 1
-    - 2
-  missing_runs: []
-  exclude_runs: []
+  tasks: ["conversation"]
+  runs: [1, 2, 3, 4, 5, 6, 7, 8]
+
+  # ---------------------------------------
+  # Explicit exclusions
+  # ---------------------------------------
+  exclude:
+
+    # A) Entire subject (all runs)
+    subjects:
+      - subject_id: "sub-003"
+        reason: "bad electrode placement"
+      - subject_id: "sub-032"
+        reason: "no signal (flat)"
+
+    # B) Specific run of a specific subject
+    subject_runs:
+      - subject_id: "sub-004"
+        run: 1
+        reason: "no audio"
+      - subject_id: "sub-004"
+        run: 2
+        reason: "no audio"
+      - subject_id: "sub-015"
+        run: 3
+        reason: "???"
+
+    # C) Entire dyad (all runs)
+    dyads:
+      - dyad_id: "dyad-001"
+        reason: "32 electrodes"
+
+    # D) Specific run of a dyad (both participants)
+    dyad_runs:
+      - dyad_id: "dyad-014"
+        run: 8
+        reason: "no EEG data"
+
+
+# ============================================================
+# EVENTS (Canonical Event Table)
+# ============================================================
+
 events:
-  ipu_min_duration_s: 0.3
+  ipu_min_duration_s: 0.30
   ipu_min_syllables: 3
+
   time_within_run:
     normalize: true
-    method: run_duration
+    method: "minmax_0_1"   # implemented as t_onset / T_run
+
   matching:
     absdiff_window_s: 1.0
-evoked_trf: {}
-induced_trf: {}
-ddc: {}
-reporting: {}
 
-random_seed: 1729
+# ============================================================
+# EVOKED TRF
+# ============================================================
+
+evoked_trf:
+  downsample_hz: 100.0
+
+  lags_s:
+    tmin: -0.2
+    tmax: 0.8
+
+  cv:
+    scheme: "blocked_kfold_within_run"
+    k_folds: 5
+    blocked_by: "time_bins"
+    time_bin_s: 60.0
+
+# ============================================================
+# INDUCED TRF (Hilbert-based)
+# ============================================================
+
+induced_trf:
+  downsample_hz: 100.0
+
+  bands_hz:
+    theta: [4.0, 7.0]
+    alpha: [8.0, 12.0]
+    beta:  [13.0, 30.0]
+
+  power:
+    method: "hilbert"
+    log_transform: "log10"   # options: none | log10 | ln
+
+  fooof_sliding:
+    window_s: 1.0
+    step_s: 0.1
+    fit_range_hz: [2.0, 40.0]
+    edge_drop: "half_window"
+
+# ============================================================
+# FOOOF PREDICTOR BRANCH
+# ============================================================
+
+fooof:
+
+  # Pre-speech causal window aligned to self speech onset (t+1)
+  prespeech_window_s:
+    tmin: -1.0
+    tmax: 0.0
+
+  # ROI definitions
+  rois:
+    definition: "file"
+    roi_file: "config/rois.yaml"
+
+  # Spectrum estimation
+  spectrum:
+    fmin_hz: 2.0
+    fmax_hz: 40.0
+    method: "welch"
+    welch_nperseg_s: 1.0
+    welch_overlap: 0.5
+
+  # FOOOF model settings
+  model:
+    knee: false
+    max_n_peaks: 6
+    peak_width_limits_hz: [1.0, 12.0]
+    min_peak_height: 0.0
+
+  # Feature extraction
+  features:
+    aperiodic: ["offset", "exponent"]
+
+    periodic_bands_hz:
+      theta: [4.0, 7.0]
+      alpha: [8.0, 12.0]
+      beta:  [13.0, 30.0]
+
+    periodic_measures:
+      - "band_peak_height"
+
+    include_center_frequency: false
+
+  # QC rules
+  qc:
+    require_successful_fit: true
+    store_fit_diagnostics: true
+
+    peak_reliability:
+      enabled: true
+      min_detection_rate: 0.30
+
+  # Standardization pipeline
+  standardization:
+    subject_level: true
+    global_level: true
+
+  # PCA compression
+  pca:
+    enabled: true
+    retain:
+      aperiodic: 1
+      periodic: 1
+    fit_scope: "full_dataset"
+    export_loadings: true
+
+  # Hierarchical LMM ladder
+  lmm:
+    outcome: "self_rate_tplus1"
+
+    predictors:
+      inertia: "self_rate_t"
+      partner: "partner_rate_t"
+
+    random_effects:
+      intercept: true
+
+    ladder:
+      run: true
+      steps: ["M0", "M1", "M2", "M3", "M4"]
+
+    reporting:
+      use_ml_for_lrt: true
+      alpha: 0.05
+
+
+# ============================================================
+# DDC (Distance–Distance Coupling)
+# ============================================================
+
+ddc:
+
+  feature_sets:
+    behaviour: ["self_rate", "other_rate", "abs_diff"]
+    eeg: ["aperiodic_offset", "aperiodic_exponent",
+          "theta_pw", "alpha_pw", "beta_pw"]
+
+  distance:
+    metric: "euclidean"
+    standardize: "group_z"      # none | group_z | dyad_z
+    dyad_mean_center: true
+
+
+# ============================================================
+# REPORTING
+# ============================================================
+
+reporting:
+  alpha: 0.05
+
+  tables_format: "csv"         # csv | parquet
+
+  figures:
+    formats: ["pdf", "png", "tiff"]
+    dpi: 300
