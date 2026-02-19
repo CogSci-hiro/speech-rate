@@ -21,11 +21,10 @@ def compute_other_rate(events_df: pd.DataFrame, window_s: float) -> tuple[pd.Ser
         candidate_df["delta_onset"] = (candidate_df["t_onset"] - float(row.t_onset)).abs()
         within_window = candidate_df[candidate_df["delta_onset"] <= window_s]
         if within_window.empty:
-            other_rates.append(np.nan)
-            listeners.append(None)
-            continue
-
-        winner = within_window.sort_values(["delta_onset", "t_onset", "speaker"], kind="mergesort").iloc[0]
+            # Fallback to nearest partner event so other_rate is defined when both streams exist.
+            winner = candidate_df.sort_values(["delta_onset", "t_onset", "speaker"], kind="mergesort").iloc[0]
+        else:
+            winner = within_window.sort_values(["delta_onset", "t_onset", "speaker"], kind="mergesort").iloc[0]
         other_rates.append(float(winner["self_rate"]))
         listeners.append(str(winner["speaker"]))
 

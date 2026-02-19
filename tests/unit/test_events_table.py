@@ -168,3 +168,59 @@ def test_other_rate_and_abs_diff_present_for_two_subject_streams(tmp_path: Path)
     assert not events_df.empty
     assert events_df["other_rate"].notna().all()
     assert events_df["abs_diff"].notna().all()
+
+
+def test_other_rate_falls_back_to_nearest_partner_when_window_empty(tmp_path: Path) -> None:
+    config = _base_config(tmp_path)
+    config["events"]["matching"]["absdiff_window_s"] = 0.1
+
+    ann_a = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
+    ann_b = tmp_path / "annotations" / "sub-002_task-dialogue_run-1_ipu.csv"
+    ann_a.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"t_onset": 0.0, "t_offset": 1.0, "syllables": 4, "speaker": "A"},
+            {"t_onset": 10.0, "t_offset": 11.0, "syllables": 4, "speaker": "A"},
+        ]
+    ).to_csv(ann_a, index=False)
+    pd.DataFrame(
+        [
+            {"t_onset": 3.0, "t_offset": 4.0, "syllables": 5, "speaker": "B"},
+            {"t_onset": 13.0, "t_offset": 14.0, "syllables": 5, "speaker": "B"},
+        ]
+    ).to_csv(ann_b, index=False)
+
+    dataset_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "role": "odd",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_a.fif",
+                "audio_path": "/tmp/fake_a.wav",
+                "annotations_path": str(ann_a),
+                "status": "ok",
+                "reason": "",
+            },
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-002",
+                "role": "even",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_b.fif",
+                "audio_path": "/tmp/fake_b.wav",
+                "annotations_path": str(ann_b),
+                "status": "ok",
+                "reason": "",
+            },
+        ]
+    )
+
+    events_df = build_events_table(config, dataset_df)
+
+    assert not events_df.empty
+    assert events_df["other_rate"].notna().all()
+    assert events_df["abs_diff"].notna().all()
