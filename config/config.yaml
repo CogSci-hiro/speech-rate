@@ -1,8 +1,8 @@
 paths:
-  out_dir: /tmp/speech-rate-out
-  bids_dir: /tmp/speech-rate-input/bids
-  eeg_dir: /tmp/speech-rate-input/eeg
-  annotations_dir: /tmp/speech-rate-input/annotations
+  out_dir: "/Volumes/work-4T/speech-rate-testing"
+  bids_dir: "/Volumes/work-4T/hyperscanning-bids"
+  eeg_dir: "/Volumes/work-4T/hyperscanning/derived/eeg"
+  annotations_dir: "/Users/hiro/PycharmProjects/hyperscanning-working/data/annotations"
 
 dataset:
   tasks:
