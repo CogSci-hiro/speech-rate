@@ -173,20 +173,48 @@ def select_eeg_path(ds_index: pd.DataFrame, *, subject: str, dyad_id: str, run: 
     """
     Resolve EEG path for a specific (dyad_id, subject_id, run) from dataset index.
 
+    This function normalizes types and strips whitespace to avoid false negatives
+    when parquet stores columns as category/object/int inconsistently.
+
     Usage example
     -------------
         p = select_eeg_path(ds_index, subject="sub-001", dyad_id="dyad-01", run=1)
     """
-    sub = ds_index.loc[
-        (ds_index["subject_id"] == subject)
-        & (ds_index["dyad_id"] == dyad_id)
-        & (ds_index["run"] == int(run))
-    ]
+    required = {"dyad_id", "subject_id", "run", "eeg_path"}
+    missing = required - set(ds_index.columns)
+    if missing:
+        raise ValueError(f"dataset index missing required columns: {sorted(missing)}")
+
+    # Normalize matching keys (string columns may be categorical, may contain spaces)
+    dyad_col = ds_index["dyad_id"].astype(str).str.strip()
+    subj_col = ds_index["subject_id"].astype(str).str.strip()
+
+    # Normalize run (may be string/float/etc.)
+    run_col = pd.to_numeric(ds_index["run"], errors="coerce")
+
+    target_dyad = str(dyad_id).strip()
+    target_subj = str(subject).strip()
+    target_run = int(run)
+
+    mask = (dyad_col == target_dyad) & (subj_col == target_subj) & (run_col == target_run)
+    sub = ds_index.loc[mask].copy()
+
     if sub.empty:
-        raise ValueError(f"No dataset index row for dyad_id={dyad_id}, subject_id={subject}, run={run}")
-    if "eeg_path" not in sub.columns:
-        raise ValueError("dataset index missing required column: eeg_path")
-    return Path(sub.iloc[0]["eeg_path"])
+        # Helpful debugging: show near-misses for this dyad/run
+        dyad_run = ds_index.loc[(dyad_col == target_dyad) & (run_col == target_run)].copy()
+        available_subjects = (
+            dyad_run["subject_id"].astype(str).str.strip().drop_duplicates().sort_values().tolist()
+            if not dyad_run.empty
+            else []
+        )
+        raise ValueError(
+            f"No dataset index row for dyad_id={target_dyad}, subject_id={target_subj}, run={target_run}. "
+            f"Available subjects for dyad/run: {available_subjects}"
+        )
+
+    eeg_path = Path(str(sub.iloc[0]["eeg_path"])).expanduser()
+    return eeg_path
+
 
 
 # =============================================================================
