@@ -44,7 +44,12 @@ def _make_present_triplet(cfg: dict, dyad_id: str, task: str, run: int) -> None:
     """Create matching audio/eeg/annotation files for one dataset unit."""
     run_label = f"run-{run}"
     stem = f"{dyad_id}_task-{task}_{run_label}"
-    _touch(Path(cfg["paths"]["annotations_dir"]) / f"{stem}.csv")
+    # Annotation files are subject-scoped to match subject-aware discovery.
+    dyad_num = int(dyad_id.split("-")[1])
+    subjects = [f"sub-{(2 * dyad_num - 1):03d}", f"sub-{(2 * dyad_num):03d}"]
+    for subject_id in subjects:
+        subj_stem = f"{subject_id}_task-{task}_{run_label}"
+        _touch(Path(cfg["paths"]["annotations_dir"]) / f"{subj_stem}.csv")
     _touch(Path(cfg["paths"]["bids_dir"]) / "audio" / f"{stem}.wav")
     _touch(Path(cfg["paths"]["eeg_dir"]) / f"{stem}.fif")
 

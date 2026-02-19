@@ -67,7 +67,7 @@ def _dataset_index_df(annotation_path: Path) -> pd.DataFrame:
                 "subject_id": None,
                 "role": None,
                 "task": "dialogue",
-                "run": "01",
+                "run": "1",
                 "eeg_path": "/tmp/fake.fif",
                 "audio_path": "/tmp/fake.wav",
                 "annotations_path": str(annotation_path),

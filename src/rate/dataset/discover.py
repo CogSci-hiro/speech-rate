@@ -14,6 +14,8 @@ RUN_PATTERN = re.compile(r"run[-_]?(\d+)", re.IGNORECASE)
 AUDIO_SUFFIXES = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
 EEG_SUFFIXES = {".fif", ".edf", ".bdf", ".set"}
 ANNOTATION_SUFFIXES = {".csv", ".tsv", ".json", ".txt", ".yaml", ".yml", ".textgrid"}
+ANNOTATION_PREFER_TOKENS = ("ipu",)
+ANNOTATION_EXCLUDE_TOKENS = ("channels",)
 
 
 def unique_preserve(values: Iterable[str]) -> list[str]:
@@ -270,6 +272,66 @@ def find_unit_path(root_dir: Path, dyad_id: str, task: str, run: str, suffixes: 
     return candidates[0][1]
 
 
+def find_annotation_path(
+    root_dir: Path,
+    dyad_id: str,
+    task: str,
+    run: str,
+    subject_id: str | None = None,
+) -> str | None:
+    """Find best-matching annotation path, preferring IPU files over channel metadata."""
+    if not root_dir.exists():
+        return None
+
+    if subject_id:
+        subj_norm = normalize_subject_id(subject_id)
+        dyad_tokens = unique_preserve(
+            [
+                subj_norm.lower(),
+                subj_norm.replace("-", "").lower(),
+            ]
+        )
+    else:
+        dyad_tokens = unique_preserve(
+            [dyad_id.lower(), dyad_id.replace("-", "").lower(), *subject_tokens_for_dyad(dyad_id)]
+        )
+    run_tokens = [f"run-{run}".lower(), f"run_{run}".lower(), f"run{run}".lower()]
+    if run.isdigit():
+        run_tokens.extend([f"run-{int(run):02d}", f"run_{int(run):02d}", f"run{int(run):02d}"])
+    run_tokens = unique_preserve(run_tokens)
+    task_tokens = unique_preserve([task.lower(), f"task-{task}".lower(), f"task_{task}".lower()])
+
+    candidates: list[tuple[int, str]] = []
+    for path in sorted(root_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in ANNOTATION_SUFFIXES:
+            continue
+
+        path_text = path.as_posix().lower()
+        if any(token in path_text for token in ANNOTATION_EXCLUDE_TOKENS):
+            continue
+        dyad_match = any(token in path_text for token in dyad_tokens)
+        run_match = any(token in path_text for token in run_tokens)
+        if not (dyad_match and run_match):
+            continue
+
+        score = 1
+        if "ipu" in path_text or "/ipu_" in path_text or "/ipu/" in path_text:
+            score += 2
+        if any(token in path_text for token in task_tokens):
+            score += 1
+        if any(token in path_text for token in ANNOTATION_PREFER_TOKENS):
+            score += 3
+        candidates.append((score, str(path)))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][1]
+
+
 __all__ = [
     "ANNOTATION_SUFFIXES",
     "AUDIO_SUFFIXES",
@@ -281,6 +343,7 @@ __all__ = [
     "discover_subjects_from_annotations",
     "discover_subjects_from_bids",
     "discover_subjects",
+    "find_annotation_path",
     "find_unit_path",
     "normalize_dyad_id",
     "normalize_run",

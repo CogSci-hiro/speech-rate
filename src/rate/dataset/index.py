@@ -9,12 +9,12 @@ import pandas as pd
 
 from rate.config import ConfigValidationError, apply_config_defaults
 from rate.dataset.discover import (
-    ANNOTATION_SUFFIXES,
     AUDIO_SUFFIXES,
     EEG_SUFFIXES,
     discover_dyads,
     discover_subjects,
     dyad_from_subject_id,
+    find_annotation_path,
     find_unit_path,
     normalize_dyad_id,
     normalize_run,
@@ -327,12 +327,12 @@ def build_dataset_index(config: Mapping[str, Any]) -> pd.DataFrame:
                             run=run,
                             suffixes=AUDIO_SUFFIXES,
                         ),
-                        "annotations_path": find_unit_path(
+                        "annotations_path": find_annotation_path(
                             annotations_dir,
                             dyad_id=dyad_id,
                             task=task,
                             run=run,
-                            suffixes=ANNOTATION_SUFFIXES,
+                            subject_id=subject_id,
                         ),
                         "status": "ok",
                         "reason": "",
