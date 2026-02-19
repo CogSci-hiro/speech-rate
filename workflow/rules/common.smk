@@ -9,7 +9,7 @@ rule validate_config:
     output:
         validated=f"{META_DIR}/config_validated.json",
     shell:
-        "PYTHONPATH=src python -m cli.main validate-config "
+        "PYTHONPATH=src python -m rate.cli.main validate-config "
         "--config {input.config_path} --schema {input.schema_path} --output {output.validated}"
 
 
@@ -21,5 +21,5 @@ rule write_manifest:
     output:
         manifest=f"{META_DIR}/run_manifest.json",
     shell:
-        "PYTHONPATH=src python -m cli.main write-manifest "
+        "PYTHONPATH=src python -m rate.cli.main write-manifest "
         "--config {input.config_path} --schema {input.schema_path} --output {output.manifest}"

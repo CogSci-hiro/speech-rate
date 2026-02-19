@@ -24,11 +24,11 @@ def validate_dataset_index(index_df: pd.DataFrame) -> None:
     if missing_cols:
         raise ValueError(f"Missing required dataset index columns: {missing_cols}")
 
-    duplicate_mask = index_df.duplicated(subset=["dyad_id", "run", "task"], keep=False)
+    duplicate_mask = index_df.duplicated(subset=["dyad_id", "run", "task", "subject_id"], keep=False)
     if duplicate_mask.any():
-        duplicates = index_df.loc[duplicate_mask, ["dyad_id", "run", "task"]].drop_duplicates()
+        duplicates = index_df.loc[duplicate_mask, ["dyad_id", "run", "task", "subject_id"]].drop_duplicates()
         duplicate_records = duplicates.to_dict(orient="records")
-        raise ValueError(f"Duplicate rows detected for dyad/run/task keys: {duplicate_records}")
+        raise ValueError(f"Duplicate rows detected for dyad/run/task/subject keys: {duplicate_records}")
 
     bad_statuses = sorted(set(index_df["status"]) - VALID_STATUSES)
     if bad_statuses:

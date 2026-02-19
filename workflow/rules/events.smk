@@ -15,7 +15,7 @@ rule events_table:
         events_table=f"{EVENTS_DIR}/events.parquet",
         qc_summary=f"{EVENTS_DIR}/qc_ipu_summary.csv",
     shell:
-        "PYTHONPATH=src python -m cli.main events-table "
+        "PYTHONPATH=src python -m rate.cli.main events-table "
         "--config {input.config_path} --schema {input.schema_path} "
         "--dataset-index {input.dataset_index} "
         "--events-output {output.events_table} --qc-output {output.qc_summary}"

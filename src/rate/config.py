@@ -80,6 +80,18 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
     if out_dir and not logs_dir:
         paths_value["logs_dir"] = str(Path(out_dir) / DEFAULT_LOGS_SUBDIR)
 
+    dataset_value = resolved.setdefault("dataset", {})
+    if not isinstance(dataset_value, dict):
+        raise ConfigValidationError("`dataset` must be a mapping.")
+
+    exclude_value = dataset_value.setdefault("exclude", {})
+    if not isinstance(exclude_value, dict):
+        raise ConfigValidationError("`dataset.exclude` must be a mapping.")
+    exclude_value.setdefault("subjects", [])
+    exclude_value.setdefault("subject_runs", [])
+    exclude_value.setdefault("dyads", [])
+    exclude_value.setdefault("dyad_runs", [])
+
     events_value = resolved.setdefault("events", {})
     if not isinstance(events_value, dict):
         raise ConfigValidationError("`events` must be a mapping.")

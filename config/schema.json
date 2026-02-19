@@ -139,6 +139,148 @@
             },
             "additionalProperties": false
           }
+        },
+        "exclude": {
+          "type": "object",
+          "properties": {
+            "subjects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "subject_id",
+                  "reason"
+                ],
+                "properties": {
+                  "subject_id": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "subject_runs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "subject_id",
+                  "run",
+                  "reason"
+                ],
+                "properties": {
+                  "subject_id": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    ]
+                  },
+                  "run": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "dyads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "dyad_id",
+                  "reason"
+                ],
+                "properties": {
+                  "dyad_id": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "dyad_runs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "dyad_id",
+                  "run",
+                  "reason"
+                ],
+                "properties": {
+                  "dyad_id": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    ]
+                  },
+                  "run": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

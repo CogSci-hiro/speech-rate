@@ -3,12 +3,24 @@ Name: rate
 Version: 0.1.0
 Summary: Speech-rate analysis scaffolding package.
 Requires-Python: >=3.10
+Requires-Dist: mne>=1.11.0
 Requires-Dist: numpy>=1.26
 Requires-Dist: PyYAML>=6.0
 Requires-Dist: jsonschema>=4.19
 Requires-Dist: pandas>=2.1
+Requires-Dist: scikit-learn>=1.8.0
+Requires-Dist: pyarrow>=23.0.1
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: snakemake>=9.0; extra == "dev"
+Provides-Extra: docs
+Requires-Dist: sphinx; extra == "docs"
+Requires-Dist: pydata-sphinx-theme; extra == "docs"
+Requires-Dist: numpydoc; extra == "docs"
+Requires-Dist: sphinx-gallery; extra == "docs"
+Requires-Dist: sphinx-copybutton; extra == "docs"
+Requires-Dist: sphinx-design; extra == "docs"
+Requires-Dist: sphinxcontrib-bibtex; extra == "docs"
+Requires-Dist: matplotlib; extra == "docs"
 Provides-Extra: parquet
 Requires-Dist: pyarrow>=14.0; extra == "parquet"
