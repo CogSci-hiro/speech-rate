@@ -12,5 +12,5 @@ rule dataset_index:
     output:
         index=f"{DATASET_DIR}/index.parquet",
     shell:
-        "PYTHONPATH=src python -m cli.main dataset-index "
+        "PYTHONPATH=src python -m rate.cli.main dataset-index "
         "--config {input.config_path} --schema {input.schema_path} --output {output.index}"
