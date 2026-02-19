@@ -88,7 +88,7 @@ evoked_trf:
     tmax: 0.8
 
   cv:
-    scheme: "blocked_kfold_within_run"
+    scheme: "leave_one_run_out"
     k_folds: 5
     blocked_by: "time_bins"
     time_bin_s: 60.0

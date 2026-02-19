@@ -253,8 +253,7 @@ def fit_receptive_field(
         tmax=float(tmax_s),
         sfreq=float(sfreq_hz),
         estimator=estimator,
-        scoring=None,
-        verbose=False,
+        scoring="corrcoef",
     )
     rf.fit(X_train, y_train)
     return rf

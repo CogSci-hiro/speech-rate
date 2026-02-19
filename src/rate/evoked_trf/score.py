@@ -103,8 +103,8 @@ class EvokedTrfConfig:
     tmin_s: float
     tmax_s: float
     scheme: str
-    k_folds: int
-    time_bin_s: float
+    k_folds: int | None
+    time_bin_s: float | None
     ridge_alpha: float
     seed: int
 
@@ -120,17 +120,21 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
     ev = cfg["evoked_trf"]
     cv_cfg = ev["cv"]
     seed = int(cv_cfg.get("seed", cfg.get("project", {}).get("random_seed", 0)))
+
+    scheme = str(cv_cfg.get("scheme"))
+    k_folds = cv_cfg.get("k_folds", None)
+    time_bin_s = cv_cfg.get("time_bin_s", None)
+
     return EvokedTrfConfig(
         downsample_hz=float(ev["downsample_hz"]),
         tmin_s=float(ev["lags_s"]["tmin"]),
         tmax_s=float(ev["lags_s"]["tmax"]),
-        scheme=str(cv_cfg.get("scheme")),
-        k_folds=int(cv_cfg["k_folds"]),
-        time_bin_s=float(cv_cfg["time_bin_s"]),
+        scheme=scheme,
+        k_folds=int(k_folds) if k_folds is not None else None,
+        time_bin_s=float(time_bin_s) if time_bin_s is not None else None,
         ridge_alpha=float(ev.get("ridge_alpha", 1.0)),
         seed=seed,
     )
-
 
 def load_input_tables(out_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -325,59 +329,106 @@ def fit_and_score_one_model(
     return score_multichannel_mean_r(y_test, y_hat)
 
 
-def run_scores_for_one_recording(
+def dyad_subject_loro_scores(
     *,
     dyad_id: str,
     subject: str,
-    run: int,
-    ev_run: pd.DataFrame,
+    events: pd.DataFrame,
     ds_index: pd.DataFrame,
     trf_cfg: EvokedTrfConfig,
     picks: str | list[str],
 ) -> tuple[list[dict[str, object]], pd.DataFrame]:
     """
-    Compute all fold scores for one (dyad_id, subject_id, run).
-
-    Returns
-    -------
-    score_rows, splits_df
-
-    Usage example
-    -------------
-        rows, splits = run_scores_for_one_recording(...)
+    Leave-one-run-out scores for a single (dyad_id, subject_id) across all runs.
     """
-    eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=run)
-    run_data = load_eeg_run(eeg_path, downsample_hz=trf_cfg.downsample_hz, picks=picks)
+    ev_subj = events.loc[
+        (events["dyad_id"].astype(str) == dyad_id)
+        & (events["subject_id"].astype(str) == subject)
+    ].copy()
+    runs = sorted(ev_subj["run"].astype(int).unique().tolist())
+    if len(runs) < 2:
+        raise ValueError(f"LORO requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}")
 
-    y = run_data.y
-    sfreq_hz = run_data.sfreq_hz
-    times_s = run_data.times_s
+    models = get_models()
+    baseline_model = next(m for m in models if m.model_name == "baseline")
+    model_names = [m.model_name for m in models]
 
-    splits = make_cv_splits(trf_cfg=trf_cfg, dyad_id=dyad_id, run=run, times_s=times_s, sfreq_hz=sfreq_hz)
+    per_run: dict[int, dict[str, np.ndarray]] = {}
+    per_run_y: dict[int, np.ndarray] = {}
+    per_run_sfreq: dict[int, float] = {}
 
-    _, X_by_model = build_design_matrices_for_run(ev_run=ev_run, sfreq_hz=sfreq_hz, n_samples=y.shape[0])
-    baseline_X = X_by_model["baseline"]
-    other_models = [k for k in X_by_model.keys() if k != "baseline"]
+    # Load + build X/y per run
+    for run in runs:
+        eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=run)
+        run_data = load_eeg_run(eeg_path, downsample_hz=trf_cfg.downsample_hz, picks=picks)
+        y = run_data.y
+        sfreq_hz = run_data.sfreq_hz
+        per_run_y[run] = y
+        per_run_sfreq[run] = sfreq_hz
+
+        ev_run = ev_subj.loc[ev_subj["run"].astype(int) == run].copy()
+        X_by_model: dict[str, np.ndarray] = {}
+        for m in models:
+            X_by_model[m.model_name] = build_design_matrix(
+                events=ev_run,
+                model=m,
+                sfreq_hz=sfreq_hz,
+                n_samples=y.shape[0],
+            )
+        per_run[run] = X_by_model
+
+    # Sanity: sfreq must be identical across runs after resample
+    sfreqs = {float(v) for v in per_run_sfreq.values()}
+    if len(sfreqs) != 1:
+        raise ValueError(f"Expected one sfreq after resample, got: {sorted(sfreqs)}")
+    sfreq_hz = float(next(iter(sfreqs)))
+
+    gap = _max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s) + 1
 
     rows: list[dict[str, object]] = []
-    context = f"dyad_id={dyad_id}, subject={subject}, run={run}"
+    split_rows: list[dict[str, object]] = []
 
-    for fold_id in range(trf_cfg.k_folds):
-        train_mask, test_mask = get_fold_masks(splits=splits, fold_id=fold_id, times_s=times_s, context=context)
+    for fold_id, test_run in enumerate(runs):
+        train_runs = [r for r in runs if r != test_run]
 
-        r_base = fit_and_score_one_model(
-            X=baseline_X,
-            y=y,
-            train_mask=train_mask,
-            test_mask=test_mask,
-            trf_cfg=trf_cfg,
+        # CV audit table (new schema, see below)
+        for r in runs:
+            split_rows.append(
+                {
+                    "dyad_id": dyad_id,
+                    "subject": subject,
+                    "fold_id": int(fold_id),
+                    "run": int(r),
+                    "split": "test" if r == test_run else "train",
+                }
+            )
+
+        # Fit baseline (train runs concatenated with gaps)
+        y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
+        y_test = per_run_y[test_run]
+
+        Xb_train = concatenate_with_gap([per_run[r]["baseline"] for r in train_runs], gap_samples=gap)
+        Xb_test = per_run[test_run]["baseline"]
+
+        # fold-wise standardization (Option B) using TRAIN only
+        Xb_train, Xb_test = standardize_design_matrix_foldwise(Xb_train, Xb_test)
+
+        rf_base = fit_receptive_field(
+            X_train=Xb_train,
+            y_train=y_train,
             sfreq_hz=sfreq_hz,
+            tmin_s=trf_cfg.tmin_s,
+            tmax_s=trf_cfg.tmax_s,
+            ridge_alpha=trf_cfg.ridge_alpha,
         )
+        y_hat_base = predict_receptive_field(rf_base, Xb_test)
+        r_base = score_multichannel_mean_r(y_test, y_hat_base)
+
         rows.append(
             {
                 "subject": subject,
                 "dyad_id": dyad_id,
-                "run": int(run),
+                "run": int(test_run),
                 "model": "baseline",
                 "fold_id": int(fold_id),
                 "r": float(r_base),
@@ -386,30 +437,41 @@ def run_scores_for_one_recording(
             }
         )
 
-        for model_name in other_models:
-            r = fit_and_score_one_model(
-                X=X_by_model[model_name],
-                y=y,
-                train_mask=train_mask,
-                test_mask=test_mask,
-                trf_cfg=trf_cfg,
+        # Other models (always compare to baseline fitted on same fold)
+        for model_name in model_names:
+            if model_name == "baseline":
+                continue
+
+            Xm_train = concatenate_with_gap([per_run[r][model_name] for r in train_runs], gap_samples=gap)
+            Xm_test = per_run[test_run][model_name]
+
+            Xm_train, Xm_test = standardize_design_matrix_foldwise(Xm_train, Xm_test)
+
+            rf = fit_receptive_field(
+                X_train=Xm_train,
+                y_train=y_train,
                 sfreq_hz=sfreq_hz,
+                tmin_s=trf_cfg.tmin_s,
+                tmax_s=trf_cfg.tmax_s,
+                ridge_alpha=trf_cfg.ridge_alpha,
             )
-            delta = float(r - r_base) if np.isfinite(r) and np.isfinite(r_base) else float("nan")
+            y_hat = predict_receptive_field(rf, Xm_test)
+            r = score_multichannel_mean_r(y_test, y_hat)
+
             rows.append(
                 {
                     "subject": subject,
                     "dyad_id": dyad_id,
-                    "run": int(run),
-                    "model": str(model_name),
+                    "run": int(test_run),
+                    "model": model_name,
                     "fold_id": int(fold_id),
                     "r": float(r),
                     "r_baseline": float(r_base),
-                    "delta_r": delta,
+                    "delta_r": float(r - r_base) if np.isfinite(r) and np.isfinite(r_base) else float("nan"),
                 }
             )
 
-    return rows, splits
+    return rows, pd.DataFrame(split_rows)
 
 
 def compute_scores_and_splits(
@@ -433,7 +495,7 @@ def compute_scores_and_splits(
         scores, splits = compute_scores_and_splits(cfg=cfg, out_dir=Path(cfg["paths"]["out_dir"]))
     """
     trf_cfg = parse_evoked_trf_config(cfg)
-    if trf_cfg.scheme != "blocked_kfold_within_run":
+    if trf_cfg.scheme not in {"blocked_kfold_within_run", "leave_one_run_out"}:
         raise ValueError(f"Unsupported evoked_trf.cv.scheme: {trf_cfg.scheme}")
 
     events, ds_index = load_input_tables(out_dir)
@@ -442,13 +504,12 @@ def compute_scores_and_splits(
     all_score_rows: list[dict[str, object]] = []
     all_splits: list[pd.DataFrame] = []
 
-    grouped = events.groupby(["dyad_id", "subject_id", "run"], sort=True)
-    for (dyad_id, subject, run), ev_run in grouped:
-        rows, splits = run_scores_for_one_recording(
+    grouped = events.groupby(["dyad_id", "subject_id"], sort=True)
+    for (dyad_id, subject), _ in grouped:
+        rows, splits = dyad_subject_loro_scores(
             dyad_id=str(dyad_id),
             subject=str(subject),
-            run=int(run),
-            ev_run=ev_run,
+            events=events,
             ds_index=ds_index,
             trf_cfg=trf_cfg,
             picks=picks,
@@ -503,7 +564,7 @@ def _validate_output_tables(*, scores: pd.DataFrame, splits: pd.DataFrame) -> No
     if missing_scores:
         raise ValueError(f"scores table missing columns: {sorted(missing_scores)}")
 
-    required_splits = {"dyad_id", "run", "fold_id", "bin_id", "bin_t0", "bin_t1", "split"}
+    required_splits = {"dyad_id", "subject", "fold_id", "run", "split"}
     missing_splits = required_splits - set(splits.columns)
     if missing_splits:
         raise ValueError(f"cv_splits table missing columns: {sorted(missing_splits)}")
@@ -514,3 +575,32 @@ def _validate_output_tables(*, scores: pd.DataFrame, splits: pd.DataFrame) -> No
         bad = scores.loc[nonbaseline & scores["r"].notna() & scores["delta_r"].isna()]
         if not bad.empty:
             raise ValueError("delta_r has missing values where r exists (non-baseline rows).")
+
+
+def _max_lag_samples(*, sfreq_hz: float, tmin_s: float, tmax_s: float) -> int:
+    return int(np.ceil(max(abs(tmin_s), abs(tmax_s)) * sfreq_hz))
+
+
+def concatenate_with_gap(
+    arrays: list[np.ndarray],
+    *,
+    gap_samples: int,
+    fill_value: float = 0.0,
+) -> np.ndarray:
+    """
+    Concatenate [A, gap, B, gap, C, ...] along axis=0.
+    arrays must be (n_samples, n_features) or (n_samples, n_channels).
+    """
+    if not arrays:
+        raise ValueError("arrays must be non-empty")
+    if gap_samples < 0:
+        raise ValueError("gap_samples must be >= 0")
+
+    parts: list[np.ndarray] = []
+    for i, a in enumerate(arrays):
+        parts.append(a)
+        if i < len(arrays) - 1 and gap_samples > 0:
+            gap_shape = (gap_samples,) + a.shape[1:]
+            parts.append(np.full(gap_shape, fill_value, dtype=float))
+    return np.concatenate(parts, axis=0)
+

@@ -48,13 +48,12 @@ def main() -> None:
     events_sub = events.loc[
         (events["dyad_id"].astype(str) == dyad_id)
         & (events["subject_id"].astype(str) == subject_id)
-        & (events["run"].astype(int) == run)
-    ].copy()
+        ].copy()
+
     ds_sub = ds_index.loc[
         (ds_index["dyad_id"].astype(str) == dyad_id)
         & (ds_index["subject_id"].astype(str) == subject_id)
-        & (ds_index["run"].astype(int) == run)
-    ].copy()
+        ].copy()
 
     (tmp_dir / "events" / "events.parquet").unlink(missing_ok=True)
     (tmp_dir / "dataset" / "index.parquet").unlink(missing_ok=True)
