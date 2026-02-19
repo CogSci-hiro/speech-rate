@@ -92,24 +92,44 @@ def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[s
     if unit_df.empty:
         return pd.DataFrame(columns=REQUIRED_EVENTS_COLUMNS)
 
-    try:
-        unit_df = add_event_rate_features(
-            unit_df,
-            absdiff_window_s=float(events_cfg["absdiff_window_s"]),
-            normalize=bool(events_cfg["normalize_time_within_run"]),
-            method=str(events_cfg["time_within_run_method"]),
-        )
-    except ValueError as exc:
-        raise EventsTableError(str(exc)) from exc
-
     unit_df["dyad_id"] = dataset_row.get("dyad_id")
-    unit_df["subject_id"] = dataset_row.get("subject_id")
+    subject_id = dataset_row.get("subject_id")
+    unit_df["subject_id"] = subject_id
+    # Subject-scoped annotation files often have a placeholder speaker label.
+    # Replace with subject_id so cross-subject pairing can be computed later.
+    if subject_id is not None:
+        unit_df["speaker"] = str(subject_id)
     unit_df["run"] = str(dataset_row.get("run"))
     unit_df["task"] = dataset_row.get("task")
     unit_df["annotations_path"] = str(annotations_path)
     unit_df["event_id"] = ""
+    unit_df["listener"] = pd.NA
+    unit_df["self_rate"] = pd.NA
+    unit_df["other_rate"] = pd.NA
+    unit_df["abs_diff"] = pd.NA
+    unit_df["time_within_run"] = pd.NA
 
     return unit_df[REQUIRED_EVENTS_COLUMNS]
+
+
+def _add_features_by_group(events_df: pd.DataFrame, events_cfg: Mapping[str, Any]) -> pd.DataFrame:
+    """Compute behavioural/time features jointly per dyad/run/task group."""
+    grouped_frames: list[pd.DataFrame] = []
+    for _, group_df in events_df.groupby(["dyad_id", "run", "task"], dropna=False, sort=False):
+        try:
+            enriched = add_event_rate_features(
+                group_df.reset_index(drop=True),
+                absdiff_window_s=float(events_cfg["absdiff_window_s"]),
+                normalize=bool(events_cfg["normalize_time_within_run"]),
+                method=str(events_cfg["time_within_run_method"]),
+            )
+        except ValueError as exc:
+            raise EventsTableError(str(exc)) from exc
+        grouped_frames.append(enriched)
+
+    if not grouped_frames:
+        return pd.DataFrame(columns=REQUIRED_EVENTS_COLUMNS)
+    return pd.concat(grouped_frames, ignore_index=True)
 
 
 def _assign_deterministic_event_ids(events_df: pd.DataFrame) -> pd.DataFrame:
@@ -154,5 +174,6 @@ def build_events_table(config: Mapping[str, Any], dataset_index_df: pd.DataFrame
         return pd.DataFrame(columns=REQUIRED_EVENTS_COLUMNS)
 
     events_df = pd.concat(built_frames, ignore_index=True)
+    events_df = _add_features_by_group(events_df, events_cfg)
     events_df = _assign_deterministic_event_ids(events_df)
     return events_df[REQUIRED_EVENTS_COLUMNS]

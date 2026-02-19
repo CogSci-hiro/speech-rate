@@ -3,6 +3,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 import mne
+from scipy.signal import hilbert
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ def compute_band_envelopes(
         band_raw.filter(l_freq=float(fmin), h_freq=float(fmax), method="fir", phase="zero")
 
         data = band_raw.get_data()
-        analytic = mne.filter.hilbert(data, envelope=False)
+        analytic = hilbert(data, axis=-1)
         amplitude = np.abs(analytic)
 
         if cfg.envelope == "amplitude":

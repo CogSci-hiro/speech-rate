@@ -125,3 +125,46 @@ def test_event_ids_are_deterministic(tmp_path: Path) -> None:
 
     assert len(first) == len(second)
     assert first["event_id"].tolist() == second["event_id"].tolist()
+
+
+def test_other_rate_and_abs_diff_present_for_two_subject_streams(tmp_path: Path) -> None:
+    config = _base_config(tmp_path)
+    ann_a = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
+    ann_b = tmp_path / "annotations" / "sub-002_task-dialogue_run-1_ipu.csv"
+    _write_annotation(ann_a)
+    _write_annotation(ann_b)
+
+    dataset_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "role": "odd",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_a.fif",
+                "audio_path": "/tmp/fake_a.wav",
+                "annotations_path": str(ann_a),
+                "status": "ok",
+                "reason": "",
+            },
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-002",
+                "role": "even",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_b.fif",
+                "audio_path": "/tmp/fake_b.wav",
+                "annotations_path": str(ann_b),
+                "status": "ok",
+                "reason": "",
+            },
+        ]
+    )
+
+    events_df = build_events_table(config, dataset_df)
+
+    assert not events_df.empty
+    assert events_df["other_rate"].notna().all()
+    assert events_df["abs_diff"].notna().all()
