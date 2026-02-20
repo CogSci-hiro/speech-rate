@@ -142,6 +142,7 @@ def _events_to_continuous_regressor(
     reg: RegressorSpec,
     sfreq_hz: float,
     n_samples: int,
+    sample_t0_s: float = 0.0,
 ) -> np.ndarray:
     """
     Convert event times + amplitudes into a continuous regressor time series.
@@ -159,6 +160,9 @@ def _events_to_continuous_regressor(
         Sampling frequency in Hz.
     n_samples
         Number of samples in the EEG run.
+    sample_t0_s
+        Time (seconds) represented by sample index 0 in the loaded run.
+        Use ``raw.times[0]`` to account for non-zero ``raw.first_samp``.
 
     Returns
     -------
@@ -180,7 +184,7 @@ def _events_to_continuous_regressor(
         times_s = times_s[finite_amp]
         amps = amps[finite_amp]
 
-    idx = np.round(times_s * sfreq_hz).astype(int)
+    idx = np.round((times_s - float(sample_t0_s)) * sfreq_hz).astype(int)
     idx = np.clip(idx, 0, n_samples - 1)
 
     x = np.zeros(n_samples, dtype=float)
@@ -195,6 +199,7 @@ def build_design_matrix(
     model: ModelSpec,
     sfreq_hz: float,
     n_samples: int,
+    sample_t0_s: float = 0.0,
     return_feature_names: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, list[str]]:
     """
@@ -213,6 +218,9 @@ def build_design_matrix(
         Sampling frequency in Hz.
     n_samples
         Number of EEG samples.
+    sample_t0_s
+        Time (seconds) represented by sample index 0 in the loaded run.
+        Set this to ``raw.times[0]`` for alignment when ``raw.first_samp`` is non-zero.
     return_feature_names
         If True, return (X, feature_names).
 
@@ -234,6 +242,7 @@ def build_design_matrix(
             reg=reg,
             sfreq_hz=sfreq_hz,
             n_samples=n_samples,
+            sample_t0_s=sample_t0_s,
         )
         x = np.asarray(x, dtype=float)
         if x.ndim != 1 or x.shape[0] != n_samples:
@@ -315,7 +324,7 @@ def fit_receptive_field(
         tmax=float(tmax_s),
         sfreq=float(sfreq_hz),
         estimator=estimator,
-        scoring="corrcoef",
+        scoring="r2",# DEBUG make sure to remove this later
     )
     rf.fit(X_train, y_train)
     return rf

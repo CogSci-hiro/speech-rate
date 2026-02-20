@@ -318,7 +318,12 @@ def build_dataset_index(config: Mapping[str, Any]) -> pd.DataFrame:
                         "task": task,
                         "run": run,
                         "eeg_path": find_unit_path(
-                            eeg_dir, dyad_id=dyad_id, task=task, run=run, suffixes=EEG_SUFFIXES
+                            eeg_dir,
+                            dyad_id=dyad_id,
+                            task=task,
+                            run=run,
+                            suffixes=EEG_SUFFIXES,
+                            subject_id=subject_id,
                         ),
                         "audio_path": find_unit_path(
                             bids_dir,
@@ -326,6 +331,7 @@ def build_dataset_index(config: Mapping[str, Any]) -> pd.DataFrame:
                             task=task,
                             run=run,
                             suffixes=AUDIO_SUFFIXES,
+                            subject_id=subject_id,
                         ),
                         "annotations_path": find_annotation_path(
                             annotations_dir,

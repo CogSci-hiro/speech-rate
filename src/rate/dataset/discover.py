@@ -18,6 +18,22 @@ ANNOTATION_PREFER_TOKENS = ("ipu",)
 ANNOTATION_EXCLUDE_TOKENS = ("channels",)
 
 
+def _is_ignored_artifact(path: Path) -> bool:
+    """Return True for filesystem artifacts that should never be treated as data."""
+    for part in path.parts:
+        if part.startswith("._"):
+            return True
+        if part in {".DS_Store", "__MACOSX"}:
+            return True
+    return False
+
+
+def _contains_token(path_text: str, token: str) -> bool:
+    """Match token with non-alphanumeric boundaries to avoid partial-id collisions."""
+    escaped = re.escape(token.lower())
+    return re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", path_text) is not None
+
+
 def unique_preserve(values: Iterable[str]) -> list[str]:
     """Keep first-seen order while removing duplicates."""
     seen: set[str] = set()
@@ -119,6 +135,8 @@ def discover_subjects_from_annotations(annotations_dir: Path) -> list[str]:
 
     discovered: set[str] = set()
     for path in sorted(annotations_dir.rglob("*")):
+        if _is_ignored_artifact(path):
+            continue
         for match in SUBJECT_PATTERN.finditer(path.as_posix()):
             discovered.add(f"sub-{int(match.group(1)):03d}")
 
@@ -141,6 +159,8 @@ def discover_subjects_from_bids(bids_dir: Path) -> list[str]:
 
     discovered: set[str] = set()
     for path in sorted(bids_dir.rglob("*")):
+        if _is_ignored_artifact(path):
+            continue
         for match in SUBJECT_PATTERN.finditer(path.as_posix()):
             discovered.add(f"sub-{int(match.group(1)):03d}")
 
@@ -166,6 +186,8 @@ def discover_dyads_from_annotations(annotations_dir: Path) -> list[str]:
 
     explicit: set[str] = set()
     for path in sorted(annotations_dir.rglob("*")):
+        if _is_ignored_artifact(path):
+            continue
         dyad_id = parse_dyad_from_path(path)
         if dyad_id:
             explicit.add(dyad_id)
@@ -184,6 +206,8 @@ def discover_dyads_from_bids(bids_dir: Path) -> list[str]:
 
     explicit: set[str] = set()
     for path in sorted(bids_dir.rglob("*")):
+        if _is_ignored_artifact(path):
+            continue
         dyad_id = parse_dyad_from_path(path)
         if dyad_id:
             explicit.add(dyad_id)
@@ -236,40 +260,67 @@ def subject_tokens_for_dyad(dyad_id: str) -> list[str]:
     return tokens
 
 
-def find_unit_path(root_dir: Path, dyad_id: str, task: str, run: str, suffixes: set[str]) -> str | None:
+def find_unit_path(
+    root_dir: Path,
+    dyad_id: str,
+    task: str,
+    run: str,
+    suffixes: set[str],
+    subject_id: str | None = None,
+) -> str | None:
     """Find best-matching file path for one dyad/task/run unit."""
     if not root_dir.exists():
         return None
 
     dyad_tokens = unique_preserve([dyad_id.lower(), dyad_id.replace("-", "").lower(), *subject_tokens_for_dyad(dyad_id)])
+    subject_tokens: list[str] = []
+    if subject_id:
+        subj_norm = normalize_subject_id(subject_id)
+        subject_tokens = unique_preserve([subj_norm.lower(), subj_norm.replace("-", "").lower()])
     run_tokens = [f"run-{run}".lower(), f"run_{run}".lower(), f"run{run}".lower()]
     if run.isdigit():
         run_tokens.extend([f"run-{int(run):02d}", f"run_{int(run):02d}", f"run{int(run):02d}"])
     run_tokens = unique_preserve(run_tokens)
     task_tokens = unique_preserve([task.lower(), f"task-{task}".lower(), f"task_{task}".lower()])
 
-    candidates: list[tuple[int, str]] = []
+    candidates: list[tuple[int, int, str]] = []
+
+    def _score(tokens: list[str], path_text: str) -> int | None:
+        id_match = any(_contains_token(path_text, token) for token in tokens)
+        run_match = any(_contains_token(path_text, token) for token in run_tokens)
+        task_match = any(_contains_token(path_text, token) for token in task_tokens)
+        if not (id_match and run_match):
+            return None
+        return 2 if task_match else 1
+
     for path in sorted(root_dir.rglob("*")):
+        if _is_ignored_artifact(path):
+            continue
         if not path.is_file():
             continue
         if suffixes and path.suffix.lower() not in suffixes:
             continue
 
         path_text = path.as_posix().lower()
-        dyad_match = any(token in path_text for token in dyad_tokens)
-        run_match = any(token in path_text for token in run_tokens)
-        task_match = any(token in path_text for token in task_tokens)
-        if not (dyad_match and run_match):
-            continue
-
-        score = 2 if task_match else 1
-        candidates.append((score, str(path)))
+        if subject_tokens:
+            subject_score = _score(subject_tokens, path_text)
+            if subject_score is not None:
+                # priority=0: subject match; priority=1: fallback dyad match
+                candidates.append((0, subject_score, str(path)))
+                continue
+            dyad_score = _score(dyad_tokens, path_text)
+            if dyad_score is not None:
+                candidates.append((1, dyad_score, str(path)))
+        else:
+            dyad_score = _score(dyad_tokens, path_text)
+            if dyad_score is not None:
+                candidates.append((0, dyad_score, str(path)))
 
     if not candidates:
         return None
 
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    return candidates[0][1]
+    candidates.sort(key=lambda item: (item[0], -item[1], item[2]))
+    return candidates[0][2]
 
 
 def find_annotation_path(
@@ -303,6 +354,8 @@ def find_annotation_path(
 
     candidates: list[tuple[int, str]] = []
     for path in sorted(root_dir.rglob("*")):
+        if _is_ignored_artifact(path):
+            continue
         if not path.is_file():
             continue
         if path.suffix.lower() not in ANNOTATION_SUFFIXES:
@@ -311,15 +364,15 @@ def find_annotation_path(
         path_text = path.as_posix().lower()
         if any(token in path_text for token in ANNOTATION_EXCLUDE_TOKENS):
             continue
-        dyad_match = any(token in path_text for token in dyad_tokens)
-        run_match = any(token in path_text for token in run_tokens)
+        dyad_match = any(_contains_token(path_text, token) for token in dyad_tokens)
+        run_match = any(_contains_token(path_text, token) for token in run_tokens)
         if not (dyad_match and run_match):
             continue
 
         score = 1
         if "ipu" in path_text or "/ipu_" in path_text or "/ipu/" in path_text:
             score += 2
-        if any(token in path_text for token in task_tokens):
+        if any(_contains_token(path_text, token) for token in task_tokens):
             score += 1
         if any(token in path_text for token in ANNOTATION_PREFER_TOKENS):
             score += 3

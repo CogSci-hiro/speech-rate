@@ -13,7 +13,7 @@ project:
 paths:
   out_dir: "/Volumes/work-4T/speech-rate-testing"
   bids_dir: "/Volumes/work-4T/hyperscanning-bids"
-  eeg_dir: "/Volumes/work-4T/hyperscanning/derived/eeg/filtered"
+  eeg_dir: "/Volumes/work-4T/hyperscanning-testing/derived/eeg/filtered"
   annotations_dir: "/Users/hiro/PycharmProjects/hyperscanning-working/data/annotations"
 
 
@@ -92,7 +92,7 @@ evoked_trf:
     k_folds: 5
     blocked_by: "time_bins"
     time_bin_s: 60.0
-  ridge_alpha_grid: [0.01, 100.0, 100000.0]
+  ridge_alpha_grid: [0.000001]
   n_jobs: 1
 
 # ============================================================

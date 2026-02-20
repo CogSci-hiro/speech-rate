@@ -1,5 +1,4 @@
 import logging
-import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -122,6 +121,7 @@ def build_run_matrices(
     ev_run: pd.DataFrame,
     sfreq_hz: float,
     n_samples: int,
+    sample_t0_s: float,
 ) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
     X_by_model: dict[str, np.ndarray] = {}
     names_by_model: dict[str, list[str]] = {}
@@ -131,6 +131,7 @@ def build_run_matrices(
             model=m,
             sfreq_hz=sfreq_hz,
             n_samples=n_samples,
+            sample_t0_s=sample_t0_s,
             return_feature_names=True,
         )
         X_by_model[m.model_name] = X
@@ -290,42 +291,14 @@ def _compute_one_dyad_subject(
     trf_cfg: EvokedTrfConfig,
     picks: str | list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    dyad_norm = str(dyad_id).strip()
-    subject_norm = str(subject).strip()
-    ev_subj = events.loc[
-        (events["dyad_id"].astype(str).str.strip() == dyad_norm)
-        & (events["subject_id"].astype(str).str.strip() == subject_norm)
-    ].copy()
-
-    runs = sorted(ev_subj["run"].astype(int).unique().tolist())
-    if len(runs) < 2:
-        raise ValueError(
-            f"leave_one_run_out requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}"
-        )
-
-    per_run_y: dict[int, np.ndarray] = {}
-    per_run_X: dict[int, dict[str, np.ndarray]] = {}
-    per_run_feature_names: dict[int, dict[str, list[str]]] = {}
-    sfreqs: set[float] = set()
-
-    for run in runs:
-        eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
-        run_data = load_eeg_run(eeg_path, downsample_hz=trf_cfg.downsample_hz, picks=picks)
-
-        y = run_data.y
-        sfreq_hz = float(run_data.sfreq_hz)
-        sfreqs.add(sfreq_hz)
-
-        ev_run = ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy()
-        X_by_model, names_by_model = build_run_matrices(ev_run=ev_run, sfreq_hz=sfreq_hz, n_samples=y.shape[0])
-
-        per_run_y[int(run)] = y
-        per_run_X[int(run)] = X_by_model
-        per_run_feature_names[int(run)] = names_by_model
-
-    if len(sfreqs) != 1:
-        raise ValueError(f"Expected identical sfreq across runs after resample; got {sorted(sfreqs)}")
-    sfreq_hz = float(next(iter(sfreqs)))
+    _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_subject_run_data(
+        dyad_id=dyad_id,
+        subject=subject,
+        events=events,
+        ds_index=ds_index,
+        trf_cfg=trf_cfg,
+        picks=picks,
+    )
 
     models = list_models()
     outer_folds = _outer_folds_from_runs(runs)
@@ -404,6 +377,60 @@ def _compute_one_dyad_subject(
     )
 
     return summary, inner_scores, outer_scores, pd.concat([best_alpha, final_model_rows], ignore_index=True)
+
+
+def _prepare_subject_run_data(
+    *,
+    dyad_id: str,
+    subject: str,
+    events: pd.DataFrame,
+    ds_index: pd.DataFrame,
+    trf_cfg: EvokedTrfConfig,
+    picks: str | list[str],
+) -> tuple[pd.DataFrame, list[int], dict[int, np.ndarray], dict[int, dict[str, np.ndarray]], dict[int, dict[str, list[str]]], float]:
+    dyad_norm = str(dyad_id).strip()
+    subject_norm = str(subject).strip()
+    ev_subj = events.loc[
+        (events["dyad_id"].astype(str).str.strip() == dyad_norm)
+        & (events["subject_id"].astype(str).str.strip() == subject_norm)
+    ].copy()
+
+    runs = sorted(ev_subj["run"].astype(int).unique().tolist())
+    if len(runs) < 2:
+        raise ValueError(
+            f"leave_one_run_out requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}"
+        )
+
+    per_run_y: dict[int, np.ndarray] = {}
+    per_run_X: dict[int, dict[str, np.ndarray]] = {}
+    per_run_feature_names: dict[int, dict[str, list[str]]] = {}
+    sfreqs: set[float] = set()
+
+    for run in runs:
+        eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
+        run_data = load_eeg_run(eeg_path, downsample_hz=trf_cfg.downsample_hz, picks=picks)
+
+        y = run_data.y
+        sfreq_hz = float(run_data.sfreq_hz)
+        sfreqs.add(sfreq_hz)
+
+        ev_run = ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy()
+        X_by_model, names_by_model = build_run_matrices(
+            ev_run=ev_run,
+            sfreq_hz=sfreq_hz,
+            n_samples=y.shape[0],
+            sample_t0_s=float(run_data.times_s[0]),
+        )
+
+        per_run_y[int(run)] = y
+        per_run_X[int(run)] = X_by_model
+        per_run_feature_names[int(run)] = names_by_model
+
+    if len(sfreqs) != 1:
+        raise ValueError(f"Expected identical sfreq across runs after resample; got {sorted(sfreqs)}")
+    sfreq_hz = float(next(iter(sfreqs)))
+
+    return ev_subj, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz
 
 
 # =============================================================================
@@ -660,6 +687,113 @@ def _subject_scores_output_path(*, out_dir: Path, dyad_id: str, subject: str) ->
     return out_dir / "evoked_trf" / "subjects" / str(dyad_id) / str(subject) / "scores.parquet"
 
 
+def _extract_rf_coef_and_lags(*, rf: Any, sfreq_hz: float, tmin_s: float, tmax_s: float) -> tuple[np.ndarray, np.ndarray]:
+    coef = getattr(rf, "coef_", None)
+    if coef is None:
+        coef = getattr(getattr(rf, "estimator_", None), "coef_", None)
+    if coef is None:
+        raise ValueError("Could not extract coefficients from ReceptiveField object")
+
+    delays = getattr(rf, "delays_", None)
+    if delays is None:
+        lags_samples = np.arange(
+            int(np.floor(float(tmin_s) * float(sfreq_hz))),
+            int(np.ceil(float(tmax_s) * float(sfreq_hz))) + 1,
+        )
+        lags_s = lags_samples / float(sfreq_hz)
+    else:
+        lags_s = np.asarray(delays, dtype=float) / float(sfreq_hz)
+    return np.asarray(coef), np.asarray(lags_s, dtype=float)
+
+
+def _fit_outer_fold_kernel(
+    *,
+    model_name: str,
+    train_runs: list[int],
+    alpha: float,
+    per_run_y: dict[int, np.ndarray],
+    per_run_X: dict[int, dict[str, np.ndarray]],
+    sfreq_hz: float,
+    tmin_s: float,
+    tmax_s: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
+    y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
+    X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
+    X_train, _ = standardize_design_matrix_foldwise(X_train, X_train)
+    rf = fit_receptive_field(
+        X_train=X_train,
+        y_train=y_train,
+        sfreq_hz=sfreq_hz,
+        tmin_s=tmin_s,
+        tmax_s=tmax_s,
+        ridge_alpha=float(alpha),
+    )
+    return _extract_rf_coef_and_lags(rf=rf, sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s)
+
+
+def _fit_full_data_kernel(
+    *,
+    model_name: str,
+    alpha: float,
+    per_run_y: dict[int, np.ndarray],
+    per_run_X: dict[int, dict[str, np.ndarray]],
+    sfreq_hz: float,
+    tmin_s: float,
+    tmax_s: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
+    runs = sorted(per_run_y.keys())
+    y_all = concatenate_with_gap([per_run_y[r] for r in runs], gap_samples=gap)
+    X_all = concatenate_with_gap([per_run_X[r][model_name] for r in runs], gap_samples=gap)
+    X_all, _ = standardize_design_matrix_foldwise(X_all, X_all)
+    rf = fit_receptive_field(
+        X_train=X_all,
+        y_train=y_all,
+        sfreq_hz=sfreq_hz,
+        tmin_s=tmin_s,
+        tmax_s=tmax_s,
+        ridge_alpha=float(alpha),
+    )
+    return _extract_rf_coef_and_lags(rf=rf, sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s)
+
+
+def _subject_mne_info(
+    *,
+    ds_index: pd.DataFrame,
+    dyad_id: str,
+    subject: str,
+    picks: str | list[str],
+    sfreq_hz: float,
+) -> Any:
+    import mne
+
+    dyad_col = ds_index["dyad_id"].astype(str).str.strip()
+    subj_col = ds_index["subject_id"].astype(str).str.strip()
+    run_col = pd.to_numeric(ds_index["run"], errors="coerce")
+    rows = ds_index.loc[(dyad_col == str(dyad_id).strip()) & (subj_col == str(subject).strip())].copy()
+    if rows.empty:
+        raise ValueError(f"No dataset rows found for dyad_id={dyad_id}, subject={subject}")
+
+    rows["run_num"] = pd.to_numeric(run_col.loc[rows.index], errors="coerce")
+    rows = rows.dropna(subset=["run_num"]).sort_values("run_num")
+    eeg_path = Path(str(rows.iloc[0]["eeg_path"])).expanduser()
+    raw = mne.io.read_raw(eeg_path, preload=True, verbose="ERROR")
+    if picks is not None:
+        raw = raw.copy().pick(picks)
+    if not np.isclose(float(raw.info["sfreq"]), float(sfreq_hz), atol=1e-9):
+        raw.resample(float(sfreq_hz), npad="auto", verbose="ERROR")
+    return raw.info.copy()
+
+
+def _evoked_fname_for_regressor(regressor_name: str) -> str:
+    if regressor_name == "self_onset_impulse":
+        return "self_onset-ave.fif"
+    if regressor_name == "other_offset_impulse":
+        return "other_onset-ave.fif"
+    return f"{regressor_name}-ave.fif"
+
+
 def write_subject_output(
     *,
     cfg: dict[str, Any],
@@ -668,7 +802,7 @@ def write_subject_output(
     subject: str,
     picks: str | list[str] = "eeg",
 ) -> Path:
-    scores, inner_scores, outer_scores, packaged = _compute_subject_artifacts(
+    scores, inner_scores, outer_scores, _ = _compute_subject_artifacts(
         cfg=cfg,
         out_dir=out_dir,
         dyad_id=dyad_id,
@@ -681,7 +815,26 @@ def write_subject_output(
     subject_dir = out_path.parent
     subject_dir.mkdir(parents=True, exist_ok=True)
 
-    summary_sorted = scores.sort_values(["dyad_id", "subject", "run", "model", "fold_id"], kind="mergesort").reset_index(
+    trf_cfg = parse_evoked_trf_config(cfg)
+    events, ds_index = load_input_tables(out_dir)
+    events = validate_events_table(events)
+    _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_subject_run_data(
+        dyad_id=str(dyad_id),
+        subject=str(subject),
+        events=events,
+        ds_index=ds_index,
+        trf_cfg=trf_cfg,
+        picks=picks,
+    )
+    info = _subject_mne_info(
+        ds_index=ds_index,
+        dyad_id=str(dyad_id),
+        subject=str(subject),
+        picks=picks,
+        sfreq_hz=sfreq_hz,
+    )
+
+    summary_fold_sorted = scores.sort_values(["dyad_id", "subject", "run", "model", "fold_id"], kind="mergesort").reset_index(
         drop=True
     )
     inner_sorted = (
@@ -698,34 +851,128 @@ def write_subject_output(
         else outer_scores
     )
 
-    alpha_grid_scores = outer_sorted.copy()
+    # All alpha x outer-fold evaluations (no reduction).
+    alpha_grid = outer_sorted.copy()
 
-    summary_sorted.to_parquet(out_path, index=False)
-    summary_sorted.to_parquet(subject_dir / "summary.parquet", index=False)
-    inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
-    outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
-    alpha_grid_scores.to_parquet(subject_dir / "alpha_grid_scores.parquet", index=False)
-
-    packaged_model_rows = (
-        packaged.loc[packaged["packaged_model"].notna()].reset_index(drop=True)
-        if ("packaged_model" in packaged.columns)
-        else pd.DataFrame()
-    )
-    if packaged_model_rows.empty:
-        raise ValueError(
-            f"Missing packaged full-data refit model row for dyad_id={dyad_id}, subject={subject}. "
-            "Cannot write rf_model.pkl/kernels.npy/lags.npy."
+    # Inner CV transparency: mean score per alpha.
+    if inner_sorted.empty:
+        inner_cv = pd.DataFrame(columns=["dyad_id", "subject", "model", "alpha", "mean_r"])
+    else:
+        inner_cv = (
+            inner_sorted.groupby(["dyad_id", "subject", "model", "alpha"], as_index=False)["r"]
+            .mean(numeric_only=True)
+            .rename(columns={"r": "mean_r"})
+            .sort_values(["dyad_id", "subject", "model", "alpha"], kind="mergesort")
+            .reset_index(drop=True)
         )
 
-    model_row = packaged_model_rows.iloc[0]
-    kernels = np.asarray(model_row["coef"])
-    lags_s = np.asarray(model_row["lags_s"], dtype=float)
-    rf_model = model_row["rf_model"]
+    # Per-fold outer scores at chosen alpha with baseline comparison.
+    selected = outer_sorted.loc[np.isclose(outer_sorted["alpha"], outer_sorted["chosen_alpha"])].copy()
+    selected = selected[["dyad_id", "subject", "model", "fold_id", "test_run", "alpha", "r"]]
+    base = selected.loc[selected["model"] == "baseline", ["fold_id", "test_run", "r"]].rename(columns={"r": "baseline_r"})
+    outer_fold_scores = selected.merge(base, on=["fold_id", "test_run"], how="left")
+    outer_fold_scores["delta_r"] = outer_fold_scores["r"] - outer_fold_scores["baseline_r"]
+    outer_fold_scores = outer_fold_scores.sort_values(["model", "test_run"], kind="mergesort").reset_index(drop=True)
 
-    np.save(subject_dir / "kernels.npy", kernels)
-    np.save(subject_dir / "lags.npy", lags_s)
-    with (subject_dir / "rf_model.pkl").open("wb") as f:
-        pickle.dump(rf_model, f, protocol=pickle.HIGHEST_PROTOCOL)
+    # One row per model summary for aggregation/reporting.
+    best_alpha_by_model = (
+        selected.groupby("model", as_index=False)["alpha"]
+        .agg(lambda x: float(pd.Series(list(x)).mode().iloc[0]))
+        .rename(columns={"alpha": "best_alpha"})
+    )
+    model_comparison = (
+        outer_fold_scores.groupby("model", as_index=False)
+        .agg(
+            mean_r=("r", "mean"),
+            mean_baseline_r=("baseline_r", "mean"),
+            mean_delta_r=("delta_r", "mean"),
+        )
+        .merge(best_alpha_by_model, on="model", how="left")
+        .sort_values(["mean_delta_r", "model"], ascending=[False, True], kind="mergesort")
+        .reset_index(drop=True)
+    )
+    summary = model_comparison.assign(dyad_id=str(dyad_id), subject=str(subject))[
+        ["dyad_id", "subject", "model", "mean_r", "mean_baseline_r", "mean_delta_r", "best_alpha"]
+    ]
+
+    # Keep existing subject-level score output for aggregation compatibility.
+    summary_fold_sorted.to_parquet(out_path, index=False)
+    alpha_grid.to_parquet(subject_dir / "alpha_grid.parquet", index=False)
+    inner_cv.to_parquet(subject_dir / "inner_cv.parquet", index=False)
+    model_comparison.to_parquet(subject_dir / "model_comparison.parquet", index=False)
+    summary.to_parquet(subject_dir / "summary.parquet", index=False)
+    # Backward-compatible detailed filenames retained.
+    alpha_grid.to_parquet(subject_dir / "alpha_grid_scores.parquet", index=False)
+    inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
+    outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
+
+    model_to_regs = {m.model_name: [r.name for r in m.regressors] for m in get_models()}
+    for model_name in model_to_regs:
+        model_dir = subject_dir / "models" / model_name
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        model_outer = outer_fold_scores.loc[outer_fold_scores["model"] == model_name].copy()
+        model_outer = model_outer[
+            ["dyad_id", "subject", "model", "test_run", "alpha", "r", "baseline_r", "delta_r"]
+        ].sort_values(["test_run"], kind="mergesort")
+        model_outer.to_parquet(model_dir / "outer_scores.parquet", index=False)
+
+        fold_kernels: list[np.ndarray] = []
+        fold_lags: np.ndarray | None = None
+        for row in model_outer.itertuples(index=False):
+            test_run = int(row.test_run)
+            train_runs = [r for r in runs if int(r) != test_run]
+            coef_fold, lags_fold = _fit_outer_fold_kernel(
+                model_name=model_name,
+                train_runs=train_runs,
+                alpha=float(row.alpha),
+                per_run_y=per_run_y,
+                per_run_X=per_run_X,
+                sfreq_hz=sfreq_hz,
+                tmin_s=trf_cfg.tmin_s,
+                tmax_s=trf_cfg.tmax_s,
+            )
+            # kernels_outer.npy axis order: (outer_fold, channel, regressor, lag)
+            fold_kernels.append(coef_fold)
+            if fold_lags is None:
+                fold_lags = lags_fold
+            elif not np.allclose(fold_lags, lags_fold):
+                raise ValueError(f"Inconsistent lag grid across folds for model={model_name}")
+        if not fold_kernels:
+            raise ValueError(f"No outer-fold kernels generated for model={model_name}")
+        np.save(model_dir / "kernels_outer.npy", np.stack(fold_kernels, axis=0))
+        np.save(model_dir / "lags.npy", np.asarray(fold_lags, dtype=float))
+
+        best_alpha_row = best_alpha_by_model.loc[best_alpha_by_model["model"] == model_name]
+        if best_alpha_row.empty:
+            raise ValueError(f"Missing best_alpha for model={model_name}")
+        best_alpha = float(best_alpha_row.iloc[0]["best_alpha"])
+        coef_full, lags_full = _fit_full_data_kernel(
+            model_name=model_name,
+            alpha=best_alpha,
+            per_run_y=per_run_y,
+            per_run_X=per_run_X,
+            sfreq_hz=sfreq_hz,
+            tmin_s=trf_cfg.tmin_s,
+            tmax_s=trf_cfg.tmax_s,
+        )
+        if not np.allclose(np.asarray(fold_lags, dtype=float), np.asarray(lags_full, dtype=float)):
+            raise ValueError(f"Refit lag grid mismatch for model={model_name}")
+        regs = per_run_feature_names[runs[0]][model_name]
+        for reg_idx, reg_name in enumerate(regs):
+            reg_data = np.asarray(coef_full)[:, reg_idx, :]
+            evoked_name = _evoked_fname_for_regressor(reg_name)
+            import mne
+
+            evoked = mne.EvokedArray(
+                data=reg_data,
+                info=info.copy(),
+                tmin=float(lags_full[0]),
+                comment=str(reg_name),
+                nave=len(runs),
+                verbose=False,
+            )
+            evoked.save(model_dir / evoked_name, overwrite=True)
 
     return out_path
 

@@ -24,6 +24,16 @@ def _is_macos_dot_underscore(path: Path) -> bool:
     return path.name.startswith("._")
 
 
+def _resolve_macos_sidecar(path: Path) -> Path | None:
+    """
+    Resolve a macOS dot-underscore sidecar path to its real data file when possible.
+    """
+    if not _is_macos_dot_underscore(path):
+        return path
+    candidate = path.with_name(path.name[2:])
+    return candidate if candidate.exists() else None
+
+
 def _safe_str(x: object) -> str:
     return str(x).strip()
 
@@ -61,10 +71,10 @@ def _make_plan(
         subject_id = _safe_str(getattr(r, "subject_id"))
         run = int(getattr(r, "run"))
         eeg_str = _safe_str(getattr(r, "eeg_path"))
-        eeg_in = Path(eeg_str).expanduser()
-
-        # Ignore macOS sidecar files if they accidentally entered the index
-        if _is_macos_dot_underscore(eeg_in):
+        eeg_in_raw = Path(eeg_str).expanduser()
+        eeg_in = _resolve_macos_sidecar(eeg_in_raw)
+        if eeg_in is None:
+            # Sidecar file listed but paired data file not found.
             continue
 
         eeg_out = _build_out_path(
@@ -164,6 +174,11 @@ def resample_index_table(
     )
 
     LOGGER.info("Resample plan: %d files", len(plan))
+    if len(ok_rows) > 0 and len(plan) == 0:
+        raise ValueError(
+            "Resample plan is empty despite rows marked status=='ok'. "
+            "Check dataset/index.parquet eeg_path values (e.g., macOS ._ sidecar paths)."
+        )
 
     missing_keys = set()
 
