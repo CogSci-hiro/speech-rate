@@ -2,35 +2,25 @@ import pandas as pd
 from pathlib import Path
 
 OUT_DIR = config["paths"]["out_dir"]
-DATASET_INDEX = OUT_DIR + "/dataset/index_resampled.parquet"
-EVENTS_TABLE = OUT_DIR + "/events/events.parquet"
+DATASET_INDEX_RESAMPLED = Path(OUT_DIR) / "dataset" / "index_resampled.parquet"
+DATASET_INDEX = Path(OUT_DIR) / "dataset" / "index.parquet"
 
-if Path(DATASET_INDEX).exists() and Path(EVENTS_TABLE).exists():
-    df_index = pd.read_parquet(DATASET_INDEX)
-    df_events = pd.read_parquet(EVENTS_TABLE)
+if DATASET_INDEX_RESAMPLED.exists():
+    _subject_index_path = DATASET_INDEX_RESAMPLED
+elif DATASET_INDEX.exists():
+    _subject_index_path = DATASET_INDEX
+else:
+    _subject_index_path = None
 
-    index_pairs = {
-        (str(row["dyad_id"]).strip(), str(row["subject_id"]).strip())
-        for _, row in df_index[["dyad_id", "subject_id"]].drop_duplicates().iterrows()
-    }
-    event_runs = (
-        df_events.assign(
-            dyad_id=df_events["dyad_id"].astype(str).str.strip(),
-            subject_id=df_events["subject_id"].astype(str).str.strip(),
-            run=pd.to_numeric(df_events["run"], errors="coerce"),
-        )
-        .dropna(subset=["run"])
-        .groupby(["dyad_id", "subject_id"], as_index=False)["run"]
-        .nunique()
-        .rename(columns={"run": "n_runs"})
-    )
-
+if _subject_index_path is not None:
+    df_index = pd.read_parquet(_subject_index_path)
+    if "status" in df_index.columns:
+        df_index = df_index.loc[df_index["status"].astype(str).str.lower() == "ok"].copy()
     SUBJECT_TARGETS = sorted(
-        [
-            (str(row["dyad_id"]), str(row["subject_id"]))
-            for _, row in event_runs.loc[event_runs["n_runs"] >= 2].iterrows()
-            if (str(row["dyad_id"]), str(row["subject_id"])) in index_pairs
-        ]
+        {
+            (str(row["dyad_id"]).strip(), str(row["subject_id"]).strip())
+            for _, row in df_index[["dyad_id", "subject_id"]].drop_duplicates().iterrows()
+        }
     )
 else:
     SUBJECT_TARGETS = []

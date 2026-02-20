@@ -45,10 +45,21 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
     cv_cfg = ev["cv"]
     scheme = str(cv_cfg.get("scheme", "leave_one_run_out"))
 
-    grid = ev.get("ridge_alpha_grid", None)
-    if grid is None:
+    grid_cfg = ev.get("ridge_alpha_grid", None)
+    if grid_cfg is None:
         grid = [0.1, 1.0, 10.0, 100.0, 1000.0]
-    grid = [float(a) for a in grid]
+    elif isinstance(grid_cfg, dict):
+        missing = {"min", "max", "n_alpha"} - set(grid_cfg.keys())
+        if missing:
+            raise ValueError(f"ridge_alpha_grid mapping missing keys: {sorted(missing)}")
+        alpha_min = float(grid_cfg["min"])
+        alpha_max = float(grid_cfg["max"])
+        n_alpha = int(grid_cfg["n_alpha"])
+        if n_alpha < 1:
+            raise ValueError("ridge_alpha_grid.n_alpha must be >= 1")
+        grid = np.logspace(alpha_min, alpha_max, num=n_alpha).astype(float).tolist()
+    else:
+        grid = [float(a) for a in grid_cfg]
 
     return EvokedTrfConfig(
         downsample_hz=float(ev["downsample_hz"]),
@@ -775,8 +786,17 @@ def _subject_mne_info(
     if rows.empty:
         raise ValueError(f"No dataset rows found for dyad_id={dyad_id}, subject={subject}")
 
+    if "status" in rows.columns:
+        rows = rows.loc[rows["status"].astype(str).str.lower() == "ok"].copy()
+    rows = rows.loc[rows["eeg_path"].notna()].copy()
+    rows = rows.loc[rows["eeg_path"].astype(str).str.strip() != ""].copy()
+    if rows.empty:
+        raise ValueError(f"No valid EEG paths for dyad_id={dyad_id}, subject={subject}")
+
     rows["run_num"] = pd.to_numeric(run_col.loc[rows.index], errors="coerce")
     rows = rows.dropna(subset=["run_num"]).sort_values("run_num")
+    if rows.empty:
+        raise ValueError(f"No runnable rows after run parsing for dyad_id={dyad_id}, subject={subject}")
     eeg_path = Path(str(rows.iloc[0]["eeg_path"])).expanduser()
     raw = mne.io.read_raw(eeg_path, preload=True, verbose="ERROR")
     if picks is not None:
@@ -790,7 +810,7 @@ def _evoked_fname_for_regressor(regressor_name: str) -> str:
     if regressor_name == "self_onset_impulse":
         return "self_onset-ave.fif"
     if regressor_name == "other_offset_impulse":
-        return "other_onset-ave.fif"
+        return "other_offset-ave.fif"
     return f"{regressor_name}-ave.fif"
 
 
