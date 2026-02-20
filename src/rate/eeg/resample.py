@@ -141,39 +141,67 @@ def resample_index_table(
     downsample_hz: float,
     overwrite: bool,
 ) -> pd.DataFrame:
-    """
-    Resample all raws referenced by dataset index and return a new index table
-    where eeg_path points to the cached resampled file.
 
-    Usage example
-    -------------
-        resampled = resample_index_table(ds_index=df, eeg_cache_dir=Path(...), downsample_hz=100.0, overwrite=False)
-    """
-    _assert_no_missing_eeg_path(ds_index)
-    plan = _make_plan(ds_index=ds_index, eeg_cache_dir=eeg_cache_dir, downsample_hz=downsample_hz)
+    if "status" in ds_index.columns:
+        ok_mask = ds_index["status"].astype(str).str.lower() == "ok"
+    else:
+        # Backward compatibility: assume all rows are OK
+        ok_mask = pd.Series(True, index=ds_index.index)
+
+    ok_rows = ds_index.loc[ok_mask].copy()
+    skip_rows = ds_index.loc[~ok_mask].copy()
+
+    LOGGER.info("Rows total: %d", len(ds_index))
+    LOGGER.info("Rows to resample (status=='ok'): %d", len(ok_rows))
+    LOGGER.info("Rows skipped (excluded/missing): %d", len(skip_rows))
+
+    _assert_no_missing_eeg_path(ok_rows)
+
+    plan = _make_plan(
+        ds_index=ok_rows,
+        eeg_cache_dir=eeg_cache_dir,
+        downsample_hz=downsample_hz,
+    )
+
     LOGGER.info("Resample plan: %d files", len(plan))
 
+    missing_keys = set()
+
     for i, row in enumerate(plan, start=1):
-        if i % 10 == 0 or i == 1 or i == len(plan):
-            LOGGER.info("Resampling (%d/%d): %s", i, len(plan), row.eeg_path_in.name)
-        _resample_one(row, downsample_hz=downsample_hz, overwrite=overwrite)
+        try:
+            _resample_one(row, downsample_hz=downsample_hz, overwrite=overwrite)
+        except FileNotFoundError:
+            LOGGER.error("Missing EEG file: %s", row.eeg_path_in)
+            missing_keys.add((row.dyad_id, row.subject_id, row.run))
 
     # Build a new table (keep all original columns, overwrite eeg_path)
     out = ds_index.copy()
-    dyad_col = out["dyad_id"].astype(str).str.strip()
-    subj_col = out["subject_id"].astype(str).str.strip()
-    run_col = pd.to_numeric(out["run"], errors="coerce")
 
-    out_paths = {(p.dyad_id, p.subject_id, p.run): str(p.eeg_path_out) for p in plan}
+    out_paths = {
+        (p.dyad_id, p.subject_id, p.run): str(p.eeg_path_out)
+        for p in plan
+        if (p.dyad_id, p.subject_id, p.run) not in missing_keys
+    }
 
-    new_paths: list[str] = []
-    for dyad_id, subject_id, run in zip(dyad_col, subj_col, run_col):
-        key = (str(dyad_id), str(subject_id), int(run))
-        if key not in out_paths:
-            raise ValueError(f"Missing resampled path for dyad_id={dyad_id}, subject_id={subject_id}, run={run}")
-        new_paths.append(out_paths[key])
+    new_status = []
+    new_paths = []
+
+    for r in out.itertuples():
+        key = (str(r.dyad_id), str(r.subject_id), int(r.run))
+
+        if key in out_paths:
+            new_paths.append(out_paths[key])
+            new_status.append("ok")
+        elif key in missing_keys:
+            new_paths.append(r.eeg_path)
+            new_status.append("missing")
+        else:
+            new_paths.append(r.eeg_path)
+            new_status.append(getattr(r, "status", "excluded"))
 
     out["eeg_path"] = new_paths
-    out["eeg_is_resampled"] = True
+    out["status"] = new_status
+    out["eeg_is_resampled"] = out["status"] == "ok"
     out["eeg_downsample_hz"] = float(downsample_hz)
+
     return out
