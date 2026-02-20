@@ -154,7 +154,8 @@ def build_design_matrix(
     model: ModelSpec,
     sfreq_hz: float,
     n_samples: int,
-) -> np.ndarray:
+    return_feature_names: bool = False,
+) -> np.ndarray | tuple[np.ndarray, list[str]]:
     """
     Build the (non-lagged) design matrix X for a model.
 
@@ -171,11 +172,15 @@ def build_design_matrix(
         Sampling frequency in Hz.
     n_samples
         Number of EEG samples.
+    return_feature_names
+        If True, return (X, feature_names).
 
     Returns
     -------
     X
-        Array of shape (n_samples, n_regressors).
+        Array of shape (n_samples, n_regressors), dtype float.
+    feature_names
+        Names aligned to columns of X, returned only when return_feature_names=True.
 
     Usage example
     -------------
@@ -183,17 +188,29 @@ def build_design_matrix(
     """
     cols: list[np.ndarray] = []
     for reg in model.regressors:
-        cols.append(
-            _events_to_continuous_regressor(
-                events=events,
-                reg=reg,
-                sfreq_hz=sfreq_hz,
-                n_samples=n_samples,
-            )
+        x = _events_to_continuous_regressor(
+            events=events,
+            reg=reg,
+            sfreq_hz=sfreq_hz,
+            n_samples=n_samples,
         )
+        x = np.asarray(x, dtype=float)
+        if x.ndim != 1 or x.shape[0] != n_samples:
+            raise ValueError(
+                f"Regressor {reg.name} produced shape {x.shape}; expected ({n_samples},)"
+            )
+        cols.append(x)
+
     if not cols:
-        return np.zeros((n_samples, 0), dtype=float)
-    return np.column_stack(cols)
+        raise ValueError("Model has no regressors; cannot build design matrix")
+
+    X = np.column_stack(cols).astype(float)
+
+    if return_feature_names:
+        feature_names = [reg.name for reg in model.regressors]
+        return X, feature_names
+
+    return X
 
 
 def fit_receptive_field(

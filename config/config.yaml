@@ -81,10 +81,10 @@ events:
 # ============================================================
 
 evoked_trf:
-  downsample_hz: 100.0
+  downsample_hz: 64.0
 
   lags_s:
-    tmin: -2.0
+    tmin: -1.0
     tmax: 0.5
 
   cv:
@@ -92,6 +92,9 @@ evoked_trf:
     k_folds: 5
     blocked_by: "time_bins"
     time_bin_s: 60.0
+  evoked_trf:
+    ridge_alpha_grid: [ 0.1, 1.0, 10.0, 100.0, 1000.0 ]
+    n_jobs: 5
 
 # ============================================================
 # INDUCED TRF (Hilbert-based)

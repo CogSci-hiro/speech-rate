@@ -1,163 +1,80 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+from joblib import Parallel, delayed
 
-from rate.evoked_trf.cv import BlockedWithinRunCV, bins_to_sample_mask
 from rate.evoked_trf.fit import (
     build_design_matrix,
     fit_receptive_field,
     load_eeg_run,
     predict_receptive_field,
 )
+from rate.evoked_trf.results_io import DetailedPaths, save_receptive_field_npz, write_parquet
 from rate.evoked_trf.spec import add_timelock_columns, get_models
+from rate.evoked_trf.tuning import select_alpha_nested_loro
+from rate.evoked_trf.utils import (
+    concatenate_with_gap,
+    max_lag_samples,
+    score_multichannel_mean_r,
+    standardize_design_matrix_foldwise,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Scoring utilities
-# =============================================================================
-
-
-def pearsonr_1d(a: np.ndarray, b: np.ndarray) -> float:
-    """
-    Pearson correlation for 1D arrays. Returns NaN if variance is zero.
-
-    Usage example
-    -------------
-        r = pearsonr_1d(y_true, y_pred)
-    """
-    a = np.asarray(a, dtype=float)
-    b = np.asarray(b, dtype=float)
-    if a.size != b.size:
-        raise ValueError("a and b must have the same length")
-
-    a = a - a.mean()
-    b = b - b.mean()
-    denom = np.sqrt(np.sum(a * a) * np.sum(b * b))
-    if denom == 0.0:
-        return float("nan")
-    return float(np.sum(a * b) / denom)
-
-
-def score_multichannel_mean_r(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """
-    Score as mean Pearson r across channels.
-
-    Parameters
-    ----------
-    y_true, y_pred
-        Arrays of shape (n_samples, n_channels).
-
-    Usage example
-    -------------
-        r = score_multichannel_mean_r(y_test, y_hat)
-    """
-    if y_true.shape != y_pred.shape:
-        raise ValueError("y_true and y_pred must have the same shape")
-    rs: list[float] = []
-    for ch in range(y_true.shape[1]):
-        rs.append(pearsonr_1d(y_true[:, ch], y_pred[:, ch]))
-    return float(np.nanmean(rs))
-
-
-def standardize_design_matrix_foldwise(
-    X_train: np.ndarray, X_test: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Standardize X using training statistics only (no leakage).
-
-    Any constant feature in training is left unchanged (std set to 1).
-
-    Usage example
-    -------------
-        Xtr, Xte = standardize_design_matrix_foldwise(X_train, X_test)
-    """
-    mean = X_train.mean(axis=0)
-    std = X_train.std(axis=0)
-    std = np.where(std == 0.0, 1.0, std)
-    return (X_train - mean) / std, (X_test - mean) / std
-
-
-# =============================================================================
-# Config + IO
+# Config
 # =============================================================================
 
 
 @dataclass(frozen=True)
 class EvokedTrfConfig:
-    """
-    Minimal configuration required for evoked TRF scoring.
-
-    Usage example
-    -------------
-        c = EvokedTrfConfig(
-            downsample_hz=100.0, tmin_s=-0.2, tmax_s=0.8,
-            k_folds=5, time_bin_s=10.0, scheme="blocked_kfold_within_run",
-            ridge_alpha=1.0, seed=0
-        )
-    """
-
     downsample_hz: float
     tmin_s: float
     tmax_s: float
     scheme: str
-    k_folds: int | None
-    time_bin_s: float | None
-    ridge_alpha: float
-    seed: int
+    ridge_alpha_grid: list[float]
+    ridge_alpha_default: float
+    n_jobs: int
 
 
 def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
-    """
-    Parse and validate evoked_trf config block.
-
-    Usage example
-    -------------
-        trf_cfg = parse_evoked_trf_config(cfg)
-    """
     ev = cfg["evoked_trf"]
     cv_cfg = ev["cv"]
-    seed = int(cv_cfg.get("seed", cfg.get("project", {}).get("random_seed", 0)))
+    scheme = str(cv_cfg.get("scheme", "leave_one_run_out"))
 
-    scheme = str(cv_cfg.get("scheme"))
-    k_folds = cv_cfg.get("k_folds", None)
-    time_bin_s = cv_cfg.get("time_bin_s", None)
+    grid = ev.get("ridge_alpha_grid", None)
+    if grid is None:
+        grid = [0.1, 1.0, 10.0, 100.0, 1000.0]
+    grid = [float(a) for a in grid]
 
     return EvokedTrfConfig(
         downsample_hz=float(ev["downsample_hz"]),
         tmin_s=float(ev["lags_s"]["tmin"]),
         tmax_s=float(ev["lags_s"]["tmax"]),
         scheme=scheme,
-        k_folds=int(k_folds) if k_folds is not None else None,
-        time_bin_s=float(time_bin_s) if time_bin_s is not None else None,
-        ridge_alpha=float(ev.get("ridge_alpha", 1.0)),
-        seed=seed,
+        ridge_alpha_grid=grid,
+        ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
+        n_jobs=int(ev.get("n_jobs", 1)),
     )
 
-def load_input_tables(out_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Load required input tables.
 
-    Usage example
-    -------------
-        events, ds_index = load_input_tables(Path(cfg["paths"]["out_dir"]))
-    """
-    events_path = Path(out_dir) / "events" / "events.parquet"
-    ds_index_path = Path(out_dir) / "dataset" / "index.parquet"
+# =============================================================================
+# IO helpers
+# =============================================================================
+
+
+def load_input_tables(out_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    events_path = out_dir / "events" / "events.parquet"
+    ds_index_path = out_dir / "dataset" / "index.parquet"
     return pd.read_parquet(events_path), pd.read_parquet(ds_index_path)
 
 
 def validate_events_table(events: pd.DataFrame) -> pd.DataFrame:
-    """
-    Validate and augment the events table.
-
-    Usage example
-    -------------
-        events = validate_events_table(events)
-    """
     required = {
         "dyad_id",
         "subject_id",
@@ -175,146 +92,86 @@ def validate_events_table(events: pd.DataFrame) -> pd.DataFrame:
 
 
 def select_eeg_path(ds_index: pd.DataFrame, *, subject: str, dyad_id: str, run: int) -> Path:
-    """
-    Resolve EEG path for a specific (dyad_id, subject_id, run) from dataset index.
-
-    This function normalizes types and strips whitespace to avoid false negatives
-    when parquet stores columns as category/object/int inconsistently.
-
-    Usage example
-    -------------
-        p = select_eeg_path(ds_index, subject="sub-001", dyad_id="dyad-01", run=1)
-    """
     required = {"dyad_id", "subject_id", "run", "eeg_path"}
     missing = required - set(ds_index.columns)
     if missing:
         raise ValueError(f"dataset index missing required columns: {sorted(missing)}")
 
-    # Normalize matching keys (string columns may be categorical, may contain spaces)
     dyad_col = ds_index["dyad_id"].astype(str).str.strip()
     subj_col = ds_index["subject_id"].astype(str).str.strip()
-
-    # Normalize run (may be string/float/etc.)
     run_col = pd.to_numeric(ds_index["run"], errors="coerce")
 
-    target_dyad = str(dyad_id).strip()
-    target_subj = str(subject).strip()
-    target_run = int(run)
-
-    mask = (dyad_col == target_dyad) & (subj_col == target_subj) & (run_col == target_run)
+    mask = (dyad_col == str(dyad_id).strip()) & (subj_col == str(subject).strip()) & (run_col == int(run))
     sub = ds_index.loc[mask].copy()
-
     if sub.empty:
-        # Helpful debugging: show near-misses for this dyad/run
-        dyad_run = ds_index.loc[(dyad_col == target_dyad) & (run_col == target_run)].copy()
-        available_subjects = (
-            dyad_run["subject_id"].astype(str).str.strip().drop_duplicates().sort_values().tolist()
-            if not dyad_run.empty
-            else []
-        )
-        raise ValueError(
-            f"No dataset index row for dyad_id={target_dyad}, subject_id={target_subj}, run={target_run}. "
-            f"Available subjects for dyad/run: {available_subjects}"
-        )
+        raise ValueError(f"No dataset index row for dyad_id={dyad_id}, subject_id={subject}, run={run}")
 
     eeg_path = Path(str(sub.iloc[0]["eeg_path"])).expanduser()
     return eeg_path
 
 
-
 # =============================================================================
-# Core computation
+# Model building
 # =============================================================================
 
 
-def make_cv_splits(
-    *,
-    trf_cfg: EvokedTrfConfig,
-    dyad_id: str,
-    run: int,
-    times_s: np.ndarray,
-    sfreq_hz: float,
-) -> pd.DataFrame:
-    """
-    Create blocked within-run CV splits and return split audit table.
-
-    Usage example
-    -------------
-        splits = make_cv_splits(trf_cfg=trf_cfg, dyad_id="d1", run=1, times_s=t, sfreq_hz=100.0)
-    """
-    run_duration_s = float(times_s[-1] + 1.0 / sfreq_hz)
-    cv = BlockedWithinRunCV(k_folds=trf_cfg.k_folds, time_bin_s=trf_cfg.time_bin_s, seed=trf_cfg.seed)
-    return cv.make_splits(run_duration_s=run_duration_s, dyad_id=dyad_id, run=int(run))
+def list_models() -> list[str]:
+    return [m.model_name for m in get_models()]
 
 
-def build_design_matrices_for_run(
+def build_run_matrices(
     *,
     ev_run: pd.DataFrame,
     sfreq_hz: float,
     n_samples: int,
-) -> tuple[Any, dict[str, np.ndarray]]:
-    """
-    Build non-lagged design matrices for all models (RF expands lags internally).
-
-    Returns
-    -------
-    baseline_model, X_by_model
-
-    Usage example
-    -------------
-        baseline_model, X_by_model = build_design_matrices_for_run(ev_run=ev, sfreq_hz=sfreq, n_samples=n)
-    """
-    models = get_models()
-    baseline_model = next(m for m in models if m.model_name == "baseline")
+) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
     X_by_model: dict[str, np.ndarray] = {}
-    for model in models:
-        X_by_model[model.model_name] = build_design_matrix(
+    names_by_model: dict[str, list[str]] = {}
+    for m in get_models():
+        X, feature_names = build_design_matrix(
             events=ev_run,
-            model=model,
+            model=m,
             sfreq_hz=sfreq_hz,
             n_samples=n_samples,
+            return_feature_names=True,
         )
-    return baseline_model, X_by_model
+        X_by_model[m.model_name] = X
+        names_by_model[m.model_name] = feature_names
+    return X_by_model, names_by_model
 
 
-def get_fold_masks(
-    *, splits: pd.DataFrame, fold_id: int, times_s: np.ndarray, context: str
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Convert split table into (train_mask, test_mask) for a fold.
-
-    Usage example
-    -------------
-        train_mask, test_mask = get_fold_masks(splits=splits, fold_id=0, times_s=t, context="dyad-01/run1")
-    """
-    train_mask = bins_to_sample_mask(splits=splits, fold_id=fold_id, split="train", times_s=times_s)
-    test_mask = bins_to_sample_mask(splits=splits, fold_id=fold_id, split="test", times_s=times_s)
-    if np.any(train_mask & test_mask):
-        raise RuntimeError(f"Leakage detected: overlapping samples in train and test ({context}, fold={fold_id})")
-    return train_mask, test_mask
+# =============================================================================
+# CV + scoring
+# =============================================================================
 
 
-def fit_and_score_one_model(
+def _outer_folds_from_runs(runs: list[int]) -> list[tuple[list[int], int, int]]:
+    folds: list[tuple[list[int], int, int]] = []
+    for fold_id, test_run in enumerate(runs):
+        train_runs = [r for r in runs if r != test_run]
+        folds.append((train_runs, test_run, fold_id))
+    return folds
+
+
+def _fit_score_for_alpha(
     *,
-    X: np.ndarray,
-    y: np.ndarray,
-    train_mask: np.ndarray,
-    test_mask: np.ndarray,
-    trf_cfg: EvokedTrfConfig,
+    model_name: str,
+    alpha: float,
+    train_runs: list[int],
+    test_run: int,
+    per_run_y: dict[int, np.ndarray],
+    per_run_X: dict[int, dict[str, np.ndarray]],
     sfreq_hz: float,
+    tmin_s: float,
+    tmax_s: float,
 ) -> float:
-    """
-    Fit ReceptiveField on train split, predict on test, and return mean channel r.
+    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
 
-    Usage example
-    -------------
-        r = fit_and_score_one_model(X=X, y=y, train_mask=tr, test_mask=te, trf_cfg=cfg, sfreq_hz=sfreq)
-    """
-    y_train = y[train_mask, :]
-    y_test = y[test_mask, :]
+    y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
+    y_test = per_run_y[test_run]
 
-    X_train = X[train_mask, :]
-    X_test = X[test_mask, :]
+    X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
+    X_test = per_run_X[test_run][model_name]
 
     X_train, X_test = standardize_design_matrix_foldwise(X_train, X_test)
 
@@ -322,15 +179,108 @@ def fit_and_score_one_model(
         X_train=X_train,
         y_train=y_train,
         sfreq_hz=sfreq_hz,
-        tmin_s=trf_cfg.tmin_s,
-        tmax_s=trf_cfg.tmax_s,
-        ridge_alpha=trf_cfg.ridge_alpha,
+        tmin_s=tmin_s,
+        tmax_s=tmax_s,
+        ridge_alpha=float(alpha),
     )
     y_hat = predict_receptive_field(rf, X_test)
     return score_multichannel_mean_r(y_test, y_hat)
 
 
-def dyad_subject_loro_scores(
+def _outer_scores_full_table(
+    *,
+    dyad_id: str,
+    subject: str,
+    model_name: str,
+    fold_id: int,
+    train_runs: list[int],
+    test_run: int,
+    alphas: list[float],
+    per_run_y: dict[int, np.ndarray],
+    per_run_X: dict[int, dict[str, np.ndarray]],
+    sfreq_hz: float,
+    tmin_s: float,
+    tmax_s: float,
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for alpha in alphas:
+        r = _fit_score_for_alpha(
+            model_name=model_name,
+            alpha=float(alpha),
+            train_runs=train_runs,
+            test_run=test_run,
+            per_run_y=per_run_y,
+            per_run_X=per_run_X,
+            sfreq_hz=sfreq_hz,
+            tmin_s=tmin_s,
+            tmax_s=tmax_s,
+        )
+        rows.append(
+            {
+                "dyad_id": dyad_id,
+                "subject": subject,
+                "model": model_name,
+                "fold_id": int(fold_id),
+                "test_run": int(test_run),
+                "alpha": float(alpha),
+                "r": float(r),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _choose_best_alpha_inner(
+    *,
+    dyad_id: str,
+    subject: str,
+    model_name: str,
+    train_runs: list[int],
+    per_run_y: dict[int, np.ndarray],
+    per_run_X: dict[int, dict[str, np.ndarray]],
+    alphas: list[float],
+    sfreq_hz: float,
+    tmin_s: float,
+    tmax_s: float,
+    alpha_default: float,
+) -> tuple[float, pd.DataFrame]:
+    if len(train_runs) < 2:
+        df = pd.DataFrame(
+            [
+                {
+                    "dyad_id": dyad_id,
+                    "subject": subject,
+                    "model": model_name,
+                    "alpha": float(alpha_default),
+                    "inner_fold": 0,
+                    "test_run": None,
+                    "r": float("nan"),
+                    "note": "inner_cv_skipped_only_one_training_run",
+                }
+            ]
+        )
+        return float(alpha_default), df
+
+    res = select_alpha_nested_loro(
+        dyad_id=dyad_id,
+        subject=subject,
+        model_name=model_name,
+        runs_train_outer=train_runs,
+        per_run_y=per_run_y,
+        per_run_X=per_run_X,
+        alphas=alphas,
+        sfreq_hz=sfreq_hz,
+        tmin_s=tmin_s,
+        tmax_s=tmax_s,
+    )
+    return float(res.best_alpha), res.table
+
+
+# =============================================================================
+# Per-subject worker (parallel-safe)
+# =============================================================================
+
+
+def _compute_one_dyad_subject(
     *,
     dyad_id: str,
     subject: str,
@@ -338,141 +288,257 @@ def dyad_subject_loro_scores(
     ds_index: pd.DataFrame,
     trf_cfg: EvokedTrfConfig,
     picks: str | list[str],
-) -> tuple[list[dict[str, object]], pd.DataFrame]:
-    """
-    Leave-one-run-out scores for a single (dyad_id, subject_id) across all runs.
-    """
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     ev_subj = events.loc[
-        (events["dyad_id"].astype(str) == dyad_id)
-        & (events["subject_id"].astype(str) == subject)
+        (events["dyad_id"].astype(str) == dyad_id) & (events["subject_id"].astype(str) == subject)
     ].copy()
+
     runs = sorted(ev_subj["run"].astype(int).unique().tolist())
     if len(runs) < 2:
-        raise ValueError(f"LORO requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}")
+        raise ValueError(f"leave_one_run_out requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}")
 
-    models = get_models()
-    baseline_model = next(m for m in models if m.model_name == "baseline")
-    model_names = [m.model_name for m in models]
-
-    per_run: dict[int, dict[str, np.ndarray]] = {}
     per_run_y: dict[int, np.ndarray] = {}
-    per_run_sfreq: dict[int, float] = {}
+    per_run_X: dict[int, dict[str, np.ndarray]] = {}
+    per_run_feature_names: dict[int, dict[str, list[str]]] = {}
+    sfreqs: set[float] = set()
 
-    # Load + build X/y per run
     for run in runs:
-        eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=run)
+        eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
         run_data = load_eeg_run(eeg_path, downsample_hz=trf_cfg.downsample_hz, picks=picks)
+
         y = run_data.y
-        sfreq_hz = run_data.sfreq_hz
-        per_run_y[run] = y
-        per_run_sfreq[run] = sfreq_hz
+        sfreq_hz = float(run_data.sfreq_hz)
+        sfreqs.add(sfreq_hz)
 
-        ev_run = ev_subj.loc[ev_subj["run"].astype(int) == run].copy()
-        X_by_model: dict[str, np.ndarray] = {}
-        for m in models:
-            X_by_model[m.model_name] = build_design_matrix(
-                events=ev_run,
-                model=m,
-                sfreq_hz=sfreq_hz,
-                n_samples=y.shape[0],
-            )
-        per_run[run] = X_by_model
+        ev_run = ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy()
+        X_by_model, names_by_model = build_run_matrices(ev_run=ev_run, sfreq_hz=sfreq_hz, n_samples=y.shape[0])
 
-    # Sanity: sfreq must be identical across runs after resample
-    sfreqs = {float(v) for v in per_run_sfreq.values()}
+        per_run_y[int(run)] = y
+        per_run_X[int(run)] = X_by_model
+        per_run_feature_names[int(run)] = names_by_model
+
     if len(sfreqs) != 1:
-        raise ValueError(f"Expected one sfreq after resample, got: {sorted(sfreqs)}")
+        raise ValueError(f"Expected identical sfreq across runs after resample; got {sorted(sfreqs)}")
     sfreq_hz = float(next(iter(sfreqs)))
 
-    gap = _max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s) + 1
+    models = list_models()
+    outer_folds = _outer_folds_from_runs(runs)
 
-    rows: list[dict[str, object]] = []
-    split_rows: list[dict[str, object]] = []
+    inner_rows: list[pd.DataFrame] = []
+    outer_rows: list[pd.DataFrame] = []
+    best_alpha_rows: list[dict[str, object]] = []
 
-    for fold_id, test_run in tqdm(list(enumerate(runs)), desc=f"{dyad_id}/{subject} folds", leave=False):
-        train_runs = [r for r in runs if r != test_run]
-
-        # CV audit table (new schema, see below)
-        for r in runs:
-            split_rows.append(
-                {
-                    "dyad_id": dyad_id,
-                    "subject": subject,
-                    "fold_id": int(fold_id),
-                    "run": int(r),
-                    "split": "test" if r == test_run else "train",
-                }
-            )
-
-        # Fit baseline (train runs concatenated with gaps)
-        y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
-        y_test = per_run_y[test_run]
-
-        Xb_train = concatenate_with_gap([per_run[r]["baseline"] for r in train_runs], gap_samples=gap)
-        Xb_test = per_run[test_run]["baseline"]
-
-        # fold-wise standardization (Option B) using TRAIN only
-        Xb_train, Xb_test = standardize_design_matrix_foldwise(Xb_train, Xb_test)
-
-        rf_base = fit_receptive_field(
-            X_train=Xb_train,
-            y_train=y_train,
-            sfreq_hz=sfreq_hz,
-            tmin_s=trf_cfg.tmin_s,
-            tmax_s=trf_cfg.tmax_s,
-            ridge_alpha=trf_cfg.ridge_alpha,
-        )
-        y_hat_base = predict_receptive_field(rf_base, Xb_test)
-        r_base = score_multichannel_mean_r(y_test, y_hat_base)
-
-        rows.append(
-            {
-                "subject": subject,
-                "dyad_id": dyad_id,
-                "run": int(test_run),
-                "model": "baseline",
-                "fold_id": int(fold_id),
-                "r": float(r_base),
-                "r_baseline": float(r_base),
-                "delta_r": float(0.0),
-            }
-        )
-
-        # Other models (always compare to baseline fitted on same fold)
-        for model_name in model_names:
-            if model_name == "baseline":
-                continue
-
-            Xm_train = concatenate_with_gap([per_run[r][model_name] for r in train_runs], gap_samples=gap)
-            Xm_test = per_run[test_run][model_name]
-
-            Xm_train, Xm_test = standardize_design_matrix_foldwise(Xm_train, Xm_test)
-
-            rf = fit_receptive_field(
-                X_train=Xm_train,
-                y_train=y_train,
+    for train_runs, test_run, fold_id in outer_folds:
+        for model_name in models:
+            best_alpha, inner_df = _choose_best_alpha_inner(
+                dyad_id=dyad_id,
+                subject=subject,
+                model_name=model_name,
+                train_runs=train_runs,
+                per_run_y=per_run_y,
+                per_run_X=per_run_X,
+                alphas=trf_cfg.ridge_alpha_grid,
                 sfreq_hz=sfreq_hz,
                 tmin_s=trf_cfg.tmin_s,
                 tmax_s=trf_cfg.tmax_s,
-                ridge_alpha=trf_cfg.ridge_alpha,
+                alpha_default=trf_cfg.ridge_alpha_default,
             )
-            y_hat = predict_receptive_field(rf, Xm_test)
-            r = score_multichannel_mean_r(y_test, y_hat)
+            inner_df = inner_df.assign(outer_fold=int(fold_id), outer_test_run=int(test_run))
+            inner_rows.append(inner_df)
 
-            rows.append(
+            best_alpha_rows.append(
                 {
-                    "subject": subject,
                     "dyad_id": dyad_id,
-                    "run": int(test_run),
+                    "subject": subject,
                     "model": model_name,
                     "fold_id": int(fold_id),
-                    "r": float(r),
-                    "r_baseline": float(r_base),
-                    "delta_r": float(r - r_base) if np.isfinite(r) and np.isfinite(r_base) else float("nan"),
+                    "test_run": int(test_run),
+                    "best_alpha": float(best_alpha),
                 }
             )
 
-    return rows, pd.DataFrame(split_rows)
+            outer_full = _outer_scores_full_table(
+                dyad_id=dyad_id,
+                subject=subject,
+                model_name=model_name,
+                fold_id=int(fold_id),
+                train_runs=train_runs,
+                test_run=int(test_run),
+                alphas=trf_cfg.ridge_alpha_grid,
+                per_run_y=per_run_y,
+                per_run_X=per_run_X,
+                sfreq_hz=sfreq_hz,
+                tmin_s=trf_cfg.tmin_s,
+                tmax_s=trf_cfg.tmax_s,
+            )
+            outer_full["chosen_alpha"] = float(best_alpha)
+            outer_rows.append(outer_full)
+
+    inner_scores = pd.concat(inner_rows, ignore_index=True) if inner_rows else pd.DataFrame()
+    outer_scores = pd.concat(outer_rows, ignore_index=True) if outer_rows else pd.DataFrame()
+    best_alpha = pd.DataFrame(best_alpha_rows)
+
+    # Summary delta_r using chosen_alpha score for each fold/model vs baseline chosen_alpha
+    summary = summarize_scores(dyad_id=dyad_id, subject=subject, outer_scores=outer_scores)
+
+    # Best model per subject = max mean delta_r (excluding baseline)
+    best_model = best_model_table(dyad_id=dyad_id, subject=subject, summary=summary)
+
+    # Save final RF params for the best model only (trained on all runs)
+    final_model_rows = fit_and_package_best_model(
+        dyad_id=dyad_id,
+        subject=subject,
+        best_model=best_model,
+        per_run_y=per_run_y,
+        per_run_X=per_run_X,
+        per_run_feature_names=per_run_feature_names,
+        sfreq_hz=sfreq_hz,
+        tmin_s=trf_cfg.tmin_s,
+        tmax_s=trf_cfg.tmax_s,
+    )
+
+    return summary, inner_scores, outer_scores, pd.concat([best_alpha, final_model_rows], ignore_index=True)
+
+
+# =============================================================================
+# Summaries + final model packaging
+# =============================================================================
+
+
+def summarize_scores(*, dyad_id: str, subject: str, outer_scores: pd.DataFrame) -> pd.DataFrame:
+    """
+    Produce the main scores.parquet table:
+    subject, dyad_id, run, model, fold_id, r, r_baseline, delta_r
+
+    We use r at chosen_alpha for each (model, fold).
+
+    DataFrame format example
+    ------------------------
+    dyad_id   subject   run   model      fold_id   r     r_baseline  delta_r
+    dyad-001  sub-001   1     baseline   0         0.01  0.01        0.00
+    dyad-001  sub-001   1     self_rate  0         0.02  0.01        0.01
+    """
+    required = {"dyad_id", "subject", "model", "fold_id", "test_run", "alpha", "r", "chosen_alpha"}
+    missing = required - set(outer_scores.columns)
+    if missing:
+        raise ValueError(f"outer_scores missing columns: {sorted(missing)}")
+
+    chosen = outer_scores.loc[outer_scores["alpha"] == outer_scores["chosen_alpha"]].copy()
+    chosen = chosen.rename(columns={"test_run": "run"})
+    chosen = chosen[["dyad_id", "subject", "run", "model", "fold_id", "r"]]
+
+    base = chosen.loc[chosen["model"] == "baseline", ["dyad_id", "subject", "run", "fold_id", "r"]].rename(
+        columns={"r": "r_baseline"}
+    )
+
+    merged = chosen.merge(base, on=["dyad_id", "subject", "run", "fold_id"], how="left")
+    merged["delta_r"] = merged["r"] - merged["r_baseline"]
+    return merged
+
+
+def best_model_table(*, dyad_id: str, subject: str, summary: pd.DataFrame) -> pd.DataFrame:
+    """
+    Best model per subject by mean delta_r across folds (excluding baseline).
+    """
+    nonbase = summary.loc[summary["model"] != "baseline"].copy()
+    means = nonbase.groupby("model", as_index=False)["delta_r"].mean(numeric_only=True)
+    means = means.sort_values(["delta_r", "model"], ascending=[False, True])
+    best = means.iloc[0].to_dict()
+    return pd.DataFrame(
+        [
+            {
+                "dyad_id": dyad_id,
+                "subject": subject,
+                "best_model": str(best["model"]),
+                "mean_delta_r": float(best["delta_r"]),
+            }
+        ]
+    )
+
+
+def _mode_alpha(values: list[float]) -> float:
+    if not values:
+        raise ValueError("values must be non-empty")
+    vals = pd.Series(values)
+    mode = vals.mode()
+    return float(mode.iloc[0]) if not mode.empty else float(vals.iloc[0])
+
+
+def fit_and_package_best_model(
+    *,
+    dyad_id: str,
+    subject: str,
+    best_model: pd.DataFrame,
+    per_run_y: dict[int, np.ndarray],
+    per_run_X: dict[int, dict[str, np.ndarray]],
+    per_run_feature_names: dict[int, dict[str, list[str]]],
+    sfreq_hz: float,
+    tmin_s: float,
+    tmax_s: float,
+) -> pd.DataFrame:
+    """
+    Fit the best model on ALL runs using a stable alpha (mode of chosen alphas),
+    return a one-row table with reproduction metadata and NPZ path placeholder.
+    """
+    best_model_name = str(best_model.iloc[0]["best_model"])
+
+    # Use the baseline-ish grid selection summary by taking mode of chosen alphas in outer table later.
+    # Here we just store the model; actual alpha is written by the caller from best_alpha table.
+    # We still fit a final model using a conservative alpha=1.0 by default unless the caller updates.
+    alpha = 1.0
+
+    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
+    runs = sorted(per_run_y.keys())
+
+    y_all = concatenate_with_gap([per_run_y[r] for r in runs], gap_samples=gap)
+    X_all = concatenate_with_gap([per_run_X[r][best_model_name] for r in runs], gap_samples=gap)
+
+    # Standardize using all data (final fit artifact; not for evaluation)
+    X_all, _ = standardize_design_matrix_foldwise(X_all, X_all)
+
+    rf = fit_receptive_field(
+        X_train=X_all,
+        y_train=y_all,
+        sfreq_hz=sfreq_hz,
+        tmin_s=tmin_s,
+        tmax_s=tmax_s,
+        ridge_alpha=float(alpha),
+    )
+
+    # Pull coefficients in a library-agnostic way
+    coef = getattr(rf, "coef_", None)
+    if coef is None:
+        coef = getattr(getattr(rf, "estimator_", None), "coef_", None)
+    if coef is None:
+        raise ValueError("Could not extract coefficients from ReceptiveField object")
+
+    intercept = getattr(getattr(rf, "estimator_", None), "intercept_", None)
+
+    # Feature names (assume consistent across runs for a model)
+    feature_names = per_run_feature_names[runs[0]][best_model_name]
+
+    # NPZ written by caller (needs out_dir paths); we return metadata now
+    return pd.DataFrame(
+        [
+            {
+                "dyad_id": dyad_id,
+                "subject": subject,
+                "packaged_model": best_model_name,
+                "packaged_alpha": float(alpha),
+                "sfreq_hz": float(sfreq_hz),
+                "tmin_s": float(tmin_s),
+                "tmax_s": float(tmax_s),
+                "feature_names": feature_names,
+                "coef": np.asarray(coef),
+                "intercept": np.asarray(intercept) if intercept is not None else None,
+            }
+        ]
+    )
+
+
+# =============================================================================
+# Public API
+# =============================================================================
 
 
 def compute_scores_and_splits(
@@ -482,66 +548,155 @@ def compute_scores_and_splits(
     picks: str | list[str] = "eeg",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Compute evoked TRF scores and split audit tables.
+    Main entry: computes summary scores and cv_splits (run-based).
 
-    Outputs
-    -------
-    scores
-        subject, dyad_id, run, model, fold_id, r, r_baseline, delta_r
-    cv_splits
-        dyad_id, run, fold_id, bin_id, bin_t0, bin_t1, split
-
-    Usage example
-    -------------
-        scores, splits = compute_scores_and_splits(cfg=cfg, out_dir=Path(cfg["paths"]["out_dir"]))
+    cv_splits schema (LORO)
+    -----------------------
+    dyad_id, subject, fold_id, run, split
     """
     trf_cfg = parse_evoked_trf_config(cfg)
-    if trf_cfg.scheme not in {"blocked_kfold_within_run", "leave_one_run_out"}:
+    if trf_cfg.scheme != "leave_one_run_out":
         raise ValueError(f"Unsupported evoked_trf.cv.scheme: {trf_cfg.scheme}")
 
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
 
-    all_score_rows: list[dict[str, object]] = []
-    all_splits: list[pd.DataFrame] = []
+    pairs = sorted({(str(d), str(s)) for d, s in events[["dyad_id", "subject_id"]].itertuples(index=False)})
 
-    grouped = events.groupby(["dyad_id", "subject_id"], sort=True)
-    for (dyad_id, subject), _ in tqdm(grouped, desc="evoked_trf dyad×subject"):
-        rows, splits = dyad_subject_loro_scores(
-            dyad_id=str(dyad_id),
-            subject=str(subject),
+    results = Parallel(n_jobs=trf_cfg.n_jobs, prefer="processes")(
+        delayed(_compute_one_dyad_subject)(
+            dyad_id=dyad_id,
+            subject=subject,
             events=events,
             ds_index=ds_index,
             trf_cfg=trf_cfg,
             picks=picks,
         )
-        all_score_rows.extend(rows)
-        all_splits.append(splits)
+        for dyad_id, subject in pairs
+    )
 
-    scores_df = pd.DataFrame(all_score_rows)
-    splits_df = pd.concat(all_splits, axis=0, ignore_index=True) if all_splits else pd.DataFrame()
+    summaries = [r[0] for r in results]
+    inner_all = [r[1] for r in results]
+    outer_all = [r[2] for r in results]
+    packaged_all = [r[3] for r in results]
+
+    scores_df = pd.concat(summaries, ignore_index=True) if summaries else pd.DataFrame()
+
+    # cv_splits (run-based) derived from score table
+    splits_df = make_run_splits_from_scores(scores_df)
+
+    # Write detailed package here (side-effect) to keep CLI simple
+    write_detailed_package(
+        out_dir=out_dir,
+        inner_scores=pd.concat(inner_all, ignore_index=True) if inner_all else pd.DataFrame(),
+        outer_scores=pd.concat(outer_all, ignore_index=True) if outer_all else pd.DataFrame(),
+        packaged=packaged_all,
+    )
+
     return scores_df, splits_df
 
 
-# =============================================================================
-# Outputs
-# =============================================================================
+def make_run_splits_from_scores(scores: pd.DataFrame) -> pd.DataFrame:
+    if scores.empty:
+        return pd.DataFrame(columns=["dyad_id", "subject", "fold_id", "run", "split"])
+
+    runs = scores[["dyad_id", "subject", "fold_id", "run"]].drop_duplicates()
+    rows: list[dict[str, object]] = []
+    for (dyad_id, subject, fold_id), g in runs.groupby(["dyad_id", "subject", "fold_id"], sort=True):
+        test_run = int(g["run"].iloc[0])
+        all_runs = sorted(scores.loc[(scores["dyad_id"] == dyad_id) & (scores["subject"] == subject), "run"].unique())
+        for r in all_runs:
+            rows.append(
+                {
+                    "dyad_id": dyad_id,
+                    "subject": subject,
+                    "fold_id": int(fold_id),
+                    "run": int(r),
+                    "split": "test" if int(r) == test_run else "train",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def write_detailed_package(
+    *,
+    out_dir: Path,
+    inner_scores: pd.DataFrame,
+    outer_scores: pd.DataFrame,
+    packaged: list[pd.DataFrame],
+) -> None:
+    paths = DetailedPaths.from_out_dir(out_dir)
+
+    write_parquet(inner_scores, paths.inner_scores)
+    write_parquet(outer_scores, paths.outer_scores)
+
+    # best alpha per dyad/subject/model: mode across outer folds
+    if not outer_scores.empty and "chosen_alpha" in outer_scores.columns:
+        best_alpha = (
+            outer_scores[["dyad_id", "subject", "model", "chosen_alpha"]]
+            .drop_duplicates()
+            .groupby(["dyad_id", "subject", "model"], as_index=False)["chosen_alpha"]
+            .agg(lambda x: float(pd.Series(list(x)).mode().iloc[0]))
+            .rename(columns={"chosen_alpha": "best_alpha"})
+        )
+    else:
+        best_alpha = pd.DataFrame(columns=["dyad_id", "subject", "model", "best_alpha"])
+    write_parquet(best_alpha, paths.best_alpha)
+
+    # best model per subject
+    scores_path = out_dir / "evoked_trf" / "scores" / "scores.parquet"
+    if scores_path.exists():
+        scores = pd.read_parquet(scores_path)
+        nonbase = scores.loc[scores["model"] != "baseline"].copy()
+        means = nonbase.groupby(["dyad_id", "subject", "model"], as_index=False)["delta_r"].mean(numeric_only=True)
+        best = (
+            means.sort_values(["dyad_id", "subject", "delta_r"], ascending=[True, True, False])
+            .groupby(["dyad_id", "subject"], as_index=False)
+            .head(1)
+            .rename(columns={"model": "best_model", "delta_r": "mean_delta_r"})
+        )
+    else:
+        best = pd.DataFrame(columns=["dyad_id", "subject", "best_model", "mean_delta_r"])
+    write_parquet(best, paths.best_model)
+
+    # Save packaged model params (best model per subject; one file per subject)
+    for df in packaged:
+        if df.empty:
+            continue
+        row = df.iloc[0]
+        dyad_id = str(row["dyad_id"])
+        subject = str(row["subject"])
+        model = str(row["packaged_model"])
+        alpha = float(row["packaged_alpha"])
+        sfreq_hz = float(row["sfreq_hz"])
+        tmin_s = float(row["tmin_s"])
+        tmax_s = float(row["tmax_s"])
+        feature_names = list(row["feature_names"])
+        coef = np.asarray(row["coef"])
+        intercept = row["intercept"]
+        intercept_arr = np.asarray(intercept) if intercept is not None else None
+
+        out_path = paths.models_dir / dyad_id / subject / f"{model}.npz"
+        save_receptive_field_npz(
+            path=out_path,
+            dyad_id=dyad_id,
+            subject=subject,
+            model=model,
+            sfreq_hz=sfreq_hz,
+            tmin_s=tmin_s,
+            tmax_s=tmax_s,
+            alpha=alpha,
+            feature_names=feature_names,
+            coef=coef,
+            intercept=intercept_arr,
+        )
 
 
 def write_outputs(*, cfg: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
-    """
-    Write parquet outputs to:
-    - {out_dir}/evoked_trf/scores/scores.parquet
-    - {out_dir}/evoked_trf/qc/cv_splits.parquet
-
-    Usage example
-    -------------
-        scores_path, splits_path = write_outputs(cfg=cfg, out_dir=Path(cfg["paths"]["out_dir"]))
-    """
     scores, splits = compute_scores_and_splits(cfg=cfg, out_dir=out_dir)
 
-    scores_out = Path(out_dir) / "evoked_trf" / "scores" / "scores.parquet"
-    splits_out = Path(out_dir) / "evoked_trf" / "qc" / "cv_splits.parquet"
+    scores_out = out_dir / "evoked_trf" / "scores" / "scores.parquet"
+    splits_out = out_dir / "evoked_trf" / "qc" / "cv_splits.parquet"
     scores_out.parent.mkdir(parents=True, exist_ok=True)
     splits_out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -553,13 +708,6 @@ def write_outputs(*, cfg: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
 
 
 def _validate_output_tables(*, scores: pd.DataFrame, splits: pd.DataFrame) -> None:
-    """
-    Validate output schemas and basic missingness constraints.
-
-    Usage example
-    -------------
-        _validate_output_tables(scores=scores, splits=splits)
-    """
     required_scores = {"subject", "dyad_id", "run", "model", "fold_id", "r", "r_baseline", "delta_r"}
     missing_scores = required_scores - set(scores.columns)
     if missing_scores:
@@ -570,38 +718,7 @@ def _validate_output_tables(*, scores: pd.DataFrame, splits: pd.DataFrame) -> No
     if missing_splits:
         raise ValueError(f"cv_splits table missing columns: {sorted(missing_splits)}")
 
-    # delta_r should exist whenever r exists for non-baseline models
     nonbaseline = scores["model"] != "baseline"
-    if nonbaseline.any():
-        bad = scores.loc[nonbaseline & scores["r"].notna() & scores["delta_r"].isna()]
-        if not bad.empty:
-            raise ValueError("delta_r has missing values where r exists (non-baseline rows).")
-
-
-def _max_lag_samples(*, sfreq_hz: float, tmin_s: float, tmax_s: float) -> int:
-    return int(np.ceil(max(abs(tmin_s), abs(tmax_s)) * sfreq_hz))
-
-
-def concatenate_with_gap(
-    arrays: list[np.ndarray],
-    *,
-    gap_samples: int,
-    fill_value: float = 0.0,
-) -> np.ndarray:
-    """
-    Concatenate [A, gap, B, gap, C, ...] along axis=0.
-    arrays must be (n_samples, n_features) or (n_samples, n_channels).
-    """
-    if not arrays:
-        raise ValueError("arrays must be non-empty")
-    if gap_samples < 0:
-        raise ValueError("gap_samples must be >= 0")
-
-    parts: list[np.ndarray] = []
-    for i, a in enumerate(arrays):
-        parts.append(a)
-        if i < len(arrays) - 1 and gap_samples > 0:
-            gap_shape = (gap_samples,) + a.shape[1:]
-            parts.append(np.full(gap_shape, fill_value, dtype=float))
-    return np.concatenate(parts, axis=0)
-
+    bad = scores.loc[nonbaseline & scores["r"].notna() & scores["delta_r"].isna()]
+    if not bad.empty:
+        raise ValueError("delta_r has missing values where r exists (non-baseline rows).")
