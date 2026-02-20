@@ -85,16 +85,15 @@ evoked_trf:
 
   lags_s:
     tmin: -1.0
-    tmax: 0.5
+    tmax: 0.0
 
   cv:
     scheme: "leave_one_run_out"
     k_folds: 5
     blocked_by: "time_bins"
     time_bin_s: 60.0
-  evoked_trf:
-    ridge_alpha_grid: [ 0.1, 1.0, 10.0, 100.0, 1000.0 ]
-    n_jobs: 5
+  ridge_alpha_grid: [0.01, 100.0, 100000.0]
+  n_jobs: 1
 
 # ============================================================
 # INDUCED TRF (Hilbert-based)

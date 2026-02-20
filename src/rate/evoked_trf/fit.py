@@ -10,6 +10,15 @@ import pandas as pd
 from rate.evoked_trf.spec import ModelSpec, RegressorSpec, get_event_times_and_amps
 
 
+@dataclass
+class FoldData:
+    X_train: np.ndarray
+    y_train: np.ndarray
+    X_test: np.ndarray
+    y_test: np.ndarray
+    feature_names: list[str]
+
+
 @dataclass(frozen=True)
 class EegRunData:
     """
@@ -33,6 +42,38 @@ class EegRunData:
     y: np.ndarray
     sfreq_hz: float
     times_s: np.ndarray
+
+
+def prepare_fold_data(
+    *,
+    events_df: pd.DataFrame,
+    model_spec,
+    train_runs: list[int],
+    test_run: int,
+):
+    """
+    Build and standardize train/test arrays for one fold.
+
+    No alpha here.
+    No RF fitting here.
+    """
+
+    # Build full design matrix once
+    X, y = build_design_matrix(events_df, model_spec)
+
+    train_mask = events_df["run"].isin(train_runs)
+    test_mask = events_df["run"] == test_run
+
+    X_train = X[train_mask]
+    X_test = X[test_mask]
+    y_train = y[train_mask]
+    y_test = y[test_mask]
+
+    scaler = StandardScaler()
+    X_train_std = scaler.fit_transform(X_train)
+    X_test_std = scaler.transform(X_test)
+
+    return X_train_std, y_train, X_test_std, y_test
 
 
 def load_eeg_run(

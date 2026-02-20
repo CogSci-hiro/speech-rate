@@ -28,6 +28,8 @@ import rate.cli.commands.validate_config as cmd_validate_config
 import rate.cli.commands.write_manifest as cmd_write_manifest
 import rate.cli.commands.resample_eeg as cmd_resample_eeg
 import rate.cli.commands.evoked_trf_scores as cmd_evoked_trf_scores
+import rate.cli.commands.evoked_trf_subject as cmd_evoked_trf_subject
+import rate.cli.commands.evoked_trf_aggregate as cmd_evoked_trf_aggregate
 
 LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
 LOGGER = logging.getLogger(__name__)
@@ -39,6 +41,8 @@ _COMMANDS = {
     "events-table": cmd_events_table,
     "resample-eeg": cmd_resample_eeg,
     "evoked-trf-scores": cmd_evoked_trf_scores,
+    "evoked-trf-subject": cmd_evoked_trf_subject,
+    "evoked-trf-aggregate": cmd_evoked_trf_aggregate,
     "clean": cmd_clean,
     "run-tests": cmd_run_tests,
 }

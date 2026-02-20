@@ -33,6 +33,7 @@ def register_subparser(subparsers) -> ArgumentParser:
 
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     """Execute evoked TRF scoring and write parquet outputs."""
+
     if config is None:
         try:
             resolved = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))

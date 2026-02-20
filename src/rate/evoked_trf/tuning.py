@@ -87,16 +87,20 @@ def select_alpha_nested_loro(
     gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
 
     rows: list[dict[str, object]] = []
-    for alpha in alphas:
-        for inner_fold_id, (train_runs, test_run) in enumerate(inner_folds):
-            y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
-            y_test = per_run_y[test_run]
 
-            X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
-            X_test = per_run_X[test_run][model_name]
+    for inner_fold_id, (train_runs, test_run) in enumerate(inner_folds):
 
-            X_train, X_test = standardize_design_matrix_foldwise(X_train, X_test)
+        # 🔹 PREPARE FOLD ONCE
+        y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
+        y_test = per_run_y[test_run]
 
+        X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
+        X_test = per_run_X[test_run][model_name]
+
+        X_train, X_test = standardize_design_matrix_foldwise(X_train, X_test)
+
+        # 🔹 LOOP ALPHAS ONLY FITTING
+        for alpha in alphas:
             rf = fit_receptive_field(
                 X_train=X_train,
                 y_train=y_train,

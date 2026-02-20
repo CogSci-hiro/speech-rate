@@ -1,11 +1,11 @@
 import logging
+import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from joblib import Parallel, delayed
 
 from rate.evoked_trf.fit import (
     build_design_matrix,
@@ -39,7 +39,6 @@ class EvokedTrfConfig:
     scheme: str
     ridge_alpha_grid: list[float]
     ridge_alpha_default: float
-    n_jobs: int
 
 
 def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
@@ -59,7 +58,6 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
         scheme=scheme,
         ridge_alpha_grid=grid,
         ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
-        n_jobs=int(ev.get("n_jobs", 1)),
     )
 
 
@@ -70,7 +68,7 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
 
 def load_input_tables(out_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     events_path = out_dir / "events" / "events.parquet"
-    ds_index_path = out_dir / "dataset" / "index.parquet"
+    ds_index_path = out_dir / "dataset" / "index_resampled.parquet"
     return pd.read_parquet(events_path), pd.read_parquet(ds_index_path)
 
 
@@ -153,28 +151,17 @@ def _outer_folds_from_runs(runs: list[int]) -> list[tuple[list[int], int, int]]:
     return folds
 
 
-def _fit_score_for_alpha(
+def _score_alpha_from_prepared(
     *,
-    model_name: str,
     alpha: float,
-    train_runs: list[int],
-    test_run: int,
-    per_run_y: dict[int, np.ndarray],
-    per_run_X: dict[int, dict[str, np.ndarray]],
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
     sfreq_hz: float,
     tmin_s: float,
     tmax_s: float,
 ) -> float:
-    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
-
-    y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
-    y_test = per_run_y[test_run]
-
-    X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
-    X_test = per_run_X[test_run][model_name]
-
-    X_train, X_test = standardize_design_matrix_foldwise(X_train, X_test)
-
     rf = fit_receptive_field(
         X_train=X_train,
         y_train=y_train,
@@ -203,18 +190,31 @@ def _outer_scores_full_table(
     tmax_s: float,
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
+
+    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
+
+    # 🔹 PREPARE FOLD ONCE
+    y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
+    y_test = per_run_y[test_run]
+
+    X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
+    X_test = per_run_X[test_run][model_name]
+
+    X_train, X_test = standardize_design_matrix_foldwise(X_train, X_test)
+
+    # 🔹 LOOP ONLY ALPHA FITS
     for alpha in alphas:
-        r = _fit_score_for_alpha(
-            model_name=model_name,
+        r = _score_alpha_from_prepared(
             alpha=float(alpha),
-            train_runs=train_runs,
-            test_run=test_run,
-            per_run_y=per_run_y,
-            per_run_X=per_run_X,
+            X_train=X_train,
+            y_train=y_train,
+            X_test=X_test,
+            y_test=y_test,
             sfreq_hz=sfreq_hz,
             tmin_s=tmin_s,
             tmax_s=tmax_s,
         )
+
         rows.append(
             {
                 "dyad_id": dyad_id,
@@ -226,6 +226,7 @@ def _outer_scores_full_table(
                 "r": float(r),
             }
         )
+
     return pd.DataFrame(rows)
 
 
@@ -289,13 +290,18 @@ def _compute_one_dyad_subject(
     trf_cfg: EvokedTrfConfig,
     picks: str | list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    dyad_norm = str(dyad_id).strip()
+    subject_norm = str(subject).strip()
     ev_subj = events.loc[
-        (events["dyad_id"].astype(str) == dyad_id) & (events["subject_id"].astype(str) == subject)
+        (events["dyad_id"].astype(str).str.strip() == dyad_norm)
+        & (events["subject_id"].astype(str).str.strip() == subject_norm)
     ].copy()
 
     runs = sorted(ev_subj["run"].astype(int).unique().tolist())
     if len(runs) < 2:
-        raise ValueError(f"leave_one_run_out requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}")
+        raise ValueError(
+            f"leave_one_run_out requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}"
+        )
 
     per_run_y: dict[int, np.ndarray] = {}
     per_run_X: dict[int, dict[str, np.ndarray]] = {}
@@ -513,6 +519,15 @@ def fit_and_package_best_model(
         raise ValueError("Could not extract coefficients from ReceptiveField object")
 
     intercept = getattr(getattr(rf, "estimator_", None), "intercept_", None)
+    delays = getattr(rf, "delays_", None)
+    if delays is None:
+        lags_samples = np.arange(
+            int(np.floor(float(tmin_s) * float(sfreq_hz))),
+            int(np.ceil(float(tmax_s) * float(sfreq_hz))) + 1,
+        )
+        lags_s = lags_samples / float(sfreq_hz)
+    else:
+        lags_s = np.asarray(delays, dtype=float) / float(sfreq_hz)
 
     # Feature names (assume consistent across runs for a model)
     feature_names = per_run_feature_names[runs[0]][best_model_name]
@@ -531,6 +546,8 @@ def fit_and_package_best_model(
                 "feature_names": feature_names,
                 "coef": np.asarray(coef),
                 "intercept": np.asarray(intercept) if intercept is not None else None,
+                "lags_s": np.asarray(lags_s, dtype=float),
+                "rf_model": rf,
             }
         ]
     )
@@ -562,9 +579,9 @@ def compute_scores_and_splits(
     events = validate_events_table(events)
 
     pairs = sorted({(str(d), str(s)) for d, s in events[["dyad_id", "subject_id"]].itertuples(index=False)})
-
-    results = Parallel(n_jobs=trf_cfg.n_jobs, prefer="processes")(
-        delayed(_compute_one_dyad_subject)(
+    results = []
+    for dyad_id, subject in pairs:
+        result = _compute_one_dyad_subject(
             dyad_id=dyad_id,
             subject=subject,
             events=events,
@@ -572,8 +589,7 @@ def compute_scores_and_splits(
             trf_cfg=trf_cfg,
             picks=picks,
         )
-        for dyad_id, subject in pairs
-    )
+        results.append(result)
 
     summaries = [r[0] for r in results]
     inner_all = [r[1] for r in results]
@@ -594,6 +610,148 @@ def compute_scores_and_splits(
     )
 
     return scores_df, splits_df
+
+
+def compute_subject_scores(
+    *,
+    cfg: dict[str, Any],
+    out_dir: Path,
+    dyad_id: str,
+    subject: str,
+    picks: str | list[str] = "eeg",
+) -> pd.DataFrame:
+    summary, _, _, _ = _compute_subject_artifacts(
+        cfg=cfg,
+        out_dir=out_dir,
+        dyad_id=dyad_id,
+        subject=subject,
+        picks=picks,
+    )
+    return summary
+
+
+def _compute_subject_artifacts(
+    *,
+    cfg: dict[str, Any],
+    out_dir: Path,
+    dyad_id: str,
+    subject: str,
+    picks: str | list[str] = "eeg",
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    trf_cfg = parse_evoked_trf_config(cfg)
+    if trf_cfg.scheme != "leave_one_run_out":
+        raise ValueError(f"Unsupported evoked_trf.cv.scheme: {trf_cfg.scheme}")
+
+    events, ds_index = load_input_tables(out_dir)
+    events = validate_events_table(events)
+
+    summary, inner_scores, outer_scores, packaged = _compute_one_dyad_subject(
+        dyad_id=str(dyad_id),
+        subject=str(subject),
+        events=events,
+        ds_index=ds_index,
+        trf_cfg=trf_cfg,
+        picks=picks,
+    )
+    return summary, inner_scores, outer_scores, packaged
+
+
+def _subject_scores_output_path(*, out_dir: Path, dyad_id: str, subject: str) -> Path:
+    return out_dir / "evoked_trf" / "subjects" / str(dyad_id) / str(subject) / "scores.parquet"
+
+
+def write_subject_output(
+    *,
+    cfg: dict[str, Any],
+    out_dir: Path,
+    dyad_id: str,
+    subject: str,
+    picks: str | list[str] = "eeg",
+) -> Path:
+    scores, inner_scores, outer_scores, packaged = _compute_subject_artifacts(
+        cfg=cfg,
+        out_dir=out_dir,
+        dyad_id=dyad_id,
+        subject=subject,
+        picks=picks,
+    )
+    _validate_scores_table(scores=scores)
+
+    out_path = _subject_scores_output_path(out_dir=out_dir, dyad_id=dyad_id, subject=subject)
+    subject_dir = out_path.parent
+    subject_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_sorted = scores.sort_values(["dyad_id", "subject", "run", "model", "fold_id"], kind="mergesort").reset_index(
+        drop=True
+    )
+    inner_sorted = (
+        inner_scores.sort_values(["dyad_id", "subject", "model", "outer_fold", "inner_fold", "alpha"], kind="mergesort")
+        .reset_index(drop=True)
+        if not inner_scores.empty
+        else inner_scores
+    )
+    outer_sorted = (
+        outer_scores.sort_values(["dyad_id", "subject", "model", "fold_id", "alpha"], kind="mergesort").reset_index(
+            drop=True
+        )
+        if not outer_scores.empty
+        else outer_scores
+    )
+
+    alpha_grid_scores = outer_sorted.copy()
+
+    summary_sorted.to_parquet(out_path, index=False)
+    summary_sorted.to_parquet(subject_dir / "summary.parquet", index=False)
+    inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
+    outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
+    alpha_grid_scores.to_parquet(subject_dir / "alpha_grid_scores.parquet", index=False)
+
+    packaged_model_rows = (
+        packaged.loc[packaged["packaged_model"].notna()].reset_index(drop=True)
+        if ("packaged_model" in packaged.columns)
+        else pd.DataFrame()
+    )
+    if packaged_model_rows.empty:
+        raise ValueError(
+            f"Missing packaged full-data refit model row for dyad_id={dyad_id}, subject={subject}. "
+            "Cannot write rf_model.pkl/kernels.npy/lags.npy."
+        )
+
+    model_row = packaged_model_rows.iloc[0]
+    kernels = np.asarray(model_row["coef"])
+    lags_s = np.asarray(model_row["lags_s"], dtype=float)
+    rf_model = model_row["rf_model"]
+
+    np.save(subject_dir / "kernels.npy", kernels)
+    np.save(subject_dir / "lags.npy", lags_s)
+    with (subject_dir / "rf_model.pkl").open("wb") as f:
+        pickle.dump(rf_model, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return out_path
+
+
+def aggregate_subject_scores(*, out_dir: Path) -> pd.DataFrame:
+    subjects_root = out_dir / "evoked_trf" / "subjects"
+    subject_paths = sorted(subjects_root.rglob("scores.parquet"))
+    if not subject_paths:
+        raise ValueError(f"No subject score files found under: {subjects_root}")
+
+    frames = [pd.read_parquet(path) for path in subject_paths]
+    scores = pd.concat(frames, ignore_index=True)
+    return scores.sort_values(
+        ["dyad_id", "subject", "run", "model", "fold_id"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
+def write_aggregate_output(*, out_dir: Path) -> Path:
+    scores = aggregate_subject_scores(out_dir=out_dir)
+    _validate_scores_table(scores=scores)
+
+    out_path = out_dir / "evoked_trf" / "scores" / "scores.parquet"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    scores.to_parquet(out_path, index=False)
+    return out_path
 
 
 def make_run_splits_from_scores(scores: pd.DataFrame) -> pd.DataFrame:
@@ -663,7 +821,10 @@ def write_detailed_package(
     for df in packaged:
         if df.empty:
             continue
-        row = df.iloc[0]
+        packaged_rows = df.loc[df["packaged_model"].notna()] if "packaged_model" in df.columns else pd.DataFrame()
+        if packaged_rows.empty:
+            continue
+        row = packaged_rows.iloc[0]
         dyad_id = str(row["dyad_id"])
         subject = str(row["subject"])
         model = str(row["packaged_model"])
@@ -693,6 +854,7 @@ def write_detailed_package(
 
 
 def write_outputs(*, cfg: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
+
     scores, splits = compute_scores_and_splits(cfg=cfg, out_dir=out_dir)
 
     scores_out = out_dir / "evoked_trf" / "scores" / "scores.parquet"
@@ -708,15 +870,19 @@ def write_outputs(*, cfg: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
 
 
 def _validate_output_tables(*, scores: pd.DataFrame, splits: pd.DataFrame) -> None:
-    required_scores = {"subject", "dyad_id", "run", "model", "fold_id", "r", "r_baseline", "delta_r"}
-    missing_scores = required_scores - set(scores.columns)
-    if missing_scores:
-        raise ValueError(f"scores table missing columns: {sorted(missing_scores)}")
+    _validate_scores_table(scores=scores)
 
     required_splits = {"dyad_id", "subject", "fold_id", "run", "split"}
     missing_splits = required_splits - set(splits.columns)
     if missing_splits:
         raise ValueError(f"cv_splits table missing columns: {sorted(missing_splits)}")
+
+
+def _validate_scores_table(*, scores: pd.DataFrame) -> None:
+    required_scores = {"subject", "dyad_id", "run", "model", "fold_id", "r", "r_baseline", "delta_r"}
+    missing_scores = required_scores - set(scores.columns)
+    if missing_scores:
+        raise ValueError(f"scores table missing columns: {sorted(missing_scores)}")
 
     nonbaseline = scores["model"] != "baseline"
     bad = scores.loc[nonbaseline & scores["r"].notna() & scores["delta_r"].isna()]
