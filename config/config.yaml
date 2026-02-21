@@ -81,7 +81,7 @@ events:
 # ============================================================
 
 evoked_trf:
-  downsample_hz: 32.0
+  downsample_hz: 16.0
 
   lags_s:
     tmin: -2.0
@@ -92,10 +92,12 @@ evoked_trf:
     k_folds: 5
     blocked_by: "time_bins"
     time_bin_s: 60.0
+  regularization:
+    type: "laplacian"  # options: ridge | laplacian
   ridge_alpha_grid:
-    min: -1
-    max: 7
-    n_alpha: 100
+    min: 2
+    max: 6
+    n_alpha: 10
   n_jobs: 1
 
 # ============================================================
