@@ -102,11 +102,11 @@ evoked_trf:
     blocked_by: "time_bins"
     time_bin_s: 60.0
   regularization:
-    type: "laplacian"  # options: ridge | laplacian
+    type: "ridge"  # options: ridge | laplacian
   ridge_alpha_grid:
     min: 2
     max: 6
-    n_alpha: 2
+    n_alpha: 4
   n_jobs: 1
 
 # ============================================================
@@ -268,6 +268,10 @@ stats:
 
 reporting:
   alpha: 0.05
+
+  trf:
+    regressors: ["self_rate", "other_rate"]
+    electrodes: ["Fz", "Pz"]
 
   tables_format: "csv"         # csv | parquet
 
