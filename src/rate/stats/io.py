@@ -78,6 +78,22 @@ def load_subject_kernels_outer(
     return KernelOuterLoad(kernels_outer=kernels_outer)
 
 
+def load_subject_lags(
+    out_dir: Path,
+    analysis: str,
+    dyad_id: str,
+    subject_id: str,
+    model: str,
+) -> np.ndarray:
+    """Load lag grid for one subject/model from ``lags.npy``."""
+    model_dir = _subject_model_dir(out_dir, analysis, dyad_id, subject_id, model)
+    lags_path = model_dir / "lags.npy"
+    lags = np.load(lags_path)
+    if lags.ndim != 1:
+        raise ValueError(f"Expected lags.npy to be 1D, got shape={lags.shape} at {lags_path}")
+    return np.asarray(lags, dtype=float)
+
+
 def stack_subject_feature_kernels(
     out_dir: Path,
     analysis: str,

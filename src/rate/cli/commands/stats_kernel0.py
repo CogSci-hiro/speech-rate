@@ -9,6 +9,7 @@ import pandas as pd
 from mne.channels import make_standard_montage
 
 from rate.config import ConfigValidationError, load_and_validate_config
+from rate.stats.io import load_subject_lags
 from rate.stats import ClusterMethod, StatsConfig, run_two_level_kernel0
 from rate.stats.reporting import write_two_level_cluster_result
 
@@ -116,6 +117,13 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         ch_names=ch_names,
         config=stats_config,
     )
+    lags = load_subject_lags(
+        out_dir=out_dir,
+        analysis=args.analysis,
+        dyad_id=str(subject_keys[0][0]),
+        subject_id=str(subject_keys[0][1]),
+        model=args.model,
+    )
 
     write_two_level_cluster_result(
         result=result,
@@ -124,6 +132,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         model=args.model,
         feature_name=args.feature_name,
         feature_index=args.feature_index,
+        lags=lags,
         tables_format=str(cfg.get("reporting", {}).get("tables_format", "parquet")).lower(),
     )
 
