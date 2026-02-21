@@ -55,6 +55,7 @@ def select_alpha_nested_loro(
     sfreq_hz: float,
     tmin_s: float,
     tmax_s: float,
+    regularization_type: str = "ridge",
 ) -> AlphaSelectionResult:
     """
     Choose alpha using inner LORO on the OUTER training runs only.
@@ -108,6 +109,7 @@ def select_alpha_nested_loro(
                 tmin_s=tmin_s,
                 tmax_s=tmax_s,
                 ridge_alpha=float(alpha),
+                regularization_type=regularization_type,
             )
             y_hat = predict_receptive_field(rf, X_test)
             r = score_multichannel_mean_r(y_test, y_hat)

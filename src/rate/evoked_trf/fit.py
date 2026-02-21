@@ -271,9 +271,10 @@ def fit_receptive_field(
     tmin_s: float,
     tmax_s: float,
     ridge_alpha: float,
+    regularization_type: str = "ridge",
 ) -> Any:
     """
-    Fit an MNE ReceptiveField model with ridge regression.
+    Fit an MNE TRF model with configurable regularization.
 
     Parameters
     ----------
@@ -286,7 +287,9 @@ def fit_receptive_field(
     tmin_s, tmax_s
         Lag window in seconds.
     ridge_alpha
-        Ridge penalty strength.
+        Regularization strength (alpha).
+    regularization_type
+        One of {"ridge", "laplacian"}.
 
     Returns
     -------
@@ -314,18 +317,33 @@ def fit_receptive_field(
     if ridge_alpha <= 0:
         raise ValueError("ridge_alpha must be > 0")
 
-    from mne.decoding import ReceptiveField
-    from sklearn.linear_model import Ridge
+    reg = str(regularization_type).strip().lower()
+    if reg not in {"ridge", "laplacian"}:
+        raise ValueError("regularization_type must be 'ridge' or 'laplacian'")
 
-    estimator = Ridge(alpha=float(ridge_alpha), fit_intercept=True)
+    if reg == "ridge":
+        from mne.decoding import ReceptiveField
+        from sklearn.linear_model import Ridge
 
-    rf = ReceptiveField(
-        tmin=float(tmin_s),
-        tmax=float(tmax_s),
-        sfreq=float(sfreq_hz),
-        estimator=estimator,
-        scoring="corrcoef",
-    )
+        estimator = Ridge(alpha=float(ridge_alpha), fit_intercept=True)
+        rf = ReceptiveField(
+            tmin=float(tmin_s),
+            tmax=float(tmax_s),
+            sfreq=float(sfreq_hz),
+            estimator=estimator,
+            scoring="corrcoef",
+        )
+    else:
+        from mne.decoding import TimeDelayingRidge
+
+        rf = TimeDelayingRidge(
+            tmin=float(tmin_s),
+            tmax=float(tmax_s),
+            sfreq=float(sfreq_hz),
+            alpha=float(ridge_alpha),
+            reg_type="laplacian",
+            fit_intercept=True,
+        )
     rf.fit(X_train, y_train)
     return rf
 

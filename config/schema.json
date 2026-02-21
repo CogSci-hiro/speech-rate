@@ -326,7 +326,23 @@
       "additionalProperties": true
     },
     "evoked_trf": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "regularization": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "ridge",
+                "laplacian"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
     },
     "induced_trf": {
       "type": "object"

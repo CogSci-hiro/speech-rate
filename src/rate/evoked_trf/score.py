@@ -36,6 +36,7 @@ class EvokedTrfConfig:
     tmin_s: float
     tmax_s: float
     scheme: str
+    regularization_type: str
     ridge_alpha_grid: list[float]
     ridge_alpha_default: float
 
@@ -44,6 +45,14 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
     ev = cfg["evoked_trf"]
     cv_cfg = ev["cv"]
     scheme = str(cv_cfg.get("scheme", "leave_one_run_out"))
+    reg_cfg = ev.get("regularization", {})
+    if reg_cfg is None:
+        reg_cfg = {}
+    if not isinstance(reg_cfg, dict):
+        raise ValueError("evoked_trf.regularization must be a mapping when provided")
+    regularization_type = str(reg_cfg.get("type", "ridge")).strip().lower()
+    if regularization_type not in {"ridge", "laplacian"}:
+        raise ValueError("evoked_trf.regularization.type must be 'ridge' or 'laplacian'")
 
     grid_cfg = ev.get("ridge_alpha_grid", None)
     if grid_cfg is None:
@@ -66,6 +75,7 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
         tmin_s=float(ev["lags_s"]["tmin"]),
         tmax_s=float(ev["lags_s"]["tmax"]),
         scheme=scheme,
+        regularization_type=regularization_type,
         ridge_alpha_grid=grid,
         ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
     )
@@ -173,6 +183,7 @@ def _score_alpha_from_prepared(
     sfreq_hz: float,
     tmin_s: float,
     tmax_s: float,
+    regularization_type: str,
 ) -> float:
     rf = fit_receptive_field(
         X_train=X_train,
@@ -181,6 +192,7 @@ def _score_alpha_from_prepared(
         tmin_s=tmin_s,
         tmax_s=tmax_s,
         ridge_alpha=float(alpha),
+        regularization_type=regularization_type,
     )
     y_hat = predict_receptive_field(rf, X_test)
     return score_multichannel_mean_r(y_test, y_hat)
@@ -200,6 +212,7 @@ def _outer_scores_full_table(
     sfreq_hz: float,
     tmin_s: float,
     tmax_s: float,
+    regularization_type: str,
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
@@ -225,6 +238,7 @@ def _outer_scores_full_table(
             sfreq_hz=sfreq_hz,
             tmin_s=tmin_s,
             tmax_s=tmax_s,
+            regularization_type=regularization_type,
         )
 
         rows.append(
@@ -255,6 +269,7 @@ def _choose_best_alpha_inner(
     tmin_s: float,
     tmax_s: float,
     alpha_default: float,
+    regularization_type: str,
 ) -> tuple[float, pd.DataFrame]:
     if len(train_runs) < 2:
         df = pd.DataFrame(
@@ -284,6 +299,7 @@ def _choose_best_alpha_inner(
         sfreq_hz=sfreq_hz,
         tmin_s=tmin_s,
         tmax_s=tmax_s,
+        regularization_type=regularization_type,
     )
     return float(res.best_alpha), res.table
 
@@ -332,6 +348,7 @@ def _compute_one_dyad_subject(
                 tmin_s=trf_cfg.tmin_s,
                 tmax_s=trf_cfg.tmax_s,
                 alpha_default=trf_cfg.ridge_alpha_default,
+                regularization_type=trf_cfg.regularization_type,
             )
             inner_df = inner_df.assign(outer_fold=int(fold_id), outer_test_run=int(test_run))
             inner_rows.append(inner_df)
@@ -360,6 +377,7 @@ def _compute_one_dyad_subject(
                 sfreq_hz=sfreq_hz,
                 tmin_s=trf_cfg.tmin_s,
                 tmax_s=trf_cfg.tmax_s,
+                regularization_type=trf_cfg.regularization_type,
             )
             outer_full["chosen_alpha"] = float(best_alpha)
             outer_rows.append(outer_full)
@@ -385,6 +403,7 @@ def _compute_one_dyad_subject(
         sfreq_hz=sfreq_hz,
         tmin_s=trf_cfg.tmin_s,
         tmax_s=trf_cfg.tmax_s,
+        regularization_type=trf_cfg.regularization_type,
     )
 
     return summary, inner_scores, outer_scores, pd.concat([best_alpha, final_model_rows], ignore_index=True)
@@ -519,6 +538,7 @@ def fit_and_package_best_model(
     sfreq_hz: float,
     tmin_s: float,
     tmax_s: float,
+    regularization_type: str,
 ) -> pd.DataFrame:
     """
     Fit the best model on ALL runs using a stable alpha (mode of chosen alphas),
@@ -547,6 +567,7 @@ def fit_and_package_best_model(
         tmin_s=tmin_s,
         tmax_s=tmax_s,
         ridge_alpha=float(alpha),
+        regularization_type=regularization_type,
     )
 
     # Pull coefficients in a library-agnostic way
@@ -727,6 +748,7 @@ def _fit_outer_fold_kernel(
     sfreq_hz: float,
     tmin_s: float,
     tmax_s: float,
+    regularization_type: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
     y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
@@ -739,6 +761,7 @@ def _fit_outer_fold_kernel(
         tmin_s=tmin_s,
         tmax_s=tmax_s,
         ridge_alpha=float(alpha),
+        regularization_type=regularization_type,
     )
     return _extract_rf_coef_and_lags(rf=rf, sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s)
 
@@ -752,6 +775,7 @@ def _fit_full_data_kernel(
     sfreq_hz: float,
     tmin_s: float,
     tmax_s: float,
+    regularization_type: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
     runs = sorted(per_run_y.keys())
@@ -765,6 +789,7 @@ def _fit_full_data_kernel(
         tmin_s=tmin_s,
         tmax_s=tmax_s,
         ridge_alpha=float(alpha),
+        regularization_type=regularization_type,
     )
     return _extract_rf_coef_and_lags(rf=rf, sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s)
 
@@ -951,6 +976,7 @@ def write_subject_output(
                 sfreq_hz=sfreq_hz,
                 tmin_s=trf_cfg.tmin_s,
                 tmax_s=trf_cfg.tmax_s,
+                regularization_type=trf_cfg.regularization_type,
             )
             # kernels_outer.npy axis order: (outer_fold, channel, regressor, lag)
             fold_kernels.append(coef_fold)
@@ -975,6 +1001,7 @@ def write_subject_output(
             sfreq_hz=sfreq_hz,
             tmin_s=trf_cfg.tmin_s,
             tmax_s=trf_cfg.tmax_s,
+            regularization_type=trf_cfg.regularization_type,
         )
         if not np.allclose(np.asarray(fold_lags, dtype=float), np.asarray(lags_full, dtype=float)):
             raise ValueError(f"Refit lag grid mismatch for model={model_name}")
