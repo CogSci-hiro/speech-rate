@@ -39,7 +39,7 @@ def subject_t_to_signed_z(
 
 
 def compute_subject_level_z_maps(
-    feature_kernels: np.ndarray,
+    feature_kernels: np.ndarray | list[np.ndarray],
 ) -> np.ndarray:
     """
     Compute subject-level signed z-maps from outer-fold kernels (two-level stage 1).
@@ -47,8 +47,10 @@ def compute_subject_level_z_maps(
     Parameters
     ----------
     feature_kernels
-        Array of shape (n_subjects, n_folds, n_channels, n_lags)
-        corresponding to one feature's kernels across outer folds.
+        Either:
+        - Array of shape (n_subjects, n_folds, n_channels, n_lags), or
+        - List of per-subject arrays shaped (n_folds, n_channels, n_lags),
+          allowing variable n_folds across subjects.
 
     Returns
     -------
@@ -68,25 +70,41 @@ def compute_subject_level_z_maps(
     -------------
         z_maps = compute_subject_level_z_maps(feature_kernels)
     """
-    if feature_kernels.ndim != 4:
-        raise ValueError(f"Expected ndim=4, got shape={feature_kernels.shape}")
+    if isinstance(feature_kernels, np.ndarray):
+        if feature_kernels.ndim != 4:
+            raise ValueError(f"Expected ndim=4, got shape={feature_kernels.shape}")
+        subject_arrays = [feature_kernels[i] for i in range(feature_kernels.shape[0])]
+    else:
+        subject_arrays = list(feature_kernels)
 
-    n_subjects, n_folds, n_channels, n_lags = feature_kernels.shape
-    if n_folds < 2:
-        raise ValueError("Need at least 2 outer folds to compute subject-level t-values.")
+    if not subject_arrays:
+        raise ValueError("No subject kernel arrays provided.")
 
-    # t-test against zero across folds for each subject/bin
-    mean_beta = feature_kernels.mean(axis=1)  # (subj, ch, lag)
-    std_beta = feature_kernels.std(axis=1, ddof=1)  # (subj, ch, lag)
-    se_beta = std_beta / np.sqrt(float(n_folds))
+    expected_ch_lag: tuple[int, int] | None = None
+    z_maps: list[np.ndarray] = []
+    for i, subj in enumerate(subject_arrays):
+        if subj.ndim != 3:
+            raise ValueError(f"Subject[{i}] expected ndim=3 (fold, ch, lag), got shape={subj.shape}")
+        n_folds, n_channels, n_lags = subj.shape
+        if n_folds < 2:
+            raise ValueError(
+                f"Subject[{i}] has n_folds={n_folds}. Need at least 2 folds for subject-level t-values."
+            )
+        ch_lag = (n_channels, n_lags)
+        if expected_ch_lag is None:
+            expected_ch_lag = ch_lag
+        elif ch_lag != expected_ch_lag:
+            raise ValueError(
+                f"Inconsistent subject geometry at Subject[{i}]: (ch, lag)={ch_lag}, "
+                f"expected={expected_ch_lag}"
+            )
 
-    # Avoid division by zero (if std=0 across folds)
-    se_beta = np.where(se_beta == 0.0, np.nan, se_beta)
+        mean_beta = subj.mean(axis=0)  # (ch, lag)
+        std_beta = subj.std(axis=0, ddof=1)  # (ch, lag)
+        se_beta = std_beta / np.sqrt(float(n_folds))
+        se_beta = np.where(se_beta == 0.0, np.nan, se_beta)
+        t_map = mean_beta / se_beta
+        z_map = subject_t_to_signed_z(t_values=t_map, df=n_folds - 1)
+        z_maps.append(np.nan_to_num(z_map, nan=0.0, posinf=0.0, neginf=0.0))
 
-    t_map = mean_beta / se_beta
-    df = n_folds - 1
-    z_map = subject_t_to_signed_z(t_values=t_map, df=df)
-
-    # Replace NaNs (bins with zero variance across folds) with 0 contribution
-    z_map = np.nan_to_num(z_map, nan=0.0, posinf=0.0, neginf=0.0)
-    return z_map
+    return np.stack(z_maps, axis=0)

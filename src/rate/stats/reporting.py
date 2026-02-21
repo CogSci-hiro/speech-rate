@@ -13,6 +13,7 @@ def write_two_level_cluster_result(
     analysis: str,
     model: str,
     feature_name: str,
+    feature_index: int,
 ) -> Path:
     """
     Write cluster results to disk.
@@ -32,10 +33,23 @@ def write_two_level_cluster_result(
     Usage example
     -------------
         out_path = write_two_level_cluster_result(
-            result, out_dir, analysis="evoked_trf", model="self_rate", feature_name="self_rate"
+            result,
+            out_dir,
+            analysis="evoked_trf",
+            model="self_rate",
+            feature_name="self_rate",
+            feature_index=0,
         )
     """
-    out_path = out_dir / "final" / "kernel_stats" / analysis / model / feature_name
+    out_path = (
+        out_dir
+        / "final"
+        / "kernel_stats"
+        / analysis
+        / model
+        / feature_name
+        / f"feature-{feature_index}"
+    )
     out_path.mkdir(parents=True, exist_ok=True)
 
     np.save(out_path / "t_obs.npy", result.group_cluster.t_obs)

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 import numpy as np
 
@@ -84,7 +84,7 @@ def stack_subject_feature_kernels(
     subject_keys: Sequence[Tuple[str, str]],
     model: str,
     feature_index: int,
-) -> np.ndarray:
+) -> List[np.ndarray]:
     """
     Load and stack kernels for a single feature across subjects.
 
@@ -103,8 +103,9 @@ def stack_subject_feature_kernels(
 
     Returns
     -------
-    np.ndarray
-        Array of shape (n_subjects, n_folds, n_channels, n_lags).
+    list[np.ndarray]
+        Per-subject arrays of shape (n_folds, n_channels, n_lags).
+        The number of folds may vary by subject.
 
     Usage example
     -------------
@@ -118,6 +119,8 @@ def stack_subject_feature_kernels(
         )
     """
     per_subject: List[np.ndarray] = []
+    expected_ch_lag: tuple[int, int] | None = None
+    mismatched_shapes: List[str] = []
     for dyad_id, subject_id in subject_keys:
         load = load_subject_kernels_outer(out_dir, analysis, dyad_id, subject_id, model)
         kernels_outer = load.kernels_outer
@@ -127,7 +130,23 @@ def stack_subject_feature_kernels(
                 f"feature_index={feature_index} out of bounds for n_features={n_features} "
                 f"(subject {dyad_id}/{subject_id}, model={model})"
             )
-        per_subject.append(kernels_outer[:, :, feature_index, :])  # (fold, ch, lag)
+        subj_arr = kernels_outer[:, :, feature_index, :]  # (fold, ch, lag)
+        subj_ch_lag = (subj_arr.shape[1], subj_arr.shape[2])
+        if expected_ch_lag is None:
+            expected_ch_lag = subj_ch_lag
+        elif subj_ch_lag != expected_ch_lag:
+            mismatched_shapes.append(
+                f"{dyad_id}/{subject_id}: (ch, lag)={subj_ch_lag}, expected={expected_ch_lag}"
+            )
+            continue
+        per_subject.append(subj_arr)
 
-    # (subj, fold, ch, lag)
-    return np.stack(per_subject, axis=0)
+    if mismatched_shapes:
+        raise ValueError(
+            "Inconsistent (n_channels, n_lags) across subjects for group stats. "
+            "Fix upstream preprocessing so all subjects share channel/lag geometry. "
+            "Examples: " + "; ".join(mismatched_shapes[:5])
+        )
+    if not per_subject:
+        raise ValueError("No valid subject kernels found for group stats.")
+    return per_subject

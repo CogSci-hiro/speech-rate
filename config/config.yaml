@@ -228,6 +228,32 @@ ddc:
 
 
 # ============================================================
+# STATS (Group-level inference on frozen results)
+# ============================================================
+
+stats:
+
+  kernel_cluster:
+
+    method: "threshold"          # tfce | threshold
+
+    n_permutations: 1000
+    seed: 42
+
+    # Only used if method = threshold
+    threshold_p: 0.001
+
+    # Only used if method = tfce
+    tfce:
+      start: 0.0
+      step: 0.2
+
+    tail: 0                 # -1 | 0 | 1
+
+    adjacency:
+      montage_name: "biosemi64"
+
+# ============================================================
 # REPORTING
 # ============================================================
 
