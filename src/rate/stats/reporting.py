@@ -57,6 +57,14 @@ def write_two_level_cluster_result(
     np.save(out_path / "t_obs.npy", result.group_cluster.t_obs)
     np.save(out_path / "h0.npy", result.group_cluster.h0)
     np.save(out_path / "subject_z_maps.npy", result.subject_z_maps)
+    n_channels = int(result.subject_z_maps.shape[1])
+    n_lags = int(result.subject_z_maps.shape[2])
+    n_tests = n_channels * n_lags
+
+    t_obs_flat = np.asarray(result.group_cluster.t_obs, dtype=float).reshape(-1)
+    if t_obs_flat.size == n_tests:
+        t_obs_map = t_obs_flat.reshape(n_channels, n_lags).T
+        np.save(out_path / "t_obs_map.npy", t_obs_map)
 
     # Save grand-average z-scored TRF as an Evoked list (single evoked entry).
     if lags.ndim != 1 or len(lags) < 1:
@@ -95,10 +103,13 @@ def write_two_level_cluster_result(
     clusters = result.group_cluster.clusters
     pvals = result.group_cluster.cluster_p_values
 
+    cluster_labels_flat = np.zeros(n_tests, dtype=np.int32)
     for i, (clu, p) in enumerate(zip(clusters, pvals)):
         # clu is a tuple of index arrays (because out_type="indices")
         # For flattened tests, it's typically (indices,)
-        idx = clu[0]
+        idx = np.asarray(clu[0], dtype=int)
+        if idx.size > 0:
+            cluster_labels_flat[idx] = int(i) + 1
         rows.append(
             dict(
                 cluster_id=i,
@@ -106,6 +117,7 @@ def write_two_level_cluster_result(
                 n_bins=int(len(idx)),
             )
         )
+    np.save(out_path / "cluster_labels.npy", cluster_labels_flat.reshape(n_channels, n_lags).T)
 
     columns = ["cluster_id", "p_value", "n_bins"]
     if rows:
