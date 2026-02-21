@@ -81,7 +81,7 @@ events:
 # ============================================================
 
 evoked_trf:
-  downsample_hz: 16.0
+  downsample_hz: 32.0
 
   lags_s:
     tmin: -2.0
@@ -94,8 +94,8 @@ evoked_trf:
     time_bin_s: 60.0
   ridge_alpha_grid:
     min: -1
-    max: 6
-    n_alpha: 20
+    max: 7
+    n_alpha: 100
   n_jobs: 1
 
 # ============================================================
