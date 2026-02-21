@@ -124,6 +124,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         model=args.model,
         feature_name=args.feature_name,
         feature_index=args.feature_index,
+        tables_format=str(cfg.get("reporting", {}).get("tables_format", "parquet")).lower(),
     )
 
     LOGGER.info("Two-level kernel stats completed successfully.")

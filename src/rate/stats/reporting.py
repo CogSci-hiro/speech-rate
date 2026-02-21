@@ -14,13 +14,14 @@ def write_two_level_cluster_result(
     model: str,
     feature_name: str,
     feature_index: int,
+    tables_format: str = "parquet",
 ) -> Path:
     """
     Write cluster results to disk.
 
     Outputs
     -------
-    - clusters.parquet
+    - clusters.{csv|parquet}
     - t_obs.npy
     - h0.npy
     - subject_z_maps.npy
@@ -74,6 +75,9 @@ def write_two_level_cluster_result(
         )
 
     df = pd.DataFrame(rows).sort_values("p_value", ascending=True)
-    df.to_parquet(out_path / "clusters.parquet", index=False)
+    if tables_format == "csv":
+        df.to_csv(out_path / "clusters.csv", index=False)
+    else:
+        df.to_parquet(out_path / "clusters.parquet", index=False)
 
     return out_path
