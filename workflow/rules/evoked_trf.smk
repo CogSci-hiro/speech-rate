@@ -31,7 +31,7 @@ rule evoked_trf_subject:
     shell:
         r"""
         set -euo pipefail
-        MNE_TQDM=off PYTHONPATH=src python -u -m rate.cli.main evoked-trf-subject \
+        MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-subject \
             --dyad-id {wildcards.dyad_id} \
             --subject {wildcards.subject} \
             --config config/config.yaml \
@@ -51,7 +51,7 @@ rule evoked_trf_aggregate:
     shell:
         r"""
         set -euo pipefail
-        MNE_TQDM=off PYTHONPATH=src python -u -m rate.cli.main evoked-trf-aggregate \
+        MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-aggregate \
             --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \

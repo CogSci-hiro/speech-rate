@@ -26,6 +26,31 @@ from rate.evoked_trf.utils import (
 LOGGER = logging.getLogger(__name__)
 
 
+class _NoOpProgressBar:
+    def update(self, _n: int = 1) -> None:
+        return
+
+    def close(self) -> None:
+        return
+
+
+def _outer_cv_progress_bar(*, dyad_id: str, subject: str, total: int):
+    if total <= 0:
+        return _NoOpProgressBar()
+    try:
+        from tqdm.auto import tqdm  # type: ignore
+    except Exception:
+        return _NoOpProgressBar()
+    return tqdm(
+        total=int(total),
+        desc=f"outer-cv {dyad_id}/{subject}",
+        unit="model-fold",
+        leave=True,
+        ascii=True,
+        dynamic_ncols=True,
+    )
+
+
 # =============================================================================
 # Config
 # =============================================================================
@@ -342,53 +367,62 @@ def _compute_one_dyad_subject(
     outer_rows: list[pd.DataFrame] = []
     best_alpha_rows: list[dict[str, object]] = []
 
-    for train_runs, test_run, fold_id in outer_folds:
-        for model_name in models:
-            best_alpha, inner_df = _choose_best_alpha_inner(
-                dyad_id=dyad_id,
-                subject=subject,
-                model_name=model_name,
-                train_runs=train_runs,
-                per_run_y=per_run_y,
-                per_run_X=per_run_X,
-                alphas=trf_cfg.ridge_alpha_grid,
-                sfreq_hz=sfreq_hz,
-                tmin_s=trf_cfg.tmin_s,
-                tmax_s=trf_cfg.tmax_s,
-                alpha_default=trf_cfg.ridge_alpha_default,
-                regularization_type=trf_cfg.regularization_type,
-            )
-            inner_df = inner_df.assign(outer_fold=int(fold_id), outer_test_run=int(test_run))
-            inner_rows.append(inner_df)
+    progress = _outer_cv_progress_bar(
+        dyad_id=dyad_id,
+        subject=subject,
+        total=len(outer_folds) * len(models),
+    )
+    try:
+        for train_runs, test_run, fold_id in outer_folds:
+            for model_name in models:
+                best_alpha, inner_df = _choose_best_alpha_inner(
+                    dyad_id=dyad_id,
+                    subject=subject,
+                    model_name=model_name,
+                    train_runs=train_runs,
+                    per_run_y=per_run_y,
+                    per_run_X=per_run_X,
+                    alphas=trf_cfg.ridge_alpha_grid,
+                    sfreq_hz=sfreq_hz,
+                    tmin_s=trf_cfg.tmin_s,
+                    tmax_s=trf_cfg.tmax_s,
+                    alpha_default=trf_cfg.ridge_alpha_default,
+                    regularization_type=trf_cfg.regularization_type,
+                )
+                inner_df = inner_df.assign(outer_fold=int(fold_id), outer_test_run=int(test_run))
+                inner_rows.append(inner_df)
 
-            best_alpha_rows.append(
-                {
-                    "dyad_id": dyad_id,
-                    "subject": subject,
-                    "model": model_name,
-                    "fold_id": int(fold_id),
-                    "test_run": int(test_run),
-                    "best_alpha": float(best_alpha),
-                }
-            )
+                best_alpha_rows.append(
+                    {
+                        "dyad_id": dyad_id,
+                        "subject": subject,
+                        "model": model_name,
+                        "fold_id": int(fold_id),
+                        "test_run": int(test_run),
+                        "best_alpha": float(best_alpha),
+                    }
+                )
 
-            outer_full = _outer_scores_full_table(
-                dyad_id=dyad_id,
-                subject=subject,
-                model_name=model_name,
-                fold_id=int(fold_id),
-                train_runs=train_runs,
-                test_run=int(test_run),
-                alphas=trf_cfg.ridge_alpha_grid,
-                per_run_y=per_run_y,
-                per_run_X=per_run_X,
-                sfreq_hz=sfreq_hz,
-                tmin_s=trf_cfg.tmin_s,
-                tmax_s=trf_cfg.tmax_s,
-                regularization_type=trf_cfg.regularization_type,
-            )
-            outer_full["chosen_alpha"] = float(best_alpha)
-            outer_rows.append(outer_full)
+                outer_full = _outer_scores_full_table(
+                    dyad_id=dyad_id,
+                    subject=subject,
+                    model_name=model_name,
+                    fold_id=int(fold_id),
+                    train_runs=train_runs,
+                    test_run=int(test_run),
+                    alphas=trf_cfg.ridge_alpha_grid,
+                    per_run_y=per_run_y,
+                    per_run_X=per_run_X,
+                    sfreq_hz=sfreq_hz,
+                    tmin_s=trf_cfg.tmin_s,
+                    tmax_s=trf_cfg.tmax_s,
+                    regularization_type=trf_cfg.regularization_type,
+                )
+                outer_full["chosen_alpha"] = float(best_alpha)
+                outer_rows.append(outer_full)
+                progress.update(1)
+    finally:
+        progress.close()
 
     inner_scores = pd.concat(inner_rows, ignore_index=True) if inner_rows else pd.DataFrame()
     outer_scores = pd.concat(outer_rows, ignore_index=True) if outer_rows else pd.DataFrame()

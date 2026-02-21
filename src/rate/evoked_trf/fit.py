@@ -9,6 +9,19 @@ import pandas as pd
 
 from rate.evoked_trf.spec import ModelSpec, RegressorSpec, get_event_times_and_amps
 
+_MNE_LOGGING_CONFIGURED = False
+
+
+def _configure_mne_logging() -> None:
+    """Silence verbose MNE info output during repeated CV fits."""
+    global _MNE_LOGGING_CONFIGURED
+    if _MNE_LOGGING_CONFIGURED:
+        return
+    import mne
+
+    mne.set_log_level("WARNING")
+    _MNE_LOGGING_CONFIGURED = True
+
 
 @dataclass
 class FoldData:
@@ -111,6 +124,7 @@ def load_eeg_run(
         y = run.y
     """
     import mne  # local import keeps module import light
+    _configure_mne_logging()
 
     eeg_path = Path(eeg_path)
     if not eeg_path.exists():
@@ -326,6 +340,7 @@ def fit_receptive_field(
     reg = str(regularization_type).strip().lower()
     if reg not in {"ridge", "laplacian"}:
         raise ValueError("regularization_type must be 'ridge' or 'laplacian'")
+    _configure_mne_logging()
 
     if reg == "ridge":
         from mne.decoding import ReceptiveField
