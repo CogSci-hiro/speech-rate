@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
+import pandas as pd
 
 from rate.config import ConfigValidationError, load_and_validate_config
 from rate.stats.io import discover_subject_keys_with_model
@@ -16,9 +17,8 @@ REQUIRES_CONFIG = True
 
 def _resolve_feature_dir(feature_name: str, feature_index: int) -> str:
     """Resolve output directory name for a model feature."""
-    if str(feature_name) == "base":
-        return "base"
-    return f"feature-{feature_index}"
+    del feature_index
+    return str(feature_name)
 
 
 def add_subparser(subparsers) -> ArgumentParser:

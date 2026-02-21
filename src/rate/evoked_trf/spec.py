@@ -155,6 +155,12 @@ def get_models() -> tuple[ModelSpec, ...]:
     ------
     baseline
         Event impulses + continuous EMG envelope.
+    self_rate
+        Baseline + self speaking-rate regressor.
+    other_rate
+        Baseline + partner speaking-rate regressor.
+    abs_diff
+        Baseline + absolute rate-difference regressor.
 
     Usage example
     -------------
@@ -170,7 +176,34 @@ def get_models() -> tuple[ModelSpec, ...]:
             emg_regressor(),
         ),
     )
-    return (baseline,)
+    self_rate = ModelSpec(
+        model_name="self_rate",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            self_rate_regressor(),
+        ),
+    )
+    other_rate = ModelSpec(
+        model_name="other_rate",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            other_rate_regressor(),
+        ),
+    )
+    abs_diff = ModelSpec(
+        model_name="abs_diff",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            abs_diff_regressor(),
+        ),
+    )
+    return (baseline, self_rate, other_rate, abs_diff)
 
 
 # ---------------------------------------------------------------------

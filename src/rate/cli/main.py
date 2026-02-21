@@ -25,6 +25,7 @@ import rate.cli.commands.dataset_index as cmd_dataset_index
 import rate.cli.commands.dataset_subject_targets as cmd_dataset_subject_targets
 import rate.cli.commands.events_table as cmd_events_table
 import rate.cli.commands.run_tests as cmd_run_tests
+import rate.cli.commands.figures as cmd_figures
 import rate.cli.commands.validate_config as cmd_validate_config
 import rate.cli.commands.write_manifest as cmd_write_manifest
 import rate.cli.commands.resample_eeg as cmd_resample_eeg
@@ -57,6 +58,7 @@ _COMMANDS = {
     "stats-export-subject-zmaps": cmd_stats_export_subject_zmaps,
     "clean": cmd_clean,
     "run-tests": cmd_run_tests,
+    "figures": cmd_figures,
 }
 
 

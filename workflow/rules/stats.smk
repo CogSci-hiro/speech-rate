@@ -6,22 +6,39 @@ OUT_DIR = config["paths"]["out_dir"]
 TABLES_FORMAT = str(config.get("reporting", {}).get("tables_format", "parquet")).lower()
 TABLE_EXT = "csv" if TABLES_FORMAT == "csv" else "parquet"
 
-# In evoked_trf baseline spec, the EMG regressor is at feature index 2:
-# [self_onset_impulse, other_offset_impulse, emg].
-KERNEL0_BEHAVIOR_MODELS = ["baseline"]
-KERNEL0_BEHAVIOR_FEATURE_INDEX = 2
-KERNEL0_BEHAVIOR_FEATURE_DIR = "emg"
+KERNEL0_BEHAVIOR_MODEL_FEATURES = {
+    # baseline regressors: [self_onset_impulse, other_offset_impulse, emg]
+    "baseline": {"feature_index": 2, "feature_name": "emg"},
+    # extended regressors: [self_onset_impulse, other_offset_impulse, emg, target]
+    "self_rate": {"feature_index": 3, "feature_name": "self_rate"},
+    "other_rate": {"feature_index": 3, "feature_name": "other_rate"},
+    "abs_diff": {"feature_index": 3, "feature_name": "abs_diff"},
+}
+KERNEL0_BEHAVIOR_MODELS = list(KERNEL0_BEHAVIOR_MODEL_FEATURES.keys())
+
+
+def _kernel0_feature_index(wildcards):
+    return int(KERNEL0_BEHAVIOR_MODEL_FEATURES[str(wildcards.model)]["feature_index"])
+
+
+def _kernel0_feature_name(wildcards):
+    return str(KERNEL0_BEHAVIOR_MODEL_FEATURES[str(wildcards.model)]["feature_name"])
+
+
 KERNEL0_BEHAVIOR_TARGETS = [
     (
         f"{OUT_DIR}/stats/"
-        f"evoked_trf/{model}/{KERNEL0_BEHAVIOR_FEATURE_DIR}/clusters.{TABLE_EXT}"
+        f"evoked_trf/{model}/{KERNEL0_BEHAVIOR_MODEL_FEATURES[model]['feature_name']}/clusters.{TABLE_EXT}"
     )
     for model in KERNEL0_BEHAVIOR_MODELS
 ]
 KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS = [
     (
         f"{OUT_DIR}/stats/"
-        f"evoked_trf/{model}/{KERNEL0_BEHAVIOR_FEATURE_DIR}/subject_level/subject_z_map_index.{TABLE_EXT}"
+        "evoked_trf/"
+        f"{model}/"
+        f"{KERNEL0_BEHAVIOR_MODEL_FEATURES[model]['feature_name']}/"
+        f"subject_level/subject_z_map_index.{TABLE_EXT}"
     )
     for model in KERNEL0_BEHAVIOR_MODELS
 ]
@@ -33,23 +50,25 @@ rule stats_kernel0:
     output:
         clusters=(
             f"{OUT_DIR}/stats/"
-            "{analysis}/{model}/" + KERNEL0_BEHAVIOR_FEATURE_DIR + "/clusters." + TABLE_EXT
+            "{analysis}/{model}/{feature_name}/clusters." + TABLE_EXT
         ),
         subject_z_maps=(
             f"{OUT_DIR}/stats/"
-            "{analysis}/{model}/" + KERNEL0_BEHAVIOR_FEATURE_DIR + "/subject_z_maps.npy"
+            "{analysis}/{model}/{feature_name}/subject_z_maps.npy"
         ),
         grand_average=(
             f"{OUT_DIR}/stats/"
-            "{analysis}/{model}/" + KERNEL0_BEHAVIOR_FEATURE_DIR + "/grand_average_trfs-ave.fif"
+            "{analysis}/{model}/{feature_name}/grand_average_trfs-ave.fif"
         ),
+    params:
+        feature_index=_kernel0_feature_index,
     shell:
         """
         python -m rate.cli.main stats-kernel0 \
             --analysis {wildcards.analysis} \
             --model {wildcards.model} \
-            --feature-index {KERNEL0_BEHAVIOR_FEATURE_INDEX} \
-            --feature-name {KERNEL0_BEHAVIOR_FEATURE_DIR}
+            --feature-index {params.feature_index} \
+            --feature-name {wildcards.feature_name}
         """
 
 
@@ -63,21 +82,23 @@ rule stats_kernel0_subject_level:
         index=f"{OUT_DIR}/dataset/index.parquet",
         subject_z_maps=(
             f"{OUT_DIR}/stats/"
-            "{analysis}/{model}/" + KERNEL0_BEHAVIOR_FEATURE_DIR + "/subject_z_maps.npy"
+            "{analysis}/{model}/{feature_name}/subject_z_maps.npy"
         ),
     output:
         subject_z_index=(
             f"{OUT_DIR}/stats/"
-            "{analysis}/{model}/" + KERNEL0_BEHAVIOR_FEATURE_DIR + "/subject_level/"
+            "{analysis}/{model}/{feature_name}/subject_level/"
             "subject_z_map_index." + TABLE_EXT
         ),
+    params:
+        feature_index=_kernel0_feature_index,
     shell:
         """
         python -m rate.cli.main stats-export-subject-zmaps \
             --analysis {wildcards.analysis} \
             --model {wildcards.model} \
-            --feature-index {KERNEL0_BEHAVIOR_FEATURE_INDEX} \
-            --feature-name {KERNEL0_BEHAVIOR_FEATURE_DIR}
+            --feature-index {params.feature_index} \
+            --feature-name {wildcards.feature_name}
         """
 
 

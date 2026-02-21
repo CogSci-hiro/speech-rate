@@ -10,9 +10,8 @@ from .two_level import TwoLevelClusterResult
 
 def _resolve_feature_dir(feature_name: str, feature_index: int) -> str:
     """Resolve output directory name for a model feature."""
-    if str(feature_name) == "base":
-        return "base"
-    return f"feature-{feature_index}"
+    del feature_index
+    return str(feature_name)
 
 
 def write_two_level_cluster_result(
