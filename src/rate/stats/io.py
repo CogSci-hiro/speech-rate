@@ -28,6 +28,33 @@ def _subject_model_dir(
     return out_dir / analysis / "subjects" / dyad_id / subject_id / "models" / model
 
 
+def discover_subject_keys_with_model(
+    out_dir: Path,
+    analysis: str,
+    model: str,
+) -> List[Tuple[str, str]]:
+    """
+    Discover subject keys that have model-level kernel outputs.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        Sorted list of (dyad_id, subject_id).
+    """
+    root = out_dir / analysis / "subjects"
+    pattern = f"*/" + f"*/models/{model}/kernels_outer.npy"
+    keys: list[tuple[str, str]] = []
+    for path in root.glob(pattern):
+        try:
+            subject_id = str(path.parents[2].name)
+            dyad_id = str(path.parents[3].name)
+        except Exception:
+            continue
+        if dyad_id and subject_id:
+            keys.append((dyad_id, subject_id))
+    return sorted(set(keys))
+
+
 def load_subject_kernels_outer(
     out_dir: Path,
     analysis: str,

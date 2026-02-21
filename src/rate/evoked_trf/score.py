@@ -12,6 +12,7 @@ from rate.evoked_trf.fit import (
     load_eeg_run,
     predict_receptive_field,
 )
+from rate.evoked_trf.feature_sources import emg_for_run_aligned, load_subject_emg
 from rate.evoked_trf.results_io import DetailedPaths, save_receptive_field_npz, write_parquet
 from rate.evoked_trf.spec import add_timelock_columns, get_models
 from rate.evoked_trf.tuning import select_alpha_nested_loro
@@ -39,6 +40,7 @@ class EvokedTrfConfig:
     regularization_type: str
     ridge_alpha_grid: list[float]
     ridge_alpha_default: float
+    emg_zscore_within_run: bool
 
 
 def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
@@ -70,6 +72,10 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
     else:
         grid = [float(a) for a in grid_cfg]
 
+    emg_cfg = ev.get("emg", {}) or {}
+    if not isinstance(emg_cfg, dict):
+        raise ValueError("evoked_trf.emg must be a mapping when provided")
+
     return EvokedTrfConfig(
         downsample_hz=float(ev["downsample_hz"]),
         tmin_s=float(ev["lags_s"]["tmin"]),
@@ -78,6 +84,7 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
         regularization_type=regularization_type,
         ridge_alpha_grid=grid,
         ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
+        emg_zscore_within_run=bool(emg_cfg.get("zscore_within_run", True)),
     )
 
 
@@ -99,9 +106,6 @@ def validate_events_table(events: pd.DataFrame) -> pd.DataFrame:
         "run",
         "t_onset",
         "t_offset",
-        "self_rate",
-        "other_rate",
-        "abs_diff",
     }
     missing = required - set(events.columns)
     if missing:
@@ -143,6 +147,7 @@ def build_run_matrices(
     sfreq_hz: float,
     n_samples: int,
     sample_t0_s: float,
+    continuous_regressors: dict[str, np.ndarray] | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
     X_by_model: dict[str, np.ndarray] = {}
     names_by_model: dict[str, list[str]] = {}
@@ -153,6 +158,7 @@ def build_run_matrices(
             sfreq_hz=sfreq_hz,
             n_samples=n_samples,
             sample_t0_s=sample_t0_s,
+            continuous_regressors=continuous_regressors,
             return_feature_names=True,
         )
         X_by_model[m.model_name] = X
@@ -311,6 +317,7 @@ def _choose_best_alpha_inner(
 
 def _compute_one_dyad_subject(
     *,
+    out_dir: Path,
     dyad_id: str,
     subject: str,
     events: pd.DataFrame,
@@ -319,6 +326,7 @@ def _compute_one_dyad_subject(
     picks: str | list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_subject_run_data(
+        out_dir=out_dir,
         dyad_id=dyad_id,
         subject=subject,
         events=events,
@@ -411,6 +419,7 @@ def _compute_one_dyad_subject(
 
 def _prepare_subject_run_data(
     *,
+    out_dir: Path,
     dyad_id: str,
     subject: str,
     events: pd.DataFrame,
@@ -435,6 +444,7 @@ def _prepare_subject_run_data(
     per_run_X: dict[int, dict[str, np.ndarray]] = {}
     per_run_feature_names: dict[int, dict[str, list[str]]] = {}
     sfreqs: set[float] = set()
+    emg_subject = load_subject_emg(out_dir=out_dir, dyad_id=dyad_id, subject=subject)
 
     for run in runs:
         eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
@@ -445,11 +455,20 @@ def _prepare_subject_run_data(
         sfreqs.add(sfreq_hz)
 
         ev_run = ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy()
+        emg_run = emg_for_run_aligned(
+            emg_subject=emg_subject,
+            run=int(run),
+            n_samples=y.shape[0],
+            sfreq_hz=sfreq_hz,
+            sample_t0_s=float(run_data.times_s[0]),
+            zscore_within_run=trf_cfg.emg_zscore_within_run,
+        )
         X_by_model, names_by_model = build_run_matrices(
             ev_run=ev_run,
             sfreq_hz=sfreq_hz,
             n_samples=y.shape[0],
             sample_t0_s=float(run_data.times_s[0]),
+            continuous_regressors={"emg": emg_run},
         )
 
         per_run_y[int(run)] = y
@@ -504,6 +523,17 @@ def best_model_table(*, dyad_id: str, subject: str, summary: pd.DataFrame) -> pd
     Best model per subject by mean delta_r across folds (excluding baseline).
     """
     nonbase = summary.loc[summary["model"] != "baseline"].copy()
+    if nonbase.empty:
+        return pd.DataFrame(
+            [
+                {
+                    "dyad_id": dyad_id,
+                    "subject": subject,
+                    "best_model": "baseline",
+                    "mean_delta_r": 0.0,
+                }
+            ]
+        )
     means = nonbase.groupby("model", as_index=False)["delta_r"].mean(numeric_only=True)
     means = means.sort_values(["delta_r", "model"], ascending=[False, True])
     best = means.iloc[0].to_dict()
@@ -641,6 +671,7 @@ def compute_scores_and_splits(
     results = []
     for dyad_id, subject in pairs:
         result = _compute_one_dyad_subject(
+            out_dir=out_dir,
             dyad_id=dyad_id,
             subject=subject,
             events=events,
@@ -705,6 +736,7 @@ def _compute_subject_artifacts(
     events = validate_events_table(events)
 
     summary, inner_scores, outer_scores, packaged = _compute_one_dyad_subject(
+        out_dir=out_dir,
         dyad_id=str(dyad_id),
         subject=str(subject),
         events=events,
@@ -864,6 +896,7 @@ def write_subject_output(
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
     _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_subject_run_data(
+        out_dir=out_dir,
         dyad_id=str(dyad_id),
         subject=str(subject),
         events=events,
@@ -1099,16 +1132,15 @@ def write_detailed_package(
     scores_path = out_dir / "evoked_trf" / "scores" / "scores.parquet"
     if scores_path.exists():
         scores = pd.read_parquet(scores_path)
-        nonbase = scores.loc[scores["model"] != "baseline"].copy()
-        means = nonbase.groupby(["dyad_id", "subject", "model"], as_index=False)["delta_r"].mean(numeric_only=True)
+        means = scores.groupby(["dyad_id", "subject", "model"], as_index=False)["r"].mean(numeric_only=True)
         best = (
-            means.sort_values(["dyad_id", "subject", "delta_r"], ascending=[True, True, False])
+            means.sort_values(["dyad_id", "subject", "r"], ascending=[True, True, False])
             .groupby(["dyad_id", "subject"], as_index=False)
             .head(1)
-            .rename(columns={"model": "best_model", "delta_r": "mean_delta_r"})
+            .rename(columns={"model": "best_model", "r": "mean_r"})
         )
     else:
-        best = pd.DataFrame(columns=["dyad_id", "subject", "best_model", "mean_delta_r"])
+        best = pd.DataFrame(columns=["dyad_id", "subject", "best_model", "mean_r"])
     write_parquet(best, paths.best_model)
 
     # Save packaged model params (best model per subject; one file per subject)
@@ -1173,12 +1205,13 @@ def _validate_output_tables(*, scores: pd.DataFrame, splits: pd.DataFrame) -> No
 
 
 def _validate_scores_table(*, scores: pd.DataFrame) -> None:
-    required_scores = {"subject", "dyad_id", "run", "model", "fold_id", "r", "r_baseline", "delta_r"}
+    required_scores = {"subject", "dyad_id", "run", "model", "fold_id", "r"}
     missing_scores = required_scores - set(scores.columns)
     if missing_scores:
         raise ValueError(f"scores table missing columns: {sorted(missing_scores)}")
 
-    nonbaseline = scores["model"] != "baseline"
-    bad = scores.loc[nonbaseline & scores["r"].notna() & scores["delta_r"].isna()]
-    if not bad.empty:
-        raise ValueError("delta_r has missing values where r exists (non-baseline rows).")
+    if "delta_r" in scores.columns:
+        nonbaseline = scores["model"] != "baseline"
+        bad = scores.loc[nonbaseline & scores["r"].notna() & scores["delta_r"].isna()]
+        if not bad.empty:
+            raise ValueError("delta_r has missing values where r exists (non-baseline rows).")

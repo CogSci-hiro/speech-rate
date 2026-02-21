@@ -1,15 +1,70 @@
+import pandas as pd
 
-rule features_emg:
+OUT_DIR = config["paths"]["out_dir"]
+SUBJECT_TARGETS_TSV = f"{OUT_DIR}/_meta/subject_targets.tsv"
+
+
+checkpoint subject_targets:
     input:
-        edf=lambda wildcards: f"/Volumes/work-4T/hyperscanning-bids/{wildcards.subject}/eeg/{wildcards.subject}_task-conversation_run-{wildcards.run}_eeg.edf"
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        validate_config=f"{OUT_DIR}/_meta/config_validated.json",
+        write_manifest=f"{OUT_DIR}/_meta/run_manifest.json",
     output:
-        parquet=f"{OUT_DIR}/features/emg/{{subject}}/run-{{run}}_emg_env.parquet"
-    params:
-        sfreq=config["evoked_trf"]["downsample_hz"]
+        SUBJECT_TARGETS_TSV,
     shell:
+        r"""
+        set -euo pipefail
+        PYTHONPATH=src python -u -m rate.cli.main dataset-subject-targets \
+            --config config/config.yaml \
+            --schema config/schema.json \
+            --out-dir {OUT_DIR} \
+            --dataset-index {input.dataset_index} \
+            --output {output}
         """
-        python -m rate.cli.commands.compute_emg \
-            --edf {input.edf} \
-            --out {output.parquet} \
-            --sfreq {params.sfreq}
+
+
+def _subject_pairs():
+    ckpt = checkpoints.subject_targets.get()
+    df = pd.read_csv(ckpt.output[0], sep="\t")
+    return [(str(r.dyad_id), str(r.subject_id)) for r in df.itertuples(index=False)]
+
+
+def _emg_subject_outputs(_wildcards):
+    return [
+        f"{OUT_DIR}/features/emg/{dyad_id}/{subject}/emg_env.parquet"
+        for dyad_id, subject in _subject_pairs()
+    ]
+
+
+rule features_emg_subject:
+    input:
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        validate_config=f"{OUT_DIR}/_meta/config_validated.json",
+        write_manifest=f"{OUT_DIR}/_meta/run_manifest.json",
+    output:
+        parquet=f"{OUT_DIR}/features/emg/{{dyad_id}}/{{subject}}/emg_env.parquet"
+    log:
+        f"{OUT_DIR}/logs/features_emg/{{dyad_id}}_{{subject}}.log"
+    shell:
+        r"""
+        set -euo pipefail
+        PYTHONPATH=src python -u -m rate.cli.main compute-emg \
+            --dyad-id {wildcards.dyad_id} \
+            --subject {wildcards.subject} \
+            --config config/config.yaml \
+            --schema config/schema.json \
+            --out-dir {OUT_DIR} \
+            --dataset-index {input.dataset_index} \
+            --output {output.parquet} \
+            2>&1 | tee {log}
         """
+
+
+rule features_emg_all:
+    input:
+        _emg_subject_outputs
+    output:
+        done=f"{OUT_DIR}/_meta/features_emg_done.txt",
+    run:
+        with open(output.done, "w", encoding="utf-8") as f:
+            f.write("ok\n")

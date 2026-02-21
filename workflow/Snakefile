@@ -8,3 +8,9 @@ include: "rules/features.smk"
 include: "rules/evoked_trf.smk"
 include: "rules/stats.smk"
 include: "rules/tests.smk"
+
+
+rule pipeline:
+    input:
+        KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS
+    default_target: True

@@ -200,6 +200,7 @@ def build_design_matrix(
     sfreq_hz: float,
     n_samples: int,
     sample_t0_s: float = 0.0,
+    continuous_regressors: dict[str, np.ndarray] | None = None,
     return_feature_names: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, list[str]]:
     """
@@ -237,13 +238,18 @@ def build_design_matrix(
     """
     cols: list[np.ndarray] = []
     for reg in model.regressors:
-        x = _events_to_continuous_regressor(
-            events=events,
-            reg=reg,
-            sfreq_hz=sfreq_hz,
-            n_samples=n_samples,
-            sample_t0_s=sample_t0_s,
-        )
+        if reg.kind == "emg":
+            if continuous_regressors is None or reg.name not in continuous_regressors:
+                raise ValueError(f"Missing continuous regressor values for '{reg.name}'")
+            x = np.asarray(continuous_regressors[reg.name], dtype=float)
+        else:
+            x = _events_to_continuous_regressor(
+                events=events,
+                reg=reg,
+                sfreq_hz=sfreq_hz,
+                n_samples=n_samples,
+                sample_t0_s=sample_t0_s,
+            )
         x = np.asarray(x, dtype=float)
         if x.ndim != 1 or x.shape[0] != n_samples:
             raise ValueError(

@@ -6,11 +6,11 @@ OUT_DIR = config["paths"]["out_dir"]
 TABLES_FORMAT = str(config.get("reporting", {}).get("tables_format", "parquet")).lower()
 TABLE_EXT = "csv" if TABLES_FORMAT == "csv" else "parquet"
 
-# In evoked_trf specs, each of these models has two baseline impulses first,
-# so the behavior regressor is at feature index 2.
-KERNEL0_BEHAVIOR_MODELS = ["self_rate", "other_rate", "abs_diff"]
+# In evoked_trf baseline spec, the EMG regressor is at feature index 2:
+# [self_onset_impulse, other_offset_impulse, emg].
+KERNEL0_BEHAVIOR_MODELS = ["baseline"]
 KERNEL0_BEHAVIOR_FEATURE_INDEX = 2
-KERNEL0_BEHAVIOR_FEATURE_DIR = "base"
+KERNEL0_BEHAVIOR_FEATURE_DIR = "emg"
 KERNEL0_BEHAVIOR_TARGETS = [
     (
         f"{OUT_DIR}/stats/"
@@ -29,6 +29,7 @@ KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS = [
 rule stats_kernel0:
     input:
         index=f"{OUT_DIR}/dataset/index.parquet",
+        evoked_scores=f"{OUT_DIR}/evoked_trf/scores/scores.parquet",
     output:
         clusters=(
             f"{OUT_DIR}/stats/"

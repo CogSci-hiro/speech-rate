@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 
-RegressorKind = Literal["impulse", "self_rate", "other_rate", "abs_diff"]
+RegressorKind = Literal["impulse", "self_rate", "other_rate", "abs_diff", "emg"]
 TimeLock = Literal["self_IPU_onset", "other_IPU_offset"]
 
 
@@ -40,7 +40,7 @@ class RegressorSpec:
 
     name: str
     column: str | None
-    time_lock: TimeLock
+    time_lock: TimeLock | None
     kind: RegressorKind
 
 
@@ -133,6 +133,15 @@ def abs_diff_regressor() -> RegressorSpec:
     )
 
 
+def emg_regressor() -> RegressorSpec:
+    return RegressorSpec(
+        name="emg",
+        column="emg_env",
+        time_lock=None,
+        kind="emg",
+    )
+
+
 # ---------------------------------------------------------------------
 # Model collection
 # ---------------------------------------------------------------------
@@ -145,13 +154,7 @@ def get_models() -> tuple[ModelSpec, ...]:
     Models
     ------
     baseline
-        Event impulses only.
-    self_rate
-        Baseline + self speech rate.
-    other_rate
-        Baseline + partner speech rate.
-    abs_diff
-        Baseline + absolute speech-rate difference.
+        Event impulses + continuous EMG envelope.
 
     Usage example
     -------------
@@ -164,25 +167,10 @@ def get_models() -> tuple[ModelSpec, ...]:
         regressors=(
             baseline_self_onset_impulse(),
             baseline_other_offset_impulse(),
+            emg_regressor(),
         ),
     )
-
-    model_self = ModelSpec(
-        model_name="self_rate",
-        regressors=baseline.regressors + (self_rate_regressor(),),
-    )
-
-    model_other = ModelSpec(
-        model_name="other_rate",
-        regressors=baseline.regressors + (other_rate_regressor(),),
-    )
-
-    model_abs = ModelSpec(
-        model_name="abs_diff",
-        regressors=baseline.regressors + (abs_diff_regressor(),),
-    )
-
-    return baseline, model_self, model_other, model_abs
+    return (baseline,)
 
 
 # ---------------------------------------------------------------------
@@ -240,6 +228,9 @@ def get_event_times_and_amps(
     -------------
         t, a = get_event_times_and_amps(events, self_rate_regressor())
     """
+
+    if reg.time_lock is None:
+        raise ValueError(f"Regressor '{reg.name}' has no event time-lock.")
 
     if reg.time_lock not in events.columns:
         raise ValueError(f"Missing time-lock column: {reg.time_lock}")

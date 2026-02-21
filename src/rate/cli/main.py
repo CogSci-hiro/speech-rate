@@ -22,13 +22,17 @@ from rate.config import ConfigValidationError, load_and_validate_config
 
 import rate.cli.commands.clean as cmd_clean
 import rate.cli.commands.dataset_index as cmd_dataset_index
+import rate.cli.commands.dataset_subject_targets as cmd_dataset_subject_targets
 import rate.cli.commands.events_table as cmd_events_table
 import rate.cli.commands.run_tests as cmd_run_tests
 import rate.cli.commands.validate_config as cmd_validate_config
 import rate.cli.commands.write_manifest as cmd_write_manifest
 import rate.cli.commands.resample_eeg as cmd_resample_eeg
+import rate.cli.commands.compute_emg as cmd_compute_emg
+import rate.cli.commands.compute_emg_all as cmd_compute_emg_all
 import rate.cli.commands.evoked_trf_scores as cmd_evoked_trf_scores
 import rate.cli.commands.evoked_trf_subject as cmd_evoked_trf_subject
+import rate.cli.commands.evoked_trf_subject_all as cmd_evoked_trf_subject_all
 import rate.cli.commands.evoked_trf_aggregate as cmd_evoked_trf_aggregate
 import rate.cli.commands.stats_kernel0 as cmd_stats_kernel0
 import rate.cli.commands.stats_export_subject_zmaps as cmd_stats_export_subject_zmaps
@@ -40,10 +44,14 @@ _COMMANDS = {
     "validate-config": cmd_validate_config,
     "write-manifest": cmd_write_manifest,
     "dataset-index": cmd_dataset_index,
+    "dataset-subject-targets": cmd_dataset_subject_targets,
     "events-table": cmd_events_table,
     "resample-eeg": cmd_resample_eeg,
+    "compute-emg": cmd_compute_emg,
+    "compute-emg-all": cmd_compute_emg_all,
     "evoked-trf-scores": cmd_evoked_trf_scores,
     "evoked-trf-subject": cmd_evoked_trf_subject,
+    "evoked-trf-subject-all": cmd_evoked_trf_subject_all,
     "evoked-trf-aggregate": cmd_evoked_trf_aggregate,
     "stats-kernel0": cmd_stats_kernel0,
     "stats-export-subject-zmaps": cmd_stats_export_subject_zmaps,

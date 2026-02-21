@@ -5,11 +5,10 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Mapping
 
-import pandas as pd
 from mne.channels import make_standard_montage
 
 from rate.config import ConfigValidationError, load_and_validate_config
-from rate.stats.io import load_subject_lags
+from rate.stats.io import discover_subject_keys_with_model, load_subject_lags
 from rate.stats import ClusterMethod, StatsConfig, run_two_level_kernel0
 from rate.stats.reporting import write_two_level_cluster_result
 
@@ -57,17 +56,19 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         cfg = dict(config)
 
     out_dir = Path(cfg["paths"]["out_dir"])
-    index_path = out_dir / "dataset" / "index.parquet"
-
-    LOGGER.info("Reading dataset index: %s", index_path)
-    df = pd.read_parquet(index_path)
-    df_ok = df[df["status"] == "ok"].copy()
-
-    if df_ok.empty:
-        LOGGER.error("No valid subjects found in dataset index.")
+    subject_keys = discover_subject_keys_with_model(
+        out_dir=out_dir,
+        analysis=str(args.analysis),
+        model=str(args.model),
+    )
+    if not subject_keys:
+        LOGGER.error(
+            "No subject kernels found under %s for analysis=%s model=%s",
+            out_dir / str(args.analysis) / "subjects",
+            args.analysis,
+            args.model,
+        )
         return 1
-
-    subject_keys = list(zip(df_ok["dyad_id"], df_ok["subject_id"]))
 
     # ----------------------------------------------------------------------------------
     # Stats configuration
