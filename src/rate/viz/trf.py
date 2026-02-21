@@ -47,13 +47,38 @@ def plot_joint_kernel(
     title
         Optional figure title.
     """
-    fig = evoked.plot_joint(times=times, show=False, title=title)
+    joint_times = _normalize_joint_times(evoked=evoked, times=times)
+    fig = evoked.plot_joint(times=joint_times, show=False, title=title)
     main_ax = _find_time_axis(fig)
 
     if main_ax is not None and time_clusters is not None:
         add_time_cluster_shading(main_ax, evoked.times, time_clusters)
 
     save_figure(fig, out_dir, family, name)
+
+
+def _normalize_joint_times(
+    *,
+    evoked: mne.Evoked,
+    times: Optional[Sequence[float]],
+) -> np.ndarray:
+    """Return a 1D times array suitable for ``Evoked.plot_joint``."""
+    if times is not None:
+        arr = np.asarray(times, dtype=float)
+        arr = np.atleast_1d(arr).astype(float)
+        if arr.size < 1:
+            raise ValueError("times must contain at least one time point")
+        return arr
+
+    t = np.asarray(evoked.times, dtype=float)
+    if t.ndim != 1 or t.size < 1:
+        raise ValueError("evoked.times must be a non-empty 1D array")
+    if t.size == 1:
+        return t.copy()
+
+    # 3 representative topomap anchors across the available time span.
+    idx = np.array([0, t.size // 2, t.size - 1], dtype=int)
+    return np.unique(t[idx])
 
 
 def plot_electrode_timecourse_panel(

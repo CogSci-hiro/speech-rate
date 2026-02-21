@@ -107,7 +107,12 @@ def write_two_level_cluster_result(
             )
         )
 
-    df = pd.DataFrame(rows).sort_values("p_value", ascending=True)
+    columns = ["cluster_id", "p_value", "n_bins"]
+    if rows:
+        df = pd.DataFrame(rows, columns=columns).sort_values("p_value", ascending=True)
+    else:
+        # Keep schema stable when no supra-threshold clusters are detected.
+        df = pd.DataFrame(columns=columns)
     if tables_format == "csv":
         df.to_csv(out_path / "clusters.csv", index=False)
     else:

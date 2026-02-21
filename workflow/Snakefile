@@ -7,6 +7,7 @@ include: "rules/eeg_resample.smk"
 include: "rules/features.smk"
 include: "rules/evoked_trf.smk"
 include: "rules/stats.smk"
+include: "rules/figures.smk"
 include: "rules/tests.smk"
 
 
