@@ -129,12 +129,33 @@ def run_trf_figures(
         )
 
         if figure == FIGURE_JOINT:
+            alpha = float(config.get("reporting", {}).get("alpha", 0.05))
+            stat_map = _load_topomap_stat_map(
+                out_dir=out_dir,
+                family=family,
+                regressor=reg_name,
+                fallback=evoked.data.T,
+            )
+            sig_mask = _load_topomap_significance_mask(
+                out_dir=out_dir,
+                family=family,
+                regressor=reg_name,
+                alpha=alpha,
+                expected_shape=stat_map.shape,
+            )
             plot_joint_kernel(
                 evoked=evoked,
                 out_dir=out_dir,
                 family=family,
                 name=f"joint_{reg_name}",
                 time_clusters=cluster_intervals,
+                mask=sig_mask,
+                mask_params={
+                    "marker": "o",
+                    "markerfacecolor": "0.75",
+                    "markeredgecolor": "black",
+                    "markersize": 10,
+                },
                 title=f"{family} kernel ({reg_name})",
             )
             return

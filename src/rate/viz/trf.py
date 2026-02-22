@@ -26,6 +26,8 @@ def plot_joint_kernel(
     name: str,
     times: Optional[Sequence[float]] = None,
     time_clusters: Optional[Iterable[Tuple[float, float]]] = None,
+    mask: Optional[np.ndarray] = None,
+    mask_params: Optional[dict] = None,
     title: Optional[str] = None,
 ) -> None:
     """Plot a TRF kernel with MNE's joint layout and save it.
@@ -44,11 +46,34 @@ def plot_joint_kernel(
         Optional topomap times (seconds). If ``None``, MNE selects defaults.
     time_clusters
         Optional iterable of ``(start_s, end_s)`` intervals for shading.
+    mask
+        Optional boolean significance mask with shape ``(n_times, n_channels)``.
+        Markers are drawn on joint-plot topomaps at significant sensors.
+    mask_params
+        Optional marker styling overrides passed to MNE topomap plotting.
     title
         Optional figure title.
     """
     joint_times = _normalize_joint_times(evoked=evoked, times=times)
-    fig = evoked.plot_joint(times=joint_times, show=False, title=title)
+    topomap_args: dict[str, object] = {}
+    if mask is not None:
+        topomap_mask_params = {
+            "marker": "o",
+            "markerfacecolor": "0.75",
+            "markeredgecolor": "black",
+            "markersize": 10,
+        }
+        if mask_params is not None:
+            topomap_mask_params.update(mask_params)
+        topomap_args["mask"] = mask.T
+        topomap_args["mask_params"] = topomap_mask_params
+
+    fig = evoked.plot_joint(
+        times=joint_times,
+        show=False,
+        title=title,
+        topomap_args=topomap_args if topomap_args else None,
+    )
     main_ax = _find_time_axis(fig)
 
     if main_ax is not None and time_clusters is not None:
