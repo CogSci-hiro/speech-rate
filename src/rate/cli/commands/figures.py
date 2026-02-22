@@ -210,11 +210,27 @@ def run_trf_figures(
             reg: _load_group_evoked(mne=mne, out_dir=out_dir, family=family, regressor=reg)
             for reg in regressors
         }
-        xmin, xmax, ymin, ymax = _global_axis_bounds(condition_evokeds.values())
+        condition_se = {
+            reg: se
+            for reg in regressors
+            if (se := _load_condition_standard_error(
+                mne=mne,
+                out_dir=out_dir,
+                family=family,
+                regressor=reg,
+                template_evoked=condition_evokeds[reg],
+            )) is not None
+        }
+        xmin, xmax, ymin, ymax = _global_axis_bounds(
+            condition_evokeds.values(),
+            se_by_condition=condition_se if condition_se else None,
+            condition_evokeds=condition_evokeds,
+        )
         colors = _make_condition_colors(regressors)
 
         plot_electrode_timecourse_panel(
             condition_evokeds=condition_evokeds,
+            condition_se=condition_se if condition_se else None,
             electrodes=panel_electrodes,
             colors=colors,
             xmin=xmin,
@@ -351,14 +367,85 @@ def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
     return evokeds[0]
 
 
-def _global_axis_bounds(evokeds: Iterable[Any]) -> tuple[float, float, float, float]:
+def _global_axis_bounds(
+    evokeds: Iterable[Any],
+    *,
+    se_by_condition: Mapping[str, np.ndarray] | None = None,
+    condition_evokeds: Mapping[str, Any] | None = None,
+) -> tuple[float, float, float, float]:
     """Compute global axis bounds across a sequence of evoked objects."""
     evoked_list = list(evokeds)
     xmins = [float(evoked.times[0]) for evoked in evoked_list]
     xmaxs = [float(evoked.times[-1]) for evoked in evoked_list]
     ymins = [float(np.nanmin(evoked.data)) for evoked in evoked_list]
     ymaxs = [float(np.nanmax(evoked.data)) for evoked in evoked_list]
+
+    if se_by_condition is not None and condition_evokeds is not None:
+        for cond, se in se_by_condition.items():
+            evoked = condition_evokeds.get(cond)
+            if evoked is None:
+                continue
+            se_arr = np.asarray(se, dtype=float)
+            if se_arr.shape != evoked.data.shape:
+                continue
+            ymins.append(float(np.nanmin(evoked.data - se_arr)))
+            ymaxs.append(float(np.nanmax(evoked.data + se_arr)))
     return min(xmins), max(xmaxs), min(ymins), max(ymaxs)
+
+
+def _load_condition_standard_error(
+    *,
+    mne,
+    out_dir: Path,
+    family: str,
+    regressor: str,
+    template_evoked,
+) -> np.ndarray | None:
+    """Load subject-level kernels and return SEM array matching ``template_evoked.data``."""
+    subject_evokeds = _load_subject_evokeds(mne=mne, out_dir=out_dir, family=family, regressor=regressor)
+    if not subject_evokeds:
+        return None
+
+    ref_shape = tuple(template_evoked.data.shape)
+    ref_times = np.asarray(template_evoked.times, dtype=float)
+    matched = []
+    for evoked in subject_evokeds:
+        if tuple(evoked.data.shape) != ref_shape:
+            continue
+        if not np.allclose(np.asarray(evoked.times, dtype=float), ref_times):
+            continue
+        matched.append(np.asarray(evoked.data, dtype=float))
+
+    if len(matched) < 2:
+        return None
+
+    stack = np.stack(matched, axis=0)
+    return np.nanstd(stack, axis=0, ddof=1) / np.sqrt(float(stack.shape[0]))
+
+
+def _load_subject_evokeds(*, mne, out_dir: Path, family: str, regressor: str) -> list[Any]:
+    """Load subject-level TRF kernels for one regressor when available."""
+    if family != "evoked_trf":
+        return []
+
+    subjects_root = out_dir / "evoked_trf" / "subjects"
+    if not subjects_root.exists():
+        return []
+
+    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    fname = "self_onset-ave.fif" if regressor == "self_onset_impulse" else (
+        "other_offset-ave.fif" if regressor == "other_offset_impulse" else f"{regressor}-ave.fif"
+    )
+
+    evokeds: list[Any] = []
+    for path in sorted(subjects_root.rglob(f"models/{model}/{fname}")):
+        try:
+            loaded = mne.read_evokeds(path)
+        except Exception:
+            continue
+        if loaded:
+            evokeds.append(loaded[0])
+    return evokeds
 
 
 def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:

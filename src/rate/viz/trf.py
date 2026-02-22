@@ -109,6 +109,7 @@ def _normalize_joint_times(
 def plot_electrode_timecourse_panel(
     *,
     condition_evokeds: Dict[str, mne.Evoked],
+    condition_se: Optional[Dict[str, np.ndarray]] = None,
     electrodes: Sequence[str],
     colors: Dict[str, str],
     xmin: float,
@@ -127,6 +128,9 @@ def plot_electrode_timecourse_panel(
     ----------
     condition_evokeds
         Mapping from condition name to already-aggregated ``mne.Evoked``.
+    condition_se
+        Optional mapping from condition name to standard-error arrays with shape
+        matching ``evoked.data`` (``n_channels, n_times``).
     electrodes
         Electrode names to plot (one row per electrode).
     colors
@@ -158,11 +162,26 @@ def plot_electrode_timecourse_panel(
     for ax, electrode in zip(axes, electrodes):
         for condition, evoked in condition_evokeds.items():
             picked = evoked.copy().pick([electrode])
+            line_color = colors.get(condition)
+            if condition_se is not None and condition in condition_se:
+                se = np.asarray(condition_se[condition], dtype=float)
+                if se.shape == evoked.data.shape:
+                    ch_idx = evoked.ch_names.index(electrode)
+                    se_trace = se[ch_idx, :]
+                    mean_trace = picked.data.squeeze()
+                    ax.fill_between(
+                        picked.times,
+                        mean_trace - se_trace,
+                        mean_trace + se_trace,
+                        color=line_color,
+                        alpha=0.18,
+                        linewidth=0,
+                    )
             ax.plot(
                 picked.times,
                 picked.data.squeeze(),
                 label=condition,
-                color=colors.get(condition),
+                color=line_color,
                 linewidth=2.0,
             )
 

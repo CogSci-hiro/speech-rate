@@ -439,6 +439,10 @@
             },
             "rois": {
               "type": "object"
+            },
+            "n_jobs": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [
@@ -448,7 +452,8 @@
             "peak_threshold",
             "max_n_peaks",
             "bands",
-            "rois"
+            "rois",
+            "n_jobs"
           ],
           "additionalProperties": true
         },
@@ -494,6 +499,10 @@
             },
             "lmm": {
               "type": "object"
+            },
+            "n_jobs": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [
@@ -501,7 +510,8 @@
             "rois",
             "spectrum",
             "model",
-            "features"
+            "features",
+            "n_jobs"
           ],
           "additionalProperties": true
         }
