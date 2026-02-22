@@ -106,7 +106,7 @@ evoked_trf:
   ridge_alpha_grid:
     min: 2
     max: 6
-    n_alpha: 20
+    n_alpha: 10
   n_jobs: 1
 
 # ============================================================
@@ -272,6 +272,14 @@ reporting:
   trf:
     regressors: ["self_rate", "other_rate", "abs_diff"]
     electrodes: ["Fz", "Pz"]
+    # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
+    # Global for all regressors:
+    # joint_times_s: [-0.10, 0.00, 0.10]
+    # Per regressor ("default" optional fallback):
+    # joint_times_s:
+    #   default: [-0.10, 0.00, 0.10]
+    #   self_rate: [-0.12, -0.02, 0.08]
+    #   other_rate: [-0.08, 0.04, 0.16]
 
   tables_format: "csv"         # csv | parquet
 

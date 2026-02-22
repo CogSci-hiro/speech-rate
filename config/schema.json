@@ -409,6 +409,104 @@
     "induced_trf": {
       "type": "object"
     },
+    "fooof": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "window_length_s": {
+              "type": "number"
+            },
+            "window_alignment": {
+              "type": "string"
+            },
+            "freq_range": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "peak_threshold": {
+              "type": "number"
+            },
+            "max_n_peaks": {
+              "type": "integer"
+            },
+            "bands": {
+              "type": "object"
+            },
+            "rois": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "window_length_s",
+            "window_alignment",
+            "freq_range",
+            "peak_threshold",
+            "max_n_peaks",
+            "bands",
+            "rois"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "prespeech_window_s": {
+              "type": "object",
+              "required": [
+                "tmin",
+                "tmax"
+              ],
+              "properties": {
+                "tmin": {
+                  "type": "number"
+                },
+                "tmax": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": true
+            },
+            "rois": {
+              "type": "object"
+            },
+            "spectrum": {
+              "type": "object"
+            },
+            "model": {
+              "type": "object"
+            },
+            "features": {
+              "type": "object"
+            },
+            "qc": {
+              "type": "object"
+            },
+            "standardization": {
+              "type": "object"
+            },
+            "pca": {
+              "type": "object"
+            },
+            "lmm": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "prespeech_window_s",
+            "rois",
+            "spectrum",
+            "model",
+            "features"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
     "ddc": {
       "type": "object"
     },

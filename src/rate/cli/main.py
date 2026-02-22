@@ -31,6 +31,7 @@ import rate.cli.commands.write_manifest as cmd_write_manifest
 import rate.cli.commands.resample_eeg as cmd_resample_eeg
 import rate.cli.commands.compute_emg as cmd_compute_emg
 import rate.cli.commands.compute_emg_all as cmd_compute_emg_all
+from .commands import fooof as cmd_fooof
 import rate.cli.commands.evoked_trf_scores as cmd_evoked_trf_scores
 import rate.cli.commands.evoked_trf_subject as cmd_evoked_trf_subject
 import rate.cli.commands.evoked_trf_subject_all as cmd_evoked_trf_subject_all
@@ -50,6 +51,7 @@ _COMMANDS = {
     "resample-eeg": cmd_resample_eeg,
     "compute-emg": cmd_compute_emg,
     "compute-emg-all": cmd_compute_emg_all,
+    "fooof": cmd_fooof,
     "evoked-trf-scores": cmd_evoked_trf_scores,
     "evoked-trf-subject": cmd_evoked_trf_subject,
     "evoked-trf-subject-all": cmd_evoked_trf_subject_all,

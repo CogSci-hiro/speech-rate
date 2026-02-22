@@ -156,6 +156,7 @@ def run_trf_figures(
                 out_dir=out_dir,
                 family=family,
                 name=f"joint_{reg_name}",
+                times=_get_trf_joint_times(config, regressor=reg_name),
                 time_clusters=joint_time_clusters,
                 mask=sig_mask,
                 mask_params={
@@ -260,6 +261,46 @@ def _get_trf_electrodes(config: Mapping[str, Any]) -> list[str]:
     values = [str(item) for item in electrodes if str(item)]
     if not values:
         raise ValueError("config.reporting.trf.electrodes must contain at least one channel")
+    return values
+
+
+def _get_trf_joint_times(
+    config: Mapping[str, Any],
+    *,
+    regressor: str | None = None,
+) -> list[float] | None:
+    """Return optional joint topomap times from ``config.reporting.trf.joint_times_s``.
+
+    Supports either:
+    - a global list of times (seconds), or
+    - a mapping like ``{"default": [...], "self_rate": [...], ...}``
+    """
+    reporting = config.get("reporting", {})
+    trf_block = reporting.get("trf", {}) if isinstance(reporting, Mapping) else {}
+    times = trf_block.get("joint_times_s") if isinstance(trf_block, Mapping) else None
+
+    if times is None:
+        return None
+
+    if isinstance(times, Mapping):
+        selected = None
+        if regressor is not None and regressor in times:
+            selected = times.get(regressor)
+        elif "default" in times:
+            selected = times.get("default")
+        else:
+            return None
+        times = selected
+
+    if not isinstance(times, Sequence) or isinstance(times, (str, bytes)):
+        raise ValueError(
+            "config.reporting.trf.joint_times_s must be a list of times or a mapping "
+            "of regressor -> list of times (seconds)"
+        )
+
+    values = [float(t) for t in times]
+    if not values:
+        raise ValueError("config.reporting.trf.joint_times_s must contain at least one time value")
     return values
 
 

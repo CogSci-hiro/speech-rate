@@ -6,6 +6,7 @@ include: "rules/events.smk"
 include: "rules/eeg_resample.smk"
 include: "rules/features.smk"
 include: "rules/evoked_trf.smk"
+include: "rules/fooof.smk"
 include: "rules/stats.smk"
 include: "rules/figures.smk"
 include: "rules/tests.smk"
@@ -13,5 +14,5 @@ include: "rules/tests.smk"
 
 rule pipeline:
     input:
-        KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS
+        KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS + FOOOF_TARGETS
     default_target: True
