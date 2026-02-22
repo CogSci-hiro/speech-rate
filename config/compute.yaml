@@ -114,8 +114,8 @@ evoked_trf:
     type: "ridge"  # options: ridge | laplacian
   ridge_alpha_grid:
     min: 2
-    max: 6
-    n_alpha: 10
+    max: 7
+    n_alpha: 20
   models:
     - name: "baseline"
       regressors:
