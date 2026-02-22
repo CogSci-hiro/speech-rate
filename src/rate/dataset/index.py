@@ -8,6 +8,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from rate.config import ConfigValidationError, apply_config_defaults
+from rate.debug import limit_dataframe_by_debug_max_files
 from rate.dataset.discover import (
     AUDIO_SUFFIXES,
     EEG_SUFFIXES,
@@ -390,6 +391,12 @@ def write_dataset_index(config: Mapping[str, Any], output_path: Path | None = No
     ensure_parent_dir(target_path)
 
     index_df = build_dataset_index(resolved_config)
+    index_df = limit_dataframe_by_debug_max_files(
+        index_df,
+        resolved_config,
+        logger=LOGGER,
+        label="dataset index",
+    )
     try:
         write_parquet_dataframe(index_df, target_path)
     except RuntimeError as exc:

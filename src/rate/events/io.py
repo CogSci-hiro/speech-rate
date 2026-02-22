@@ -7,6 +7,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from rate.config import ConfigValidationError, apply_config_defaults
+from rate.debug import limit_dataframe_by_debug_max_files
 from rate.paths import ensure_parent_dir
 from rate.util import read_parquet_dataframe, write_parquet_dataframe
 
@@ -108,6 +109,12 @@ def write_events_outputs(
         dataset_index_df = read_parquet_dataframe(dataset_path)
     except RuntimeError as exc:
         raise EventsTableError(str(exc)) from exc
+    dataset_index_df = limit_dataframe_by_debug_max_files(
+        dataset_index_df,
+        resolved_config,
+        logger=LOGGER,
+        label="events dataset index",
+    )
 
     events_df = build_events_table(resolved_config, dataset_index_df)
     qc_df = build_ipu_qc_summary(events_df)

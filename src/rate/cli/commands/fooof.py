@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from rate.config import ConfigValidationError, load_and_validate_config
+from rate.debug import filter_dataframe_to_unit_keys, limit_dataframe_by_debug_max_files
 from rate.fooof.pipeline import run_fooof_pipeline
 from rate.paths import resolve_out_dir
 from rate.util import read_parquet_dataframe
@@ -49,8 +50,15 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     try:
         LOGGER.info("Reading dataset index: %s", dataset_index_path)
         index_df = read_parquet_dataframe(dataset_index_path)
+        index_df = limit_dataframe_by_debug_max_files(
+            index_df,
+            resolved,
+            logger=LOGGER,
+            label="fooof dataset index",
+        )
         LOGGER.info("Reading canonical events table: %s", events_path)
         events_df = read_parquet_dataframe(events_path)
+        events_df = filter_dataframe_to_unit_keys(events_df, index_df)
 
         run_fooof_pipeline(
             config=dict(resolved),

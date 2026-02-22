@@ -523,6 +523,22 @@
     "reporting": {
       "type": "object"
     },
+    "debug": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_files": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
     "random_seed": {
       "type": "integer"
     }

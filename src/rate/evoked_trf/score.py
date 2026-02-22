@@ -7,21 +7,23 @@ import numpy as np
 import pandas as pd
 
 from rate.evoked_trf.fit import (
-    build_design_matrix,
     fit_receptive_field,
     load_eeg_run,
     predict_receptive_field,
 )
 from rate.evoked_trf.feature_sources import emg_for_run_aligned, load_subject_emg
 from rate.evoked_trf.results_io import DetailedPaths, save_receptive_field_npz, write_parquet
-from rate.evoked_trf.spec import add_timelock_columns, get_models
-from rate.evoked_trf.tuning import select_alpha_nested_loro
+from rate.evoked_trf.spec import add_timelock_columns
 from rate.evoked_trf.utils import (
     concatenate_with_gap,
     max_lag_samples,
     score_multichannel_mean_r,
     standardize_design_matrix_foldwise,
 )
+from rate.trf.engine import TRFResult, run_trf
+from rate.trf.io_contract import write_trf_artifacts
+from rate.trf import scoring as trf_scoring
+from rate.trf.design import DesignModelSpec, build_design_matrix as build_design_matrix_from_config, parse_evoked_models_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ class EvokedTrfConfig:
     ridge_alpha_grid: list[float]
     ridge_alpha_default: float
     emg_zscore_within_run: bool
+    models: tuple[DesignModelSpec, ...]
 
 
 def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
@@ -110,6 +113,7 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
         ridge_alpha_grid=grid,
         ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
         emg_zscore_within_run=bool(emg_cfg.get("zscore_within_run", True)),
+        models=parse_evoked_models_config(ev.get("models")),
     )
 
 
@@ -162,26 +166,31 @@ def select_eeg_path(ds_index: pd.DataFrame, *, subject: str, dyad_id: str, run: 
 # =============================================================================
 
 
-def list_models() -> list[str]:
-    return [m.model_name for m in get_models()]
+def list_models(models: tuple[DesignModelSpec, ...]) -> list[str]:
+    return [m.model_name for m in models]
 
 
 def build_run_matrices(
     *,
     ev_run: pd.DataFrame,
     sfreq_hz: float,
+    lags_s: np.ndarray,
     n_samples: int,
+    run_id: int,
     sample_t0_s: float,
+    models: tuple[DesignModelSpec, ...],
     continuous_regressors: dict[str, np.ndarray] | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
     X_by_model: dict[str, np.ndarray] = {}
     names_by_model: dict[str, list[str]] = {}
-    for m in get_models():
-        X, feature_names = build_design_matrix(
-            events=ev_run,
-            model=m,
-            sfreq_hz=sfreq_hz,
-            n_samples=n_samples,
+    for m in models:
+        X, feature_names = build_design_matrix_from_config(
+            model_spec=m,
+            events_df=ev_run,
+            run_id=int(run_id),
+            sfreq=float(sfreq_hz),
+            lags=np.asarray(lags_s, dtype=float),
+            n_samples=int(n_samples),
             sample_t0_s=sample_t0_s,
             continuous_regressors=continuous_regressors,
             return_feature_names=True,
@@ -196,143 +205,12 @@ def build_run_matrices(
 # =============================================================================
 
 
-def _outer_folds_from_runs(runs: list[int]) -> list[tuple[list[int], int, int]]:
-    folds: list[tuple[list[int], int, int]] = []
-    for fold_id, test_run in enumerate(runs):
-        train_runs = [r for r in runs if r != test_run]
-        folds.append((train_runs, test_run, fold_id))
-    return folds
-
-
-def _score_alpha_from_prepared(
-    *,
-    alpha: float,
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_test: np.ndarray,
-    y_test: np.ndarray,
-    sfreq_hz: float,
-    tmin_s: float,
-    tmax_s: float,
-    regularization_type: str,
-) -> float:
-    rf = fit_receptive_field(
-        X_train=X_train,
-        y_train=y_train,
-        sfreq_hz=sfreq_hz,
-        tmin_s=tmin_s,
-        tmax_s=tmax_s,
-        ridge_alpha=float(alpha),
-        regularization_type=regularization_type,
+def _canonical_lags_s(*, sfreq_hz: float, tmin_s: float, tmax_s: float) -> np.ndarray:
+    lags_samples = np.arange(
+        int(np.floor(float(tmin_s) * float(sfreq_hz))),
+        int(np.ceil(float(tmax_s) * float(sfreq_hz))) + 1,
     )
-    y_hat = predict_receptive_field(rf, X_test)
-    return score_multichannel_mean_r(y_test, y_hat)
-
-
-def _outer_scores_full_table(
-    *,
-    dyad_id: str,
-    subject: str,
-    model_name: str,
-    fold_id: int,
-    train_runs: list[int],
-    test_run: int,
-    alphas: list[float],
-    per_run_y: dict[int, np.ndarray],
-    per_run_X: dict[int, dict[str, np.ndarray]],
-    sfreq_hz: float,
-    tmin_s: float,
-    tmax_s: float,
-    regularization_type: str,
-) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-
-    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
-
-    # 🔹 PREPARE FOLD ONCE
-    y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
-    y_test = per_run_y[test_run]
-
-    X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
-    X_test = per_run_X[test_run][model_name]
-
-    X_train, X_test = standardize_design_matrix_foldwise(X_train, X_test)
-
-    # 🔹 LOOP ONLY ALPHA FITS
-    for alpha in alphas:
-        r = _score_alpha_from_prepared(
-            alpha=float(alpha),
-            X_train=X_train,
-            y_train=y_train,
-            X_test=X_test,
-            y_test=y_test,
-            sfreq_hz=sfreq_hz,
-            tmin_s=tmin_s,
-            tmax_s=tmax_s,
-            regularization_type=regularization_type,
-        )
-
-        rows.append(
-            {
-                "dyad_id": dyad_id,
-                "subject": subject,
-                "model": model_name,
-                "fold_id": int(fold_id),
-                "test_run": int(test_run),
-                "alpha": float(alpha),
-                "r": float(r),
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-def _choose_best_alpha_inner(
-    *,
-    dyad_id: str,
-    subject: str,
-    model_name: str,
-    train_runs: list[int],
-    per_run_y: dict[int, np.ndarray],
-    per_run_X: dict[int, dict[str, np.ndarray]],
-    alphas: list[float],
-    sfreq_hz: float,
-    tmin_s: float,
-    tmax_s: float,
-    alpha_default: float,
-    regularization_type: str,
-) -> tuple[float, pd.DataFrame]:
-    if len(train_runs) < 2:
-        df = pd.DataFrame(
-            [
-                {
-                    "dyad_id": dyad_id,
-                    "subject": subject,
-                    "model": model_name,
-                    "alpha": float(alpha_default),
-                    "inner_fold": 0,
-                    "test_run": None,
-                    "r": float("nan"),
-                    "note": "inner_cv_skipped_only_one_training_run",
-                }
-            ]
-        )
-        return float(alpha_default), df
-
-    res = select_alpha_nested_loro(
-        dyad_id=dyad_id,
-        subject=subject,
-        model_name=model_name,
-        runs_train_outer=train_runs,
-        per_run_y=per_run_y,
-        per_run_X=per_run_X,
-        alphas=alphas,
-        sfreq_hz=sfreq_hz,
-        tmin_s=tmin_s,
-        tmax_s=tmax_s,
-        regularization_type=regularization_type,
-    )
-    return float(res.best_alpha), res.table
+    return lags_samples / float(sfreq_hz)
 
 
 # =============================================================================
@@ -349,7 +227,7 @@ def _compute_one_dyad_subject(
     ds_index: pd.DataFrame,
     trf_cfg: EvokedTrfConfig,
     picks: str | list[str],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, TRFResult]]:
     _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_subject_run_data(
         out_dir=out_dir,
         dyad_id=dyad_id,
@@ -360,79 +238,86 @@ def _compute_one_dyad_subject(
         picks=picks,
     )
 
-    models = list_models()
-    outer_folds = _outer_folds_from_runs(runs)
-
+    models = list_models(trf_cfg.models)
     inner_rows: list[pd.DataFrame] = []
     outer_rows: list[pd.DataFrame] = []
-    best_alpha_rows: list[dict[str, object]] = []
+    best_alpha_frames: list[pd.DataFrame] = []
+    trf_results_by_model: dict[str, TRFResult] = {}
+
+    lags_s = _canonical_lags_s(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s)
+    gap_samples = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s) + 1
 
     progress = _outer_cv_progress_bar(
         dyad_id=dyad_id,
         subject=subject,
-        total=len(outer_folds) * len(models),
+        total=len(runs) * len(models),
     )
     try:
-        for train_runs, test_run, fold_id in outer_folds:
-            for model_name in models:
-                best_alpha, inner_df = _choose_best_alpha_inner(
-                    dyad_id=dyad_id,
-                    subject=subject,
-                    model_name=model_name,
-                    train_runs=train_runs,
-                    per_run_y=per_run_y,
-                    per_run_X=per_run_X,
-                    alphas=trf_cfg.ridge_alpha_grid,
-                    sfreq_hz=sfreq_hz,
-                    tmin_s=trf_cfg.tmin_s,
-                    tmax_s=trf_cfg.tmax_s,
-                    alpha_default=trf_cfg.ridge_alpha_default,
-                    regularization_type=trf_cfg.regularization_type,
-                )
-                inner_df = inner_df.assign(outer_fold=int(fold_id), outer_test_run=int(test_run))
-                inner_rows.append(inner_df)
-
-                best_alpha_rows.append(
-                    {
+        for model_name in models:
+            trf_result = run_trf(
+                X_by_run={r: per_run_X[r][model_name] for r in runs},  # type: ignore[arg-type]
+                y_by_run={r: per_run_y[r] for r in runs},  # type: ignore[arg-type]
+                lags=np.asarray(lags_s, dtype=float),
+                alpha_grid=np.asarray(trf_cfg.ridge_alpha_grid, dtype=float),
+                cv_config={
+                    "gap_samples": int(gap_samples),
+                    "alpha_default": float(trf_cfg.ridge_alpha_default),
+                    "concat_fn": concatenate_with_gap,
+                    "standardize_fn": standardize_design_matrix_foldwise,
+                    "fit_fn": lambda *, X_train, y_train, alpha: fit_receptive_field(
+                        X_train=X_train,
+                        y_train=y_train,
+                        sfreq_hz=sfreq_hz,
+                        tmin_s=trf_cfg.tmin_s,
+                        tmax_s=trf_cfg.tmax_s,
+                        ridge_alpha=float(alpha),
+                        regularization_type=trf_cfg.regularization_type,
+                    ),
+                    "predict_fn": predict_receptive_field,
+                    "score_fn": score_multichannel_mean_r,
+                    "extract_kernel_fn": lambda rf: _extract_rf_coef_and_lags(
+                        rf=rf,
+                        sfreq_hz=sfreq_hz,
+                        tmin_s=trf_cfg.tmin_s,
+                        tmax_s=trf_cfg.tmax_s,
+                    ),
+                    "table_meta": {
                         "dyad_id": dyad_id,
                         "subject": subject,
                         "model": model_name,
-                        "fold_id": int(fold_id),
-                        "test_run": int(test_run),
-                        "best_alpha": float(best_alpha),
-                    }
-                )
-
-                outer_full = _outer_scores_full_table(
-                    dyad_id=dyad_id,
-                    subject=subject,
-                    model_name=model_name,
-                    fold_id=int(fold_id),
-                    train_runs=train_runs,
-                    test_run=int(test_run),
-                    alphas=trf_cfg.ridge_alpha_grid,
-                    per_run_y=per_run_y,
-                    per_run_X=per_run_X,
-                    sfreq_hz=sfreq_hz,
-                    tmin_s=trf_cfg.tmin_s,
-                    tmax_s=trf_cfg.tmax_s,
-                    regularization_type=trf_cfg.regularization_type,
-                )
-                outer_full["chosen_alpha"] = float(best_alpha)
-                outer_rows.append(outer_full)
-                progress.update(1)
+                    },
+                    "collect_predictions": False,
+                },
+            )
+            trf_results_by_model[model_name] = trf_result
+            if trf_result.inner_scores is not None:
+                inner_rows.append(trf_result.inner_scores)
+            outer_rows.append(trf_result.outer_scores)
+            if trf_result.best_alpha_table is not None:
+                best_alpha_frames.append(trf_result.best_alpha_table)
+            progress.update(len(runs))
     finally:
         progress.close()
 
     inner_scores = pd.concat(inner_rows, ignore_index=True) if inner_rows else pd.DataFrame()
+    if not inner_scores.empty:
+        inner_scores = inner_scores.sort_values(
+            ["dyad_id", "subject", "outer_fold", "model", "inner_fold", "alpha"],
+            kind="mergesort",
+        ).reset_index(drop=True)
     outer_scores = pd.concat(outer_rows, ignore_index=True) if outer_rows else pd.DataFrame()
-    best_alpha = pd.DataFrame(best_alpha_rows)
+    if not outer_scores.empty:
+        outer_scores = outer_scores.sort_values(
+            ["dyad_id", "subject", "fold_id", "model", "alpha"],
+            kind="mergesort",
+        ).reset_index(drop=True)
+    best_alpha = pd.concat(best_alpha_frames, ignore_index=True) if best_alpha_frames else pd.DataFrame()
 
     # Summary delta_r using chosen_alpha score for each fold/model vs baseline chosen_alpha
-    summary = summarize_scores(dyad_id=dyad_id, subject=subject, outer_scores=outer_scores)
+    summary = trf_scoring.summarize_scores(dyad_id=dyad_id, subject=subject, outer_scores=outer_scores)
 
     # Best model per subject = max mean delta_r (excluding baseline)
-    best_model = best_model_table(dyad_id=dyad_id, subject=subject, summary=summary)
+    best_model = trf_scoring.best_model_table(dyad_id=dyad_id, subject=subject, summary=summary)
 
     # Save final RF params for the best model only (trained on all runs)
     final_model_rows = fit_and_package_best_model(
@@ -448,7 +333,7 @@ def _compute_one_dyad_subject(
         regularization_type=trf_cfg.regularization_type,
     )
 
-    return summary, inner_scores, outer_scores, pd.concat([best_alpha, final_model_rows], ignore_index=True)
+    return summary, inner_scores, outer_scores, pd.concat([best_alpha, final_model_rows], ignore_index=True), trf_results_by_model
 
 
 def _prepare_subject_run_data(
@@ -500,8 +385,11 @@ def _prepare_subject_run_data(
         X_by_model, names_by_model = build_run_matrices(
             ev_run=ev_run,
             sfreq_hz=sfreq_hz,
+            lags_s=_canonical_lags_s(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s),
             n_samples=y.shape[0],
+            run_id=int(run),
             sample_t0_s=float(run_data.times_s[0]),
+            models=trf_cfg.models,
             continuous_regressors={"emg": emg_run},
         )
 
@@ -522,65 +410,11 @@ def _prepare_subject_run_data(
 
 
 def summarize_scores(*, dyad_id: str, subject: str, outer_scores: pd.DataFrame) -> pd.DataFrame:
-    """
-    Produce the main scores.parquet table:
-    subject, dyad_id, run, model, fold_id, r, r_baseline, delta_r
-
-    We use r at chosen_alpha for each (model, fold).
-
-    DataFrame format example
-    ------------------------
-    dyad_id   subject   run   model      fold_id   r     r_baseline  delta_r
-    dyad-001  sub-001   1     baseline   0         0.01  0.01        0.00
-    dyad-001  sub-001   1     self_rate  0         0.02  0.01        0.01
-    """
-    required = {"dyad_id", "subject", "model", "fold_id", "test_run", "alpha", "r", "chosen_alpha"}
-    missing = required - set(outer_scores.columns)
-    if missing:
-        raise ValueError(f"outer_scores missing columns: {sorted(missing)}")
-
-    chosen = outer_scores.loc[outer_scores["alpha"] == outer_scores["chosen_alpha"]].copy()
-    chosen = chosen.rename(columns={"test_run": "run"})
-    chosen = chosen[["dyad_id", "subject", "run", "model", "fold_id", "r"]]
-
-    base = chosen.loc[chosen["model"] == "baseline", ["dyad_id", "subject", "run", "fold_id", "r"]].rename(
-        columns={"r": "r_baseline"}
-    )
-
-    merged = chosen.merge(base, on=["dyad_id", "subject", "run", "fold_id"], how="left")
-    merged["delta_r"] = merged["r"] - merged["r_baseline"]
-    return merged
+    return trf_scoring.summarize_scores(dyad_id=dyad_id, subject=subject, outer_scores=outer_scores)
 
 
 def best_model_table(*, dyad_id: str, subject: str, summary: pd.DataFrame) -> pd.DataFrame:
-    """
-    Best model per subject by mean delta_r across folds (excluding baseline).
-    """
-    nonbase = summary.loc[summary["model"] != "baseline"].copy()
-    if nonbase.empty:
-        return pd.DataFrame(
-            [
-                {
-                    "dyad_id": dyad_id,
-                    "subject": subject,
-                    "best_model": "baseline",
-                    "mean_delta_r": 0.0,
-                }
-            ]
-        )
-    means = nonbase.groupby("model", as_index=False)["delta_r"].mean(numeric_only=True)
-    means = means.sort_values(["delta_r", "model"], ascending=[False, True])
-    best = means.iloc[0].to_dict()
-    return pd.DataFrame(
-        [
-            {
-                "dyad_id": dyad_id,
-                "subject": subject,
-                "best_model": str(best["model"]),
-                "mean_delta_r": float(best["delta_r"]),
-            }
-        ]
-    )
+    return trf_scoring.best_model_table(dyad_id=dyad_id, subject=subject, summary=summary)
 
 
 def _mode_alpha(values: list[float]) -> float:
@@ -744,7 +578,7 @@ def compute_subject_scores(
     subject: str,
     picks: str | list[str] = "eeg",
 ) -> pd.DataFrame:
-    summary, _, _, _ = _compute_subject_artifacts(
+    summary, _, _, _, _ = _compute_subject_artifacts(
         cfg=cfg,
         out_dir=out_dir,
         dyad_id=dyad_id,
@@ -753,7 +587,6 @@ def compute_subject_scores(
     )
     return summary
 
-
 def _compute_subject_artifacts(
     *,
     cfg: dict[str, Any],
@@ -761,7 +594,7 @@ def _compute_subject_artifacts(
     dyad_id: str,
     subject: str,
     picks: str | list[str] = "eeg",
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, TRFResult]]:
     trf_cfg = parse_evoked_trf_config(cfg)
     if trf_cfg.scheme != "leave_one_run_out":
         raise ValueError(f"Unsupported evoked_trf.cv.scheme: {trf_cfg.scheme}")
@@ -769,7 +602,7 @@ def _compute_subject_artifacts(
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
 
-    summary, inner_scores, outer_scores, packaged = _compute_one_dyad_subject(
+    summary, inner_scores, outer_scores, packaged, trf_results_by_model = _compute_one_dyad_subject(
         out_dir=out_dir,
         dyad_id=str(dyad_id),
         subject=str(subject),
@@ -778,7 +611,7 @@ def _compute_subject_artifacts(
         trf_cfg=trf_cfg,
         picks=picks,
     )
-    return summary, inner_scores, outer_scores, packaged
+    return summary, inner_scores, outer_scores, packaged, trf_results_by_model
 
 
 def _subject_scores_output_path(*, out_dir: Path, dyad_id: str, subject: str) -> Path:
@@ -802,34 +635,6 @@ def _extract_rf_coef_and_lags(*, rf: Any, sfreq_hz: float, tmin_s: float, tmax_s
     else:
         lags_s = np.asarray(delays, dtype=float) / float(sfreq_hz)
     return np.asarray(coef), np.asarray(lags_s, dtype=float)
-
-
-def _fit_outer_fold_kernel(
-    *,
-    model_name: str,
-    train_runs: list[int],
-    alpha: float,
-    per_run_y: dict[int, np.ndarray],
-    per_run_X: dict[int, dict[str, np.ndarray]],
-    sfreq_hz: float,
-    tmin_s: float,
-    tmax_s: float,
-    regularization_type: str,
-) -> tuple[np.ndarray, np.ndarray]:
-    gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
-    y_train = concatenate_with_gap([per_run_y[r] for r in train_runs], gap_samples=gap)
-    X_train = concatenate_with_gap([per_run_X[r][model_name] for r in train_runs], gap_samples=gap)
-    X_train, _ = standardize_design_matrix_foldwise(X_train, X_train)
-    rf = fit_receptive_field(
-        X_train=X_train,
-        y_train=y_train,
-        sfreq_hz=sfreq_hz,
-        tmin_s=tmin_s,
-        tmax_s=tmax_s,
-        ridge_alpha=float(alpha),
-        regularization_type=regularization_type,
-    )
-    return _extract_rf_coef_and_lags(rf=rf, sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s)
 
 
 def _fit_full_data_kernel(
@@ -913,7 +718,7 @@ def write_subject_output(
     subject: str,
     picks: str | list[str] = "eeg",
 ) -> Path:
-    scores, inner_scores, outer_scores, _ = _compute_subject_artifacts(
+    scores, inner_scores, outer_scores, _, trf_results_by_model = _compute_subject_artifacts(
         cfg=cfg,
         out_dir=out_dir,
         dyad_id=dyad_id,
@@ -946,120 +751,68 @@ def write_subject_output(
         sfreq_hz=sfreq_hz,
     )
 
-    summary_fold_sorted = scores.sort_values(["dyad_id", "subject", "run", "model", "fold_id"], kind="mergesort").reset_index(
-        drop=True
+    subject_tables = trf_scoring.build_subject_score_tables(
+        dyad_id=str(dyad_id),
+        subject=str(subject),
+        scores=scores,
+        inner_scores=inner_scores,
+        outer_scores=outer_scores,
     )
-    inner_sorted = (
-        inner_scores.sort_values(["dyad_id", "subject", "model", "outer_fold", "inner_fold", "alpha"], kind="mergesort")
-        .reset_index(drop=True)
-        if not inner_scores.empty
-        else inner_scores
-    )
-    outer_sorted = (
-        outer_scores.sort_values(["dyad_id", "subject", "model", "fold_id", "alpha"], kind="mergesort").reset_index(
-            drop=True
-        )
-        if not outer_scores.empty
-        else outer_scores
-    )
-
-    # All alpha x outer-fold evaluations (no reduction).
-    alpha_grid = outer_sorted.copy()
-
-    # Inner CV transparency: mean score per alpha.
-    if inner_sorted.empty:
-        inner_cv = pd.DataFrame(columns=["dyad_id", "subject", "model", "alpha", "mean_r"])
-    else:
-        inner_cv = (
-            inner_sorted.groupby(["dyad_id", "subject", "model", "alpha"], as_index=False)["r"]
-            .mean(numeric_only=True)
-            .rename(columns={"r": "mean_r"})
-            .sort_values(["dyad_id", "subject", "model", "alpha"], kind="mergesort")
-            .reset_index(drop=True)
-        )
-
-    # Per-fold outer scores at chosen alpha with baseline comparison.
-    selected = outer_sorted.loc[np.isclose(outer_sorted["alpha"], outer_sorted["chosen_alpha"])].copy()
-    selected = selected[["dyad_id", "subject", "model", "fold_id", "test_run", "alpha", "r"]]
-    base = selected.loc[selected["model"] == "baseline", ["fold_id", "test_run", "r"]].rename(columns={"r": "baseline_r"})
-    outer_fold_scores = selected.merge(base, on=["fold_id", "test_run"], how="left")
-    outer_fold_scores["delta_r"] = outer_fold_scores["r"] - outer_fold_scores["baseline_r"]
-    outer_fold_scores = outer_fold_scores.sort_values(["model", "test_run"], kind="mergesort").reset_index(drop=True)
-
-    # One row per model summary for aggregation/reporting.
-    best_alpha_by_model = (
-        selected.groupby("model", as_index=False)["alpha"]
-        .agg(lambda x: float(pd.Series(list(x)).mode().iloc[0]))
-        .rename(columns={"alpha": "best_alpha"})
-    )
-    model_comparison = (
-        outer_fold_scores.groupby("model", as_index=False)
-        .agg(
-            mean_r=("r", "mean"),
-            mean_baseline_r=("baseline_r", "mean"),
-            mean_delta_r=("delta_r", "mean"),
-        )
-        .merge(best_alpha_by_model, on="model", how="left")
-        .sort_values(["mean_delta_r", "model"], ascending=[False, True], kind="mergesort")
-        .reset_index(drop=True)
-    )
-    summary = model_comparison.assign(dyad_id=str(dyad_id), subject=str(subject))[
-        ["dyad_id", "subject", "model", "mean_r", "mean_baseline_r", "mean_delta_r", "best_alpha"]
-    ]
 
     # Keep existing subject-level score output for aggregation compatibility.
-    summary_fold_sorted.to_parquet(out_path, index=False)
-    alpha_grid.to_parquet(subject_dir / "alpha_grid.parquet", index=False)
-    inner_cv.to_parquet(subject_dir / "inner_cv.parquet", index=False)
-    model_comparison.to_parquet(subject_dir / "model_comparison.parquet", index=False)
-    summary.to_parquet(subject_dir / "summary.parquet", index=False)
+    subject_tables.summary_fold_sorted.to_parquet(out_path, index=False)
+    subject_tables.alpha_grid.to_parquet(subject_dir / "alpha_grid.parquet", index=False)
+    subject_tables.inner_cv.to_parquet(subject_dir / "inner_cv.parquet", index=False)
+    subject_tables.model_comparison.to_parquet(subject_dir / "model_comparison.parquet", index=False)
+    subject_tables.summary.to_parquet(subject_dir / "summary.parquet", index=False)
     # Backward-compatible detailed filenames retained.
-    alpha_grid.to_parquet(subject_dir / "alpha_grid_scores.parquet", index=False)
-    inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
-    outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
+    subject_tables.alpha_grid.to_parquet(subject_dir / "alpha_grid_scores.parquet", index=False)
+    subject_tables.inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
+    subject_tables.outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
 
-    model_to_regs = {m.model_name: [r.name for r in m.regressors] for m in get_models()}
+    model_to_regs = {m.model_name: [r.name for r in m.regressors] for m in trf_cfg.models}
     for model_name in model_to_regs:
         model_dir = subject_dir / "models" / model_name
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        model_outer = outer_fold_scores.loc[outer_fold_scores["model"] == model_name].copy()
+        model_outer = subject_tables.outer_fold_scores.loc[subject_tables.outer_fold_scores["model"] == model_name].copy()
         model_outer = model_outer[
             ["dyad_id", "subject", "model", "test_run", "alpha", "r", "baseline_r", "delta_r"]
         ].sort_values(["test_run"], kind="mergesort")
-        model_outer.to_parquet(model_dir / "outer_scores.parquet", index=False)
+        model_trf = trf_results_by_model.get(model_name)
+        if model_trf is None:
+            raise ValueError(f"Missing TRF result for model={model_name}")
+        write_trf_artifacts(
+            TRFResult(
+                kernels_outer=np.asarray(model_trf.kernels_outer),
+                chosen_alpha=np.asarray(model_trf.chosen_alpha, dtype=float),
+                outer_scores=model_outer,
+                lags=np.asarray(model_trf.lags, dtype=float),
+                predictions_by_fold=None,
+            ),
+            model_dir,
+        )
 
-        fold_kernels: list[np.ndarray] = []
-        fold_lags: np.ndarray | None = None
-        for row in model_outer.itertuples(index=False):
-            test_run = int(row.test_run)
-            train_runs = [r for r in runs if int(r) != test_run]
-            coef_fold, lags_fold = _fit_outer_fold_kernel(
-                model_name=model_name,
-                train_runs=train_runs,
-                alpha=float(row.alpha),
-                per_run_y=per_run_y,
-                per_run_X=per_run_X,
-                sfreq_hz=sfreq_hz,
-                tmin_s=trf_cfg.tmin_s,
-                tmax_s=trf_cfg.tmax_s,
-                regularization_type=trf_cfg.regularization_type,
-            )
-            # kernels_outer.npy axis order: (outer_fold, channel, regressor, lag)
-            fold_kernels.append(coef_fold)
-            if fold_lags is None:
-                fold_lags = lags_fold
-            elif not np.allclose(fold_lags, lags_fold):
-                raise ValueError(f"Inconsistent lag grid across folds for model={model_name}")
-        if not fold_kernels:
-            raise ValueError(f"No outer-fold kernels generated for model={model_name}")
-        np.save(model_dir / "kernels_outer.npy", np.stack(fold_kernels, axis=0))
-        np.save(model_dir / "lags.npy", np.asarray(fold_lags, dtype=float))
-
-        best_alpha_row = best_alpha_by_model.loc[best_alpha_by_model["model"] == model_name]
+        best_alpha_row = subject_tables.best_alpha_by_model.loc[subject_tables.best_alpha_by_model["model"] == model_name]
         if best_alpha_row.empty:
-            raise ValueError(f"Missing best_alpha for model={model_name}")
-        best_alpha = float(best_alpha_row.iloc[0]["best_alpha"])
+            chosen = np.asarray(model_trf.chosen_alpha, dtype=float).ravel()
+            finite = chosen[np.isfinite(chosen)]
+            if finite.size > 0:
+                best_alpha = float(pd.Series(finite.tolist()).mode().iloc[0])
+                LOGGER.warning(
+                    "Missing best_alpha table row for model=%s; using mode(chosen_alpha)=%.6g fallback.",
+                    model_name,
+                    best_alpha,
+                )
+            else:
+                best_alpha = float(trf_cfg.ridge_alpha_default)
+                LOGGER.warning(
+                    "Missing best_alpha table row for model=%s and no finite chosen_alpha; using default alpha=%.6g.",
+                    model_name,
+                    best_alpha,
+                )
+        else:
+            best_alpha = float(best_alpha_row.iloc[0]["best_alpha"])
         coef_full, lags_full = _fit_full_data_kernel(
             model_name=model_name,
             alpha=best_alpha,
@@ -1070,7 +823,7 @@ def write_subject_output(
             tmax_s=trf_cfg.tmax_s,
             regularization_type=trf_cfg.regularization_type,
         )
-        if not np.allclose(np.asarray(fold_lags, dtype=float), np.asarray(lags_full, dtype=float)):
+        if not np.allclose(np.asarray(model_trf.lags, dtype=float), np.asarray(lags_full, dtype=float)):
             raise ValueError(f"Refit lag grid mismatch for model={model_name}")
         regs = per_run_feature_names[runs[0]][model_name]
         for reg_idx, reg_name in enumerate(regs):

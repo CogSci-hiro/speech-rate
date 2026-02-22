@@ -8,6 +8,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from rate.config import ConfigValidationError, load_and_validate_config
+from rate.debug import limit_dataframe_by_debug_max_files
 from rate.eeg.resample import resample_index_table
 
 LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,12 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
 
     LOGGER.info("Reading dataset index: %s", in_index)
     ds_index = pd.read_parquet(in_index)
+    ds_index = limit_dataframe_by_debug_max_files(
+        ds_index,
+        cfg,
+        logger=LOGGER,
+        label="resample dataset index",
+    )
 
     downsample_hz = float(cfg["evoked_trf"]["downsample_hz"])
     eeg_cache_dir = out_dir / "eeg_resampled"

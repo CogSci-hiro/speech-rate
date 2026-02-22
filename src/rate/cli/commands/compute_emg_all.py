@@ -11,6 +11,7 @@ import pandas as pd
 
 from rate.cli.commands.compute_emg import compute_subject_emg
 from rate.config import ConfigValidationError, load_and_validate_config
+from rate.debug import limit_dataframe_by_debug_max_files
 
 LOGGER = logging.getLogger(__name__)
 REQUIRES_CONFIG = True
@@ -55,6 +56,12 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     if not dataset_index_path.exists():
         raise FileNotFoundError(f"dataset index not found: {dataset_index_path}")
     ds_index = pd.read_parquet(dataset_index_path)
+    ds_index = limit_dataframe_by_debug_max_files(
+        ds_index,
+        resolved,
+        logger=LOGGER,
+        label="compute-emg-all dataset index",
+    )
 
     if "status" in ds_index.columns:
         ds_index = ds_index.loc[ds_index["status"].astype(str).str.lower() == "ok"].copy()

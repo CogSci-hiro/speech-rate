@@ -10,6 +10,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from rate.config import ConfigValidationError, load_and_validate_config
+from rate.debug import limit_dataframe_by_debug_max_files
 from rate.evoked_trf.score import write_subject_output
 
 LOGGER = logging.getLogger(__name__)
@@ -58,6 +59,12 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         raise FileNotFoundError(f"dataset index not found: {dataset_index_path}")
 
     ds = pd.read_parquet(dataset_index_path)
+    ds = limit_dataframe_by_debug_max_files(
+        ds,
+        resolved,
+        logger=LOGGER,
+        label="evoked-trf-subject-all dataset index",
+    )
     if "status" in ds.columns:
         ds = ds.loc[ds["status"].astype(str).str.lower() == "ok"].copy()
     pairs = sorted(

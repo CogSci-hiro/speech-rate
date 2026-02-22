@@ -17,6 +17,8 @@ DEFAULT_IPU_MIN_SYLLABLES = 3
 DEFAULT_TIME_WITHIN_RUN_NORMALIZE = True
 DEFAULT_TIME_WITHIN_RUN_METHOD = "run_duration"
 DEFAULT_MATCHING_ABSDIFF_WINDOW_S = 1.0
+DEFAULT_DEBUG_ENABLED = False
+DEFAULT_DEBUG_MAX_FILES: int | None = None
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config" / "schema.json"
 
 
@@ -109,6 +111,26 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(matching_value, dict):
         raise ConfigValidationError("`events.matching` must be a mapping.")
     matching_value.setdefault("absdiff_window_s", DEFAULT_MATCHING_ABSDIFF_WINDOW_S)
+
+    debug_value = resolved.setdefault("debug", {})
+    if debug_value is None:
+        debug_value = {}
+        resolved["debug"] = debug_value
+    if not isinstance(debug_value, dict):
+        raise ConfigValidationError("`debug` must be a mapping.")
+    debug_value.setdefault("enabled", DEFAULT_DEBUG_ENABLED)
+    debug_value.setdefault("max_files", DEFAULT_DEBUG_MAX_FILES)
+    if not isinstance(debug_value.get("enabled"), bool):
+        raise ConfigValidationError("`debug.enabled` must be a boolean.")
+    max_files = debug_value.get("max_files")
+    if max_files is not None:
+        try:
+            max_files_int = int(max_files)
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError("`debug.max_files` must be a positive integer or null.") from exc
+        if max_files_int < 1:
+            raise ConfigValidationError("`debug.max_files` must be >= 1 when provided.")
+        debug_value["max_files"] = max_files_int
 
     return resolved
 
