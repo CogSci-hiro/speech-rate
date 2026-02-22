@@ -273,7 +273,8 @@ reporting:
   alpha: 0.05
 
   trf:
-    regressors: ["self_rate", "other_rate", "abs_diff"]
+
+    regressors: ["self_rate", "other_rate", "abs_diff", "self_rate_sq", "other_rate_sq", "abs_diff_sq"]
     electrodes: ["Fz", "Pz"]
     # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
     # Global for all regressors:
