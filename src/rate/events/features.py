@@ -55,7 +55,7 @@ def compute_time_within_run(group_df: pd.DataFrame, normalize: bool, method: str
 
 
 def add_event_rate_features(unit_df: pd.DataFrame, absdiff_window_s: float, normalize: bool, method: str) -> pd.DataFrame:
-    """Add self_rate/other_rate/latency/abs_diff/time_within_run features."""
+    """Add rate, squared-rate, latency, abs-diff, and time-within-run features."""
     enriched = unit_df.copy()
     enriched["self_rate"] = enriched["syllables"] / enriched["duration_s"]
     enriched["other_rate"], enriched["listener"], enriched["latency"] = compute_other_rate(
@@ -63,6 +63,9 @@ def add_event_rate_features(unit_df: pd.DataFrame, absdiff_window_s: float, norm
         window_s=absdiff_window_s,
     )
     enriched["abs_diff"] = (enriched["self_rate"] - enriched["other_rate"]).abs()
+    enriched["self_rate_sq"] = enriched["self_rate"] ** 2
+    enriched["other_rate_sq"] = enriched["other_rate"] ** 2
+    enriched["abs_diff_sq"] = enriched["abs_diff"] ** 2
     enriched["time_within_run"] = compute_time_within_run(
         enriched,
         normalize=normalize,

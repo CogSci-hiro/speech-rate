@@ -13,6 +13,10 @@ KERNEL0_BEHAVIOR_MODEL_FEATURES = {
     "self_rate": {"feature_index": 3, "feature_name": "self_rate"},
     "other_rate": {"feature_index": 3, "feature_name": "other_rate"},
     "abs_diff": {"feature_index": 3, "feature_name": "abs_diff"},
+    # quadratic extensions: [self_onset_impulse, other_offset_impulse, emg, linear, squared]
+    "self_rate_sq": {"feature_index": 4, "feature_name": "self_rate_sq"},
+    "other_rate_sq": {"feature_index": 4, "feature_name": "other_rate_sq"},
+    "abs_diff_sq": {"feature_index": 4, "feature_name": "abs_diff_sq"},
 }
 KERNEL0_BEHAVIOR_MODELS = list(KERNEL0_BEHAVIOR_MODEL_FEATURES.keys())
 

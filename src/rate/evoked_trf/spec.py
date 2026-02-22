@@ -7,7 +7,16 @@ import numpy as np
 import pandas as pd
 
 
-RegressorKind = Literal["impulse", "self_rate", "other_rate", "abs_diff", "emg"]
+RegressorKind = Literal[
+    "impulse",
+    "self_rate",
+    "other_rate",
+    "abs_diff",
+    "self_rate_sq",
+    "other_rate_sq",
+    "abs_diff_sq",
+    "emg",
+]
 TimeLock = Literal["self_IPU_onset", "other_IPU_offset"]
 
 
@@ -142,6 +151,33 @@ def emg_regressor() -> RegressorSpec:
     )
 
 
+def self_rate_sq_regressor() -> RegressorSpec:
+    return RegressorSpec(
+        name="self_rate_sq",
+        column="self_rate_sq",
+        time_lock="self_IPU_onset",
+        kind="self_rate_sq",
+    )
+
+
+def other_rate_sq_regressor() -> RegressorSpec:
+    return RegressorSpec(
+        name="other_rate_sq",
+        column="other_rate_sq",
+        time_lock="other_IPU_offset",
+        kind="other_rate_sq",
+    )
+
+
+def abs_diff_sq_regressor() -> RegressorSpec:
+    return RegressorSpec(
+        name="abs_diff_sq",
+        column="abs_diff_sq",
+        time_lock="self_IPU_onset",
+        kind="abs_diff_sq",
+    )
+
+
 # ---------------------------------------------------------------------
 # Model collection
 # ---------------------------------------------------------------------
@@ -161,6 +197,12 @@ def get_models() -> tuple[ModelSpec, ...]:
         Baseline + partner speaking-rate regressor.
     abs_diff
         Baseline + absolute rate-difference regressor.
+    self_rate_sq
+        Baseline + self speaking-rate regressor + squared self speaking-rate regressor.
+    other_rate_sq
+        Baseline + partner speaking-rate regressor + squared partner speaking-rate regressor.
+    abs_diff_sq
+        Baseline + absolute rate-difference regressor + squared absolute rate-difference regressor.
 
     Usage example
     -------------
@@ -203,7 +245,37 @@ def get_models() -> tuple[ModelSpec, ...]:
             abs_diff_regressor(),
         ),
     )
-    return (baseline, self_rate, other_rate, abs_diff)
+    self_rate_sq = ModelSpec(
+        model_name="self_rate_sq",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            self_rate_regressor(),
+            self_rate_sq_regressor(),
+        ),
+    )
+    other_rate_sq = ModelSpec(
+        model_name="other_rate_sq",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            other_rate_regressor(),
+            other_rate_sq_regressor(),
+        ),
+    )
+    abs_diff_sq = ModelSpec(
+        model_name="abs_diff_sq",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            abs_diff_regressor(),
+            abs_diff_sq_regressor(),
+        ),
+    )
+    return (baseline, self_rate, other_rate, abs_diff, self_rate_sq, other_rate_sq, abs_diff_sq)
 
 
 # ---------------------------------------------------------------------

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,6 @@ from rate.fooof.fit import fit_fooof_to_window
 from rate.fooof.io import (
     write_channel_ddc_table,
     write_qc_summary,
-    write_roi_lmm_table,
     write_settings,
     write_trial_channels,
     write_trial_rois,
@@ -57,6 +57,32 @@ class _NoOpProgressBar:
 
     def close(self) -> None:
         return
+
+
+def _finite_float_or_none(value: object) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _serialize_peak_params_json(peaks: object) -> str:
+    if not isinstance(peaks, list) or not peaks:
+        return "[]"
+
+    rows: list[dict[str, float | None]] = []
+    for peak in peaks:
+        if not isinstance(peak, dict):
+            continue
+        rows.append(
+            {
+                "center_frequency": _finite_float_or_none(peak.get("center_frequency")),
+                "power": _finite_float_or_none(peak.get("power")),
+                "bandwidth": _finite_float_or_none(peak.get("bandwidth")),
+            }
+        )
+    return json.dumps(rows, sort_keys=True, separators=(",", ":"))
 
 
 def _window_progress(iterable, *, enabled: bool, desc: str, total: int | None = None):
@@ -294,6 +320,9 @@ def process_subject_run(
                     "r_squared": float(fit_result["r_squared"]),
                     "error": float(fit_result["error"]),
                     "fit_success": bool(fit_result["fit_success"]),
+                    # Additive trial-level metadata for later model-spectrum reconstruction.
+                    "fooof_aperiodic_mode": str(spec.aperiodic_mode),
+                    "fooof_peak_params_json": _serialize_peak_params_json(fit_result.get("peaks", [])),
                 }
             )
 
@@ -402,7 +431,6 @@ def run_fooof_pipeline(
 
     ddc_channel_df = prepare_ddc_channel_table(trial_channels_df)
     write_channel_ddc_table(ddc_channel_df, out_dir)
-    write_roi_lmm_table(trial_rois_df, out_dir)
 
     qc_summary_df = trial_channels_df.copy()
     if qc_meta_rows:

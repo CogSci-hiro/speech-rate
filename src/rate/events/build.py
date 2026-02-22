@@ -32,6 +32,9 @@ REQUIRED_EVENTS_COLUMNS = [
     "other_rate",
     "latency",
     "abs_diff",
+    "self_rate_sq",
+    "other_rate_sq",
+    "abs_diff_sq",
     "time_within_run",
     "task",
     "duration_s",
@@ -109,6 +112,9 @@ def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[s
     unit_df["other_rate"] = pd.NA
     unit_df["latency"] = pd.NA
     unit_df["abs_diff"] = pd.NA
+    unit_df["self_rate_sq"] = pd.NA
+    unit_df["other_rate_sq"] = pd.NA
+    unit_df["abs_diff_sq"] = pd.NA
     unit_df["time_within_run"] = pd.NA
 
     return unit_df[REQUIRED_EVENTS_COLUMNS]
