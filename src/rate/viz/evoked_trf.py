@@ -32,7 +32,41 @@ def plot_joint_kernel(
     time_clusters : list of (t_start, t_end)
         Significant time intervals in seconds.
     """
-    fig = evoked.plot_joint(show=False)
+    fig = evoked.plot_joint(show=False, ts_args=dict(time_unit="ms"))
+
+    # Convert topomap titles to ms
+    for ax in fig.axes[0:]:  # skip main time-series axis
+        title = ax.get_title()
+        if "s" in title:
+            try:
+                # Extract numeric seconds
+                sec = float(title.replace(" s", "").strip())
+                ax.set_title(f"{int(sec * 1000)} ms")
+            except ValueError:
+                pass
+
+    for ax in fig.axes:
+        for line in ax.lines:
+            line.set_linewidth(1)
+
+    # Remove last axis (colorbar is typically last)
+    fig.delaxes(fig.axes[-1])
+
+    # Add shading to main time axis
+    main_ax = fig.axes[0]
+    times = evoked.times
+
+    # Set y axis
+    main_ax = fig.axes[-2]  # the main figure
+    main_ax.set_ylabel("A.U.")
+    main_ax.set_yticks([])
+
+    # Remove N_ave from title if present
+    main_ax = fig.axes[-2]
+
+    for text in main_ax.texts:
+        if "N$_" in text.get_text():
+            text.remove()
 
     # Add shading to main time axis
     main_ax = fig.axes[0]
