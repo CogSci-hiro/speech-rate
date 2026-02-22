@@ -229,7 +229,7 @@ fooof:
 ddc:
 
   feature_sets:
-    behaviour: ["self_rate", "other_rate", "abs_diff"]
+    behaviour: ["self_rate", "other_rate", "abs_diff", "self_rate_sq", "other_rate_sq", "abs_diff_sq"]
     eeg: ["aperiodic_offset", "aperiodic_exponent",
           "theta_pw", "alpha_pw", "beta_pw"]
 
