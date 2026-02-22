@@ -35,9 +35,9 @@ def write_trial_channels(df: pd.DataFrame, out_dir: Path) -> None:
 
 
 def write_trial_rois(df: pd.DataFrame, out_dir: Path) -> None:
-    path = _trial_level_dir(out_dir) / "fooof_trial_rois.parquet"
+    path = _trial_level_dir(out_dir) / "fooof_trial_rois.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_parquet_dataframe(df, path)
+    df.to_csv(path, index=False)
 
 
 def write_qc_summary(df: pd.DataFrame, out_dir: Path) -> None:

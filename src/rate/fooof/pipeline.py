@@ -7,6 +7,7 @@ from typing import Any
 import mne
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 
 from rate.fooof.aggregate import aggregate_to_rois, prepare_ddc_channel_table
 from rate.fooof.features import extract_band_features
@@ -122,97 +123,79 @@ def _finalize_channel_df(records: list[dict[str, Any]]) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = np.nan
     df = df.sort_values(
-        by=["dyad_id", "subject_id", "run", "event_id", "channel"],
+        by=["subject_id", "run", "event_id", "channel"],
         kind="mergesort",
     ).reset_index(drop=True)
     return df
 
 
-def run_fooof_pipeline(
-    config: dict,
+def _finalize_channel_concat(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    nonempty = [df for df in frames if not df.empty]
+    if not nonempty:
+        return pd.DataFrame(columns=CANONICAL_CHANNEL_COLUMNS)
+    df = pd.concat(nonempty, ignore_index=True)
+    for col in CANONICAL_CHANNEL_COLUMNS:
+        if col not in df.columns:
+            df[col] = np.nan
+    ordered_cols = [*CANONICAL_CHANNEL_COLUMNS, *[c for c in df.columns if c not in CANONICAL_CHANNEL_COLUMNS]]
+    df = df.loc[:, ordered_cols]
+    df = df.sort_values(
+        by=["subject_id", "run", "event_id", "channel"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    return df
+
+
+def _run_to_int(run_value: object) -> int:
+    text = str(run_value).strip()
+    try:
+        return int(float(text))
+    except ValueError as exc:
+        raise ValueError(f"Run value must be integer-like for FOOOF pipeline: {run_value!r}") from exc
+
+
+def process_subject_run(
+    subject_id: str,
+    run: int,
     dataset_index: pd.DataFrame,
     events_df: pd.DataFrame,
-    out_dir: Path,
-) -> None:
-    """Run the deterministic event-aligned FOOOF feature extraction pipeline."""
+    spec: FooofSpec,
+    config: dict,
+) -> pd.DataFrame:
+    """Process one (subject_id, run) block and return canonical channel-level rows only."""
     np.random.seed(resolve_random_seed(config))
-    _validate_inputs(dataset_index, events_df)
-    spec = build_fooof_spec(config)
 
-    if "status" in dataset_index.columns:
-        ds_rows = dataset_index.loc[dataset_index["status"].astype(str).str.lower() == "ok"].copy()
-    else:
-        ds_rows = dataset_index.copy()
+    run_key = _run_token(run)
+    ds_rows = dataset_index.loc[
+        (dataset_index["subject_id"].astype(str) == str(subject_id))
+        & (dataset_index["run"].map(_run_token) == run_key)
+    ].copy()
+    if ds_rows.empty:
+        return pd.DataFrame(columns=CANONICAL_CHANNEL_COLUMNS)
+
+    worker_sort_cols = [col for col in ("dyad_id", "subject_id", "run", "task") if col in ds_rows.columns]
+    ds_rows = ds_rows.sort_values(by=worker_sort_cols, kind="mergesort").reset_index(drop=True)
 
     records: list[dict[str, Any]] = []
-    qc_meta_rows: list[dict[str, Any]] = []
-
-    ds_rows = ds_rows.sort_values(by=["dyad_id", "subject_id", "run"], kind="mergesort").reset_index(drop=True)
+    raw_cache: dict[str, mne.io.BaseRaw] = {}
 
     for _, ds_row in ds_rows.iterrows():
         eeg_path = Path(str(ds_row["eeg_path"])).expanduser()
         if not eeg_path.exists():
-            qc_meta_rows.append(
-                {
-                    "dyad_id": str(ds_row["dyad_id"]),
-                    "subject_id": str(ds_row["subject_id"]),
-                    "run": _run_token(ds_row["run"]),
-                    "qc_stage": "input",
-                    "metric": "missing_eeg_file",
-                    "value": 1,
-                }
-            )
-            LOGGER.warning("Skipping missing EEG file: %s", eeg_path)
             continue
 
         row_events = _events_for_dataset_row(events_df, ds_row)
         if row_events.empty:
-            qc_meta_rows.append(
-                {
-                    "dyad_id": str(ds_row["dyad_id"]),
-                    "subject_id": str(ds_row["subject_id"]),
-                    "run": _run_token(ds_row["run"]),
-                    "qc_stage": "windows",
-                    "metric": "events_for_row",
-                    "value": 0,
-                }
-            )
             continue
 
-        raw = _read_raw_eeg(eeg_path)
-        sfreq = float(raw.info["sfreq"])
-        run_int = int(float(ds_row["run"])) if str(ds_row["run"]).strip().replace(".", "", 1).isdigit() else int(ds_row["run"])
+        eeg_key = str(eeg_path)
+        raw = raw_cache.get(eeg_key)
+        if raw is None:
+            raw = _read_raw_eeg(eeg_path)
+            raw_cache[eeg_key] = raw
 
-        boundary_excluded_events = _boundary_excluded_event_count(row_events, raw, spec)
-        n_eeg_channels = len(mne.pick_types(raw.info, eeg=True, exclude=[]))
-        qc_meta_rows.extend(
-            [
-                {
-                    "dyad_id": str(ds_row["dyad_id"]),
-                    "subject_id": str(ds_row["subject_id"]),
-                    "run": _run_token(ds_row["run"]),
-                    "qc_stage": "windows",
-                    "metric": "events_for_row",
-                    "value": int(len(row_events)),
-                },
-                {
-                    "dyad_id": str(ds_row["dyad_id"]),
-                    "subject_id": str(ds_row["subject_id"]),
-                    "run": _run_token(ds_row["run"]),
-                    "qc_stage": "windows",
-                    "metric": "boundary_excluded_events",
-                    "value": int(boundary_excluded_events),
-                },
-                {
-                    "dyad_id": str(ds_row["dyad_id"]),
-                    "subject_id": str(ds_row["subject_id"]),
-                    "run": _run_token(ds_row["run"]),
-                    "qc_stage": "windows",
-                    "metric": "eeg_channels",
-                    "value": int(n_eeg_channels),
-                },
-            ]
-        )
+        sfreq = float(raw.info["sfreq"])
+        run_int = _run_to_int(ds_row["run"])
 
         onset_by_event = (
             row_events.loc[:, ["event_id", "t_onset"]]
@@ -221,7 +204,7 @@ def run_fooof_pipeline(
             .to_dict()
         )
 
-        for subject_id, run, event_id, channel_name, window_data in iter_event_windows(
+        for _, window_run, event_id, channel_name, window_data in iter_event_windows(
             raw=raw,
             events_df=row_events,
             spec=spec,
@@ -238,7 +221,7 @@ def run_fooof_pipeline(
                 {
                     "dyad_id": str(ds_row["dyad_id"]),
                     "subject_id": str(subject_id),
-                    "run": int(run),
+                    "run": int(window_run),
                     "event_id": str(event_id),
                     "channel": str(channel_name),
                     "window_start": float(window_start),
@@ -259,7 +242,96 @@ def run_fooof_pipeline(
                 }
             )
 
-    trial_channels_df = _finalize_channel_df(records)
+    return _finalize_channel_df(records)
+
+
+def run_fooof_pipeline(
+    config: dict,
+    dataset_index: pd.DataFrame,
+    events_df: pd.DataFrame,
+    out_dir: Path,
+) -> None:
+    """Run the deterministic event-aligned FOOOF feature extraction pipeline."""
+    np.random.seed(resolve_random_seed(config))
+    _validate_inputs(dataset_index, events_df)
+    spec = build_fooof_spec(config)
+
+    if "status" in dataset_index.columns:
+        ds_rows = dataset_index.loc[dataset_index["status"].astype(str).str.lower() == "ok"].copy()
+    else:
+        ds_rows = dataset_index.copy()
+
+    qc_meta_rows: list[dict[str, Any]] = []
+
+    ds_rows = ds_rows.sort_values(by=["dyad_id", "subject_id", "run"], kind="mergesort").reset_index(drop=True)
+    # Main-process QC/meta accounting remains deterministic and avoids worker logging noise.
+    for _, ds_row in ds_rows.iterrows():
+        eeg_path = Path(str(ds_row["eeg_path"])).expanduser()
+        if not eeg_path.exists():
+            qc_meta_rows.append(
+                {
+                    "dyad_id": str(ds_row["dyad_id"]),
+                    "subject_id": str(ds_row["subject_id"]),
+                    "run": _run_token(ds_row["run"]),
+                    "qc_stage": "input",
+                    "metric": "missing_eeg_file",
+                    "value": 1,
+                }
+            )
+            LOGGER.warning("Skipping missing EEG file: %s", eeg_path)
+            continue
+        row_events = _events_for_dataset_row(events_df, ds_row)
+        if row_events.empty:
+            qc_meta_rows.append(
+                {
+                    "dyad_id": str(ds_row["dyad_id"]),
+                    "subject_id": str(ds_row["subject_id"]),
+                    "run": _run_token(ds_row["run"]),
+                    "qc_stage": "windows",
+                    "metric": "events_for_row",
+                    "value": 0,
+                }
+            )
+
+    subject_run_pairs = sorted(
+        {
+            (str(row.subject_id), _run_to_int(row.run))
+            for row in ds_rows.itertuples(index=False)
+            if pd.notna(row.subject_id)
+        },
+        key=lambda item: (item[0], item[1]),
+    )
+
+    if spec.n_jobs == 1:
+        results = [
+            process_subject_run(
+                subject_id=subject_id,
+                run=run,
+                dataset_index=ds_rows,
+                events_df=events_df,
+                spec=spec,
+                config=config,
+            )
+            for subject_id, run in subject_run_pairs
+        ]
+    else:
+        results = Parallel(
+            n_jobs=spec.n_jobs,
+            backend="loky",
+            verbose=0,
+        )(
+            delayed(process_subject_run)(
+                subject_id=subject_id,
+                run=run,
+                dataset_index=ds_rows,
+                events_df=events_df,
+                spec=spec,
+                config=config,
+            )
+            for subject_id, run in subject_run_pairs
+        )
+
+    trial_channels_df = _finalize_channel_concat(results)
     if not trial_channels_df.empty:
         trial_channels_df = trial_channels_df.apply(apply_fit_qc, axis=1)
 

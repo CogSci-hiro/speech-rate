@@ -136,6 +136,7 @@ induced_trf:
 # ============================================================
 
 fooof:
+  n_jobs: 1
 
   # Pre-speech causal window aligned to self speech onset (t+1)
   prespeech_window_s:
@@ -144,8 +145,10 @@ fooof:
 
   # ROI definitions
   rois:
-    definition: "file"
-    roi_file: "config/rois.yaml"
+    definition: "inline"
+    values:
+      ANTERIOR: ["Fz", "AFz", "FCz", "F1", "F2"]
+      POSTERIOR: ["POz", "Pz", "Oz", "PO4", "PO7"]
 
   # Spectrum estimation
   spectrum:

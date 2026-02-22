@@ -24,6 +24,7 @@ class FooofSpec:
     aperiodic_mode: str
     peak_width_limits_hz: tuple[float, float]
     min_peak_height: float
+    n_jobs: int
 
 
 def _as_mapping(value: object, label: str) -> Mapping[str, Any]:
@@ -167,6 +168,10 @@ def build_fooof_spec(config: dict) -> FooofSpec:
             if not rois[str(roi_name)]:
                 raise ValueError(f"fooof.rois.{roi_name} contains no usable channel names.")
 
+        n_jobs = int(fooof_cfg.get("n_jobs", 1))
+        if n_jobs < 1:
+            raise ValueError("fooof.n_jobs must be >= 1.")
+
         return FooofSpec(
             window_length_s=window_length_s,
             window_alignment=window_alignment,
@@ -183,6 +188,7 @@ def build_fooof_spec(config: dict) -> FooofSpec:
             aperiodic_mode="fixed",
             peak_width_limits_hz=(1.0, 12.0),
             min_peak_height=0.0,
+            n_jobs=n_jobs,
         )
 
     prespeech_cfg = _as_mapping(fooof_cfg.get("prespeech_window_s"), "fooof.prespeech_window_s")
@@ -234,6 +240,10 @@ def build_fooof_spec(config: dict) -> FooofSpec:
     use_knee = bool(model_cfg.get("knee", False))
     aperiodic_mode = "knee" if use_knee else "fixed"
 
+    n_jobs = int(fooof_cfg.get("n_jobs", 1))
+    if n_jobs < 1:
+        raise ValueError("fooof.n_jobs must be >= 1.")
+
     features_cfg = _as_mapping(fooof_cfg.get("features"), "fooof.features")
     bands = _build_bands(features_cfg)
     rois = _build_rois(fooof_cfg)
@@ -260,4 +270,5 @@ def build_fooof_spec(config: dict) -> FooofSpec:
         aperiodic_mode=aperiodic_mode,
         peak_width_limits_hz=peak_width_limits_hz,
         min_peak_height=min_peak_height,
+        n_jobs=n_jobs,
     )
