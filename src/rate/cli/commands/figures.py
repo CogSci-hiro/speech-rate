@@ -167,8 +167,8 @@ def run_trf_figures(
             mask=sig_mask,
             mask_params={
                 "marker": "o",
-                "markerfacecolor": "0.5",
-                "markeredgecolor": "0.5",
+                "markerfacecolor": "0.75",
+                "markeredgecolor": "black",
                 "markersize": 10,
             },
         )

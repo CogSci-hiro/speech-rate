@@ -207,7 +207,6 @@ def plot_stat_topomap_sequence(
         Colorbar label.
     """
     _validate_topomap_inputs(stat=stat, mask=mask, step_ms=step_ms, max_cols=max_cols)
-    limit = _resolve_lim_val(stat=stat, lim_val=lim_val)
 
     evoked = mne.EvokedArray(stat.T, info, tmin=float(data_tmin))
     plot_times, labels_ms = _make_step_times_and_labels(
@@ -223,12 +222,26 @@ def plot_stat_topomap_sequence(
     if mask is not None:
         topomap_mask_params = {
             "marker": "o",
-            "markerfacecolor": "0.5",
-            "markeredgecolor": "0.5",
+            "markerfacecolor": "0.75",
+            "markeredgecolor": "black",
             "markersize": 10,
         }
         if mask_params is not None:
             topomap_mask_params.update(mask_params)
+
+    if lim_val is None:
+        plot_idx = np.asarray(evoked.time_as_index(plot_times), dtype=int)
+        plot_idx = np.clip(plot_idx, 0, evoked.data.shape[1] - 1)
+        plotted_values = evoked.data[:, plot_idx]
+        finite_values = plotted_values[np.isfinite(plotted_values)]
+        if finite_values.size == 0:
+            limit = 1.0
+        else:
+            limit = float(np.max(np.abs(finite_values)))
+            if limit == 0.0:
+                limit = 1.0
+    else:
+        limit = _resolve_lim_val(stat=stat, lim_val=lim_val)
 
     evoked.plot_topomap(
         times=plot_times,
@@ -237,6 +250,7 @@ def plot_stat_topomap_sequence(
         mask=None if mask is None else mask.T,
         mask_params=topomap_mask_params,
         vlim=(-limit, limit),
+        scalings=1.0,
         cmap=cmap,
         colorbar=False,
     )
@@ -281,9 +295,15 @@ def _validate_topomap_inputs(
 
 def _resolve_lim_val(*, stat: np.ndarray, lim_val: float | None) -> float:
     if lim_val is not None:
-        return float(lim_val)
+        resolved = abs(float(lim_val))
+        return resolved if np.isfinite(resolved) and resolved > 0.0 else 1.0
 
-    data_limit = float(np.nanmax(np.abs(stat)))
+    finite_stat = np.asarray(stat, dtype=float)
+    finite_stat = finite_stat[np.isfinite(finite_stat)]
+    if finite_stat.size == 0:
+        return 1.0
+
+    data_limit = float(np.max(np.abs(finite_stat)))
     if not np.isfinite(data_limit) or data_limit == 0.0:
         return 1.0
     return data_limit
