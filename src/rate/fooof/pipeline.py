@@ -51,6 +51,50 @@ CANONICAL_CHANNEL_COLUMNS = [
 ]
 
 
+class _NoOpProgressBar:
+    def __iter__(self):
+        return iter(())
+
+    def close(self) -> None:
+        return
+
+
+def _window_progress(iterable, *, enabled: bool, desc: str, total: int | None = None):
+    if not enabled:
+        return iterable
+    try:
+        from tqdm.auto import tqdm  # type: ignore
+    except Exception:
+        return iterable
+    return tqdm(
+        iterable,
+        total=total,
+        desc=desc,
+        unit="chanwin",
+        leave=False,
+        ascii=True,
+        dynamic_ncols=True,
+    )
+
+
+def _outer_progress(iterable, *, enabled: bool, total: int | None = None):
+    if not enabled:
+        return iterable
+    try:
+        from tqdm.auto import tqdm  # type: ignore
+    except Exception:
+        return iterable
+    return tqdm(
+        iterable,
+        total=total,
+        desc="fooof subject-runs",
+        unit="subrun",
+        leave=True,
+        ascii=True,
+        dynamic_ncols=True,
+    )
+
+
 def _run_token(value: object) -> str:
     text = str(value).strip()
     try:
@@ -196,6 +240,10 @@ def process_subject_run(
 
         sfreq = float(raw.info["sfreq"])
         run_int = _run_to_int(ds_row["run"])
+        n_eeg_channels = len(mne.pick_types(raw.info, eeg=True, exclude=[]))
+        boundary_excluded_events = _boundary_excluded_event_count(row_events, raw, spec)
+        valid_events = max(0, int(len(row_events) - boundary_excluded_events))
+        total_chan_windows = int(valid_events * n_eeg_channels)
 
         onset_by_event = (
             row_events.loc[:, ["event_id", "t_onset"]]
@@ -204,13 +252,20 @@ def process_subject_run(
             .to_dict()
         )
 
-        for _, window_run, event_id, channel_name, window_data in iter_event_windows(
+        window_iter = iter_event_windows(
             raw=raw,
             events_df=row_events,
             spec=spec,
             subject_id=str(ds_row["subject_id"]),
             run=run_int,
-        ):
+        )
+        window_iter = _window_progress(
+            window_iter,
+            enabled=bool(spec.n_jobs == 1),
+            desc=f"fooof {subject_id}/run-{run_int}",
+            total=total_chan_windows,
+        )
+        for _, window_run, event_id, channel_name, window_data in window_iter:
             event_onset_s = float(onset_by_event[str(event_id)])
             window_start, window_end = _window_bounds_from_event(event_onset_s, spec)
 
@@ -303,6 +358,11 @@ def run_fooof_pipeline(
     )
 
     if spec.n_jobs == 1:
+        serial_pairs = _outer_progress(
+            subject_run_pairs,
+            enabled=True,
+            total=len(subject_run_pairs),
+        )
         results = [
             process_subject_run(
                 subject_id=subject_id,
@@ -312,7 +372,7 @@ def run_fooof_pipeline(
                 spec=spec,
                 config=config,
             )
-            for subject_id, run in subject_run_pairs
+            for subject_id, run in serial_pairs
         ]
     else:
         results = Parallel(

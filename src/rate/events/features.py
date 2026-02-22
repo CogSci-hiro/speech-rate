@@ -6,16 +6,20 @@ import pandas as pd
 SUPPORTED_TIME_METHODS = {"run_duration", "minmax_0_1"}
 
 
-def compute_other_rate(events_df: pd.DataFrame, window_s: float) -> tuple[pd.Series, pd.Series]:
-    """Compute nearest-other-speaker rate and listener label per event."""
+def compute_other_rate(
+    events_df: pd.DataFrame, window_s: float
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Compute nearest-other-speaker features per event."""
     other_rates: list[float] = []
     listeners: list[str | None] = []
+    latencies: list[float] = []
 
     for row in events_df.itertuples(index=False):
         candidate_df = events_df[events_df["speaker"] != row.speaker].copy()
         if candidate_df.empty:
             other_rates.append(np.nan)
             listeners.append(None)
+            latencies.append(np.nan)
             continue
 
         candidate_df["delta_onset"] = (candidate_df["t_onset"] - float(row.t_onset)).abs()
@@ -27,8 +31,13 @@ def compute_other_rate(events_df: pd.DataFrame, window_s: float) -> tuple[pd.Ser
             winner = within_window.sort_values(["delta_onset", "t_onset", "speaker"], kind="mergesort").iloc[0]
         other_rates.append(float(winner["self_rate"]))
         listeners.append(str(winner["speaker"]))
+        latencies.append(float(row.t_onset) - float(winner["t_offset"]))
 
-    return pd.Series(other_rates, dtype="float64"), pd.Series(listeners, dtype="object")
+    return (
+        pd.Series(other_rates, dtype="float64"),
+        pd.Series(listeners, dtype="object"),
+        pd.Series(latencies, dtype="float64"),
+    )
 
 
 def compute_time_within_run(group_df: pd.DataFrame, normalize: bool, method: str) -> pd.Series:
@@ -46,10 +55,10 @@ def compute_time_within_run(group_df: pd.DataFrame, normalize: bool, method: str
 
 
 def add_event_rate_features(unit_df: pd.DataFrame, absdiff_window_s: float, normalize: bool, method: str) -> pd.DataFrame:
-    """Add self_rate/other_rate/abs_diff/time_within_run features."""
+    """Add self_rate/other_rate/latency/abs_diff/time_within_run features."""
     enriched = unit_df.copy()
     enriched["self_rate"] = enriched["syllables"] / enriched["duration_s"]
-    enriched["other_rate"], enriched["listener"] = compute_other_rate(
+    enriched["other_rate"], enriched["listener"], enriched["latency"] = compute_other_rate(
         enriched,
         window_s=absdiff_window_s,
     )

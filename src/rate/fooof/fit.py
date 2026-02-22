@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import numpy as np
 from fooof import FOOOF
+from scipy.optimize import OptimizeWarning
 from scipy.signal import welch
 
 from rate.fooof.spec import FooofSpec
@@ -63,7 +65,9 @@ def fit_fooof_to_window(
     )
 
     try:
-        fm.fit(freqs, psd, spec.freq_range)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", OptimizeWarning)
+            fm.fit(freqs, psd, spec.freq_range)
     except Exception:
         return _nan_result()
 
