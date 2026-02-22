@@ -52,10 +52,6 @@ def plot_joint_kernel(
     # Remove last axis (colorbar is typically last)
     fig.delaxes(fig.axes[-1])
 
-    # Add shading to main time axis
-    main_ax = fig.axes[0]
-    times = evoked.times
-
     # Set y axis
     main_ax = fig.axes[-2]  # the main figure
     main_ax.set_ylabel("A.U.")
