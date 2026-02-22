@@ -13,7 +13,7 @@ project:
 # When enabled, bulk commands only process the first N file-like units
 # (typically unique dyad/subject/run rows from the dataset index).
 debug:
-  enabled: true
+  enabled: false
   max_files: 2
 
 # ============================================================
