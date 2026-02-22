@@ -143,12 +143,20 @@ def run_trf_figures(
                 alpha=alpha,
                 expected_shape=stat_map.shape,
             )
+            joint_time_clusters = cluster_intervals
+            if sig_mask is not None:
+                collapsed_intervals = _collapse_topomap_mask_to_time_intervals(
+                    mask=sig_mask,
+                    times=np.asarray(evoked.times, dtype=float),
+                )
+                if collapsed_intervals is not None:
+                    joint_time_clusters = collapsed_intervals
             plot_joint_kernel(
                 evoked=evoked,
                 out_dir=out_dir,
                 family=family,
                 name=f"joint_{reg_name}",
-                time_clusters=cluster_intervals,
+                time_clusters=joint_time_clusters,
                 mask=sig_mask,
                 mask_params={
                     "marker": "o",
@@ -391,3 +399,31 @@ def _load_topomap_significance_mask(
     if sig_ids.size == 0:
         return np.zeros_like(labels, dtype=bool)
     return np.isin(labels, sig_ids)
+
+
+def _collapse_topomap_mask_to_time_intervals(
+    *,
+    mask: np.ndarray,
+    times: np.ndarray,
+) -> list[tuple[float, float]] | None:
+    """Collapse a (time, channel) significance mask into contiguous time intervals."""
+    arr = np.asarray(mask, dtype=bool)
+    t = np.asarray(times, dtype=float)
+
+    if arr.ndim != 2 or t.ndim != 1 or arr.shape[0] != t.size or t.size == 0:
+        return None
+
+    active = np.any(arr, axis=1)
+    if not np.any(active):
+        return []
+
+    # Boundaries of contiguous True runs in the collapsed time mask.
+    padded = np.pad(active.astype(np.int8), (1, 1), constant_values=0)
+    transitions = np.diff(padded)
+    starts = np.flatnonzero(transitions == 1)
+    stops = np.flatnonzero(transitions == -1) - 1
+
+    intervals: list[tuple[float, float]] = []
+    for start_idx, stop_idx in zip(starts, stops):
+        intervals.append((float(t[start_idx]), float(t[stop_idx])))
+    return intervals
