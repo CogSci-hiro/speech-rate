@@ -17,6 +17,7 @@ class TRFResult:
     predictions_by_fold: dict[int, np.ndarray] | None = None
     inner_scores: pd.DataFrame | None = None
     best_alpha_table: pd.DataFrame | None = None
+    reconstruction_r2: pd.DataFrame | None = None
 
 
 def _outer_folds_from_runs(runs: list[Any]) -> list[tuple[list[Any], Any, int]]:
@@ -60,6 +61,10 @@ def run_trf(
     Optional:
     - table_meta: {"dyad_id": ..., "subject": ..., "model": ...}
     - collect_predictions: bool
+    - enable_reconstruction: bool
+    - reconstruction_fn(y_test_raw, y_test_pred, events_test, sfreq, tmin, tmax) -> DataFrame
+    - events_by_run: dict[run, DataFrame]
+    - reconstruction_kwargs: dict with sfreq, tmin, tmax
     """
     concat_fn: Callable[..., np.ndarray] = cv_config["concat_fn"]
     standardize_fn: Callable[..., tuple[np.ndarray, np.ndarray]] = cv_config["standardize_fn"]
@@ -71,6 +76,15 @@ def run_trf(
     alpha_default = float(cv_config.get("alpha_default", np.asarray(alpha_grid, dtype=float)[0]))
     table_meta = dict(cv_config.get("table_meta", {}))
     collect_predictions = bool(cv_config.get("collect_predictions", False))
+    enable_reconstruction = bool(cv_config.get("enable_reconstruction", False))
+    reconstruction_fn: Callable[..., pd.DataFrame] | None = cv_config.get("reconstruction_fn")
+    events_by_run: dict[Any, pd.DataFrame] | None = cv_config.get("events_by_run")
+    reconstruction_kwargs = dict(cv_config.get("reconstruction_kwargs", {}))
+    reconstruction_rows: list[pd.DataFrame] = []
+    if enable_reconstruction and reconstruction_fn is None:
+        raise ValueError("enable_reconstruction=True requires reconstruction_fn")
+    if enable_reconstruction and events_by_run is None:
+        raise ValueError("enable_reconstruction=True requires events_by_run")
 
     runs = sorted(X_by_run.keys())
     if sorted(y_by_run.keys()) != runs:
@@ -169,6 +183,22 @@ def run_trf(
             if collect_predictions and np.isclose(float(alpha), float(best_alpha)):
                 assert predictions_by_fold is not None
                 predictions_by_fold[int(fold_id)] = np.asarray(y_hat)
+            if enable_reconstruction and np.isclose(float(alpha), float(best_alpha)):
+                assert reconstruction_fn is not None
+                assert events_by_run is not None
+                recon = reconstruction_fn(
+                    y_test_raw=np.asarray(y_test_outer),
+                    y_test_pred=np.asarray(y_hat),
+                    events_test=events_by_run[test_run],
+                    **reconstruction_kwargs,
+                )
+                recon = recon.copy()
+                for k, v in table_meta.items():
+                    recon[k] = v
+                recon["fold_id"] = int(fold_id)
+                recon["test_run"] = int(test_run)
+                recon["alpha"] = float(best_alpha)
+                reconstruction_rows.append(recon)
         outer_df = pd.DataFrame(outer_fold_rows)
         outer_df["chosen_alpha"] = float(best_alpha)
         outer_rows.append(outer_df)
@@ -191,4 +221,5 @@ def run_trf(
         predictions_by_fold=predictions_by_fold,
         inner_scores=pd.concat(inner_rows, ignore_index=True) if inner_rows else pd.DataFrame(),
         best_alpha_table=pd.DataFrame(best_alpha_rows),
+        reconstruction_r2=pd.concat(reconstruction_rows, ignore_index=True) if reconstruction_rows else None,
     )

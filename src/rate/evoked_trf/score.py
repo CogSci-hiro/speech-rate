@@ -22,6 +22,7 @@ from rate.evoked_trf.utils import (
 )
 from rate.trf.engine import TRFResult, run_trf
 from rate.trf.io_contract import write_trf_artifacts
+from rate.trf.reconstruction import compute_reconstruction_r2
 from rate.trf import scoring as trf_scoring
 from rate.trf.design import DesignModelSpec, build_design_matrix as build_design_matrix_from_config, parse_evoked_models_config
 
@@ -237,6 +238,13 @@ def _compute_one_dyad_subject(
         trf_cfg=trf_cfg,
         picks=picks,
     )
+    ev_subj = events.loc[
+        (events["dyad_id"].astype(str).str.strip() == str(dyad_id).strip())
+        & (events["subject_id"].astype(str).str.strip() == str(subject).strip())
+    ].copy()
+    per_run_events = {
+        int(run): ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy() for run in runs
+    }
 
     models = list_models(trf_cfg.models)
     inner_rows: list[pd.DataFrame] = []
@@ -287,6 +295,14 @@ def _compute_one_dyad_subject(
                         "model": model_name,
                     },
                     "collect_predictions": False,
+                    "enable_reconstruction": True,
+                    "reconstruction_fn": compute_reconstruction_r2,
+                    "events_by_run": {r: per_run_events[r] for r in runs},
+                    "reconstruction_kwargs": {
+                        "sfreq": float(sfreq_hz),
+                        "tmin": float(trf_cfg.tmin_s),
+                        "tmax": float(trf_cfg.tmax_s),
+                    },
                 },
             )
             trf_results_by_model[model_name] = trf_result
@@ -789,6 +805,11 @@ def write_subject_output(
                 outer_scores=model_outer,
                 lags=np.asarray(model_trf.lags, dtype=float),
                 predictions_by_fold=None,
+                reconstruction_r2=(
+                    model_trf.reconstruction_r2.sort_values(["fold_id", "channel"], kind="mergesort").reset_index(drop=True)
+                    if model_trf.reconstruction_r2 is not None and not model_trf.reconstruction_r2.empty
+                    else model_trf.reconstruction_r2
+                ),
             ),
             model_dir,
         )
