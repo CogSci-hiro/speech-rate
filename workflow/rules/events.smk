@@ -6,7 +6,7 @@ EVENTS_DIR = f"{OUT_DIR}/events"
 
 rule events_table:
     input:
-        config_path="config/config.yaml",
+        config_path="config/compute.yaml",
         schema_path="config/schema.json",
         validated=f"{META_DIR}/config_validated.json",
         manifest=f"{META_DIR}/run_manifest.json",

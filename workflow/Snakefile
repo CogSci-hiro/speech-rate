@@ -1,4 +1,13 @@
-configfile: "config/config.yaml"
+import yaml
+
+configfile: "config/compute.yaml"
+
+# Load viz/stats configs manually so edits there do not become Snakemake `config`
+# changes that retrigger expensive compute jobs.
+with open("config/viz.yaml", "r", encoding="utf-8") as _f:
+    viz_config = yaml.safe_load(_f) or {}
+with open("config/stats.yaml", "r", encoding="utf-8") as _f:
+    stats_config = yaml.safe_load(_f) or {}
 
 include: "rules/common.smk"
 include: "rules/dataset.smk"

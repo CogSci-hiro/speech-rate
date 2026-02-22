@@ -15,7 +15,7 @@ checkpoint subject_targets:
         r"""
         set -euo pipefail
         PYTHONPATH=src python -u -m rate.cli.main dataset-subject-targets \
-            --config config/config.yaml \
+            --config config/compute.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             --dataset-index {input.dataset_index} \
@@ -51,7 +51,7 @@ rule features_emg_subject:
         PYTHONPATH=src python -u -m rate.cli.main compute-emg \
             --dyad-id {wildcards.dyad_id} \
             --subject {wildcards.subject} \
-            --config config/config.yaml \
+            --config config/compute.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             --dataset-index {input.dataset_index} \

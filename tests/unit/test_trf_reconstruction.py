@@ -109,6 +109,7 @@ def test_write_trf_artifacts_preserves_legacy_files_when_no_reconstruction(tmp_p
         "kernels_outer.npy",
         "lags.npy",
         "outer_scores.parquet",
+        "reconstruction_metrics.parquet",
         "reconstruction_r2.parquet",
     ]
 

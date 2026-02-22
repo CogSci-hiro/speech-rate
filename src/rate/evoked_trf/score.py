@@ -22,11 +22,14 @@ from rate.evoked_trf.utils import (
 )
 from rate.trf.engine import TRFResult, run_trf
 from rate.trf.io_contract import write_trf_artifacts
-from rate.trf.reconstruction import compute_reconstruction_r2
+from rate.trf.reconstruction import compute_reconstruction_metrics_df
+from rate.trf.similarity import cross_kernel_temporal_similarity
 from rate.trf import scoring as trf_scoring
 from rate.trf.design import DesignModelSpec, build_design_matrix as build_design_matrix_from_config, parse_evoked_models_config
 
 LOGGER = logging.getLogger(__name__)
+
+PHASE5_PRIMARY_MODELS = ("baseline", "self_rate", "other_rate", "abs_diff")
 
 
 class _NoOpProgressBar:
@@ -214,6 +217,16 @@ def _canonical_lags_s(*, sfreq_hz: float, tmin_s: float, tmax_s: float) -> np.nd
     return lags_samples / float(sfreq_hz)
 
 
+def _reconstruction_event_lock_for_model(model_name: str) -> str:
+    model = str(model_name)
+    if model in {"self_rate", "abs_diff"}:
+        return "self_IPU_onset"
+    if model == "other_rate":
+        return "other_IPU_offset"
+    # Baseline bookkeeping only; default to self onset.
+    return "self_IPU_onset"
+
+
 # =============================================================================
 # Per-subject worker (parallel-safe)
 # =============================================================================
@@ -296,12 +309,13 @@ def _compute_one_dyad_subject(
                     },
                     "collect_predictions": False,
                     "enable_reconstruction": True,
-                    "reconstruction_fn": compute_reconstruction_r2,
+                    "reconstruction_fn": compute_reconstruction_metrics_df,
                     "events_by_run": {r: per_run_events[r] for r in runs},
                     "reconstruction_kwargs": {
                         "sfreq": float(sfreq_hz),
                         "tmin": float(trf_cfg.tmin_s),
                         "tmax": float(trf_cfg.tmax_s),
+                        "event_lock": _reconstruction_event_lock_for_model(model_name),
                     },
                 },
             )
@@ -806,7 +820,10 @@ def write_subject_output(
                 lags=np.asarray(model_trf.lags, dtype=float),
                 predictions_by_fold=None,
                 reconstruction_r2=(
-                    model_trf.reconstruction_r2.sort_values(["fold_id", "channel"], kind="mergesort").reset_index(drop=True)
+                    model_trf.reconstruction_r2.sort_values(
+                        [c for c in ["fold_id", "channel", "time_s"] if c in model_trf.reconstruction_r2.columns],
+                        kind="mergesort",
+                    ).reset_index(drop=True)
                     if model_trf.reconstruction_r2 is not None and not model_trf.reconstruction_r2.empty
                     else model_trf.reconstruction_r2
                 ),
@@ -862,6 +879,33 @@ def write_subject_output(
             )
             evoked.save(model_dir / evoked_name, overwrite=True)
 
+    # Phase 5 confirmatory sidecar: cross-kernel temporal similarity (self_rate vs other_rate).
+    if {"self_rate", "other_rate"}.issubset(set(model_to_regs)):
+        self_res = trf_results_by_model.get("self_rate")
+        other_res = trf_results_by_model.get("other_rate")
+        if self_res is not None and other_res is not None:
+            self_regs = per_run_feature_names[runs[0]].get("self_rate", [])
+            other_regs = per_run_feature_names[runs[0]].get("other_rate", [])
+            if "self_rate" in self_regs and "other_rate" in other_regs:
+                self_idx = int(self_regs.index("self_rate"))
+                other_idx = int(other_regs.index("other_rate"))
+                lags = np.asarray(self_res.lags, dtype=float)
+                if lags.ndim == 1 and lags.size > 0:
+                    t0_index = int(np.argmin(np.abs(lags - 0.0)))
+                    sim = cross_kernel_temporal_similarity(
+                        kernel_a=np.asarray(self_res.kernels_outer)[:, :, self_idx, :],
+                        kernel_b=np.asarray(other_res.kernels_outer)[:, :, other_idx, :],
+                        t0_index=t0_index,
+                    )
+                    sim_arr = np.stack(
+                        [
+                            np.asarray(sim["self_self_corr"], dtype=float),
+                            np.asarray(sim["self_other_corr"], dtype=float),
+                        ],
+                        axis=0,
+                    )
+                    np.save(subject_dir / "models" / "self_rate" / "cross_kernel_similarity.npy", sim_arr)
+
     return out_path
 
 
@@ -891,6 +935,44 @@ def write_aggregate_output(*, out_dir: Path) -> Path:
     out_path = out_dir / "evoked_trf" / "scores" / "scores.parquet"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     scores.to_parquet(out_path, index=False)
+    return out_path
+
+
+def write_reconstruction_aggregate(*, out_dir: Path) -> list[Path]:
+    subjects_root = out_dir / "evoked_trf" / "subjects"
+    paths = sorted(subjects_root.rglob("models/*/reconstruction_metrics.parquet"))
+    by_model: dict[str, list[pd.DataFrame]] = {}
+    for path in paths:
+        model = str(path.parent.name)
+        df = pd.read_parquet(path)
+        # Inject identifiers from path if absent.
+        if "dyad_id" not in df.columns:
+            df["dyad_id"] = str(path.parents[3].name)
+        if "subject" not in df.columns:
+            df["subject"] = str(path.parents[2].name)
+        if "model" not in df.columns:
+            df["model"] = model
+        by_model.setdefault(model, []).append(df)
+    out_paths: list[Path] = []
+    agg_root = out_dir / "evoked_trf" / "aggregate" / "reconstruction"
+    for model, frames in sorted(by_model.items()):
+        out_path = agg_root / f"{model}_group.parquet"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.concat(frames, ignore_index=True).to_parquet(out_path, index=False)
+        out_paths.append(out_path)
+    return out_paths
+
+
+def write_similarity_aggregate(*, out_dir: Path) -> Path:
+    subjects_root = out_dir / "evoked_trf" / "subjects"
+    sim_paths = sorted(subjects_root.rglob("models/self_rate/cross_kernel_similarity.npy"))
+    if not sim_paths:
+        raise ValueError(f"No subject similarity files found under {subjects_root}")
+    arrays = [np.asarray(np.load(p), dtype=float) for p in sim_paths]
+    stacked = np.stack(arrays, axis=0)  # (subject, 2, lag)
+    out_path = out_dir / "evoked_trf" / "aggregate" / "similarity" / "self_vs_other.npy"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(out_path, stacked)
     return out_path
 
 

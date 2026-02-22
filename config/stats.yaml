@@ -1,0 +1,17 @@
+# Stats-only config (loaded manually in workflow/Snakefile)
+# Keeping this separate prevents inference/reporting tweaks from retriggering compute rules.
+paths:
+  out_dir: "/Volumes/work-4T/speech-rate-testing"
+
+reporting:
+  tables_format: "csv"  # csv | parquet
+
+stats:
+  kernel_cluster:
+    method: "threshold"   # tfce | threshold
+    n_permutations: 10000
+    seed: 42
+    threshold_p: 0.001
+    tail: 0
+    adjacency:
+      montage_name: "biosemi64"

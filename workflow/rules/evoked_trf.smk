@@ -16,6 +16,30 @@ def _evoked_subject_outputs(_wildcards):
     ]
 
 
+PHASE5_PRIMARY_MODELS = ["baseline", "self_rate", "other_rate", "abs_diff"]
+
+
+def _evoked_reconstruction_subject_sidecars(wildcards):
+    return [
+        f"{OUT_DIR}/evoked_trf/subjects/{wildcards.dyad_id}/{wildcards.subject}/models/{model}/reconstruction_metrics.parquet"
+        for model in PHASE5_PRIMARY_MODELS
+    ]
+
+
+def _evoked_reconstruction_done_outputs(_wildcards):
+    return [
+        f"{OUT_DIR}/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_reconstruction.done"
+        for dyad_id, subject in _subject_pairs()
+    ]
+
+
+def _evoked_similarity_done_outputs(_wildcards):
+    return [
+        f"{OUT_DIR}/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_similarity.done"
+        for dyad_id, subject in _subject_pairs()
+    ]
+
+
 rule evoked_trf_subject:
     input:
         events=OUT_DIR + "/events/events.parquet",
@@ -34,7 +58,7 @@ rule evoked_trf_subject:
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-subject \
             --dyad-id {wildcards.dyad_id} \
             --subject {wildcards.subject} \
-            --config config/config.yaml \
+            --config config/compute.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}
@@ -52,7 +76,69 @@ rule evoked_trf_aggregate:
         r"""
         set -euo pipefail
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-aggregate \
-            --config config/config.yaml \
+            --config config/compute.yaml \
+            --schema config/schema.json \
+            --out-dir {OUT_DIR} \
+            2>&1 | tee {log}
+        """
+
+
+rule evoked_trf_reconstruction_subject:
+    input:
+        scores=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/scores.parquet",
+        recon=_evoked_reconstruction_subject_sidecars,
+    output:
+        done=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_reconstruction.done"
+    shell:
+        r"""
+        set -euo pipefail
+        echo ok > {output.done}
+        """
+
+
+rule evoked_trf_similarity_subject:
+    input:
+        scores=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/scores.parquet",
+        sim=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/models/self_rate/cross_kernel_similarity.npy",
+    output:
+        done=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_similarity.done"
+    shell:
+        r"""
+        set -euo pipefail
+        echo ok > {output.done}
+        """
+
+
+rule evoked_trf_reconstruction_aggregate:
+    input:
+        _evoked_reconstruction_done_outputs
+    output:
+        touch(OUT_DIR + "/evoked_trf/aggregate/reconstruction/_done")
+    log:
+        OUT_DIR + "/logs/evoked_trf/reconstruction_aggregate.log"
+    shell:
+        r"""
+        set -euo pipefail
+        MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-reconstruction-aggregate \
+            --config config/compute.yaml \
+            --schema config/schema.json \
+            --out-dir {OUT_DIR} \
+            2>&1 | tee {log}
+        """
+
+
+rule evoked_trf_similarity_aggregate:
+    input:
+        _evoked_similarity_done_outputs
+    output:
+        sim=OUT_DIR + "/evoked_trf/aggregate/similarity/self_vs_other.npy"
+    log:
+        OUT_DIR + "/logs/evoked_trf/similarity_aggregate.log"
+    shell:
+        r"""
+        set -euo pipefail
+        MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-similarity-aggregate \
+            --config config/compute.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}

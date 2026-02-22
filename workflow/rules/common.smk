@@ -4,7 +4,7 @@ META_DIR = f"{OUT_DIR}/_meta"
 
 rule validate_config:
     input:
-        config_path="config/config.yaml",
+        config_path="config/compute.yaml",
         schema_path="config/schema.json",
     output:
         validated=f"{META_DIR}/config_validated.json",
@@ -15,7 +15,7 @@ rule validate_config:
 
 rule write_manifest:
     input:
-        config_path="config/config.yaml",
+        config_path="config/compute.yaml",
         schema_path="config/schema.json",
         validated=f"{META_DIR}/config_validated.json",
     output:

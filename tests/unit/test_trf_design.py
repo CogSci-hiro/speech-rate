@@ -1,12 +1,16 @@
 import numpy as np
 import pandas as pd
 import pytest
-from pathlib import Path
 
-from rate.config import load_and_validate_config
 from rate.evoked_trf.fit import build_design_matrix as build_design_matrix_legacy
 from rate.evoked_trf.spec import add_timelock_columns, get_models
 from rate.trf.design import build_design_matrix, parse_evoked_models_config
+
+
+LEGACY_MODELS_CFG = [
+    {"name": "baseline", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg"]},
+    {"name": "self_rate", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "self_rate"]},
+]
 
 
 def _demo_events_df():
@@ -25,8 +29,7 @@ def _demo_events_df():
 
 @pytest.mark.parametrize("model_name", ["baseline", "self_rate"])
 def test_config_design_matrix_matches_legacy_builder_for_existing_models(model_name: str) -> None:
-    cfg = load_and_validate_config(Path("config/config.yaml"))
-    models_new = {m.model_name: m for m in parse_evoked_models_config(cfg["evoked_trf"].get("models"))}
+    models_new = {m.model_name: m for m in parse_evoked_models_config(list(LEGACY_MODELS_CFG))}
     models_old = {m.model_name: m for m in get_models()}
 
     ev = _demo_events_df()

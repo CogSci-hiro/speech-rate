@@ -121,6 +121,59 @@ evoked_trf:
       regressors:
         - "self_ipu_onset"
         - "other_ipu_offset"
+    - name: "self_rate"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "self_rate"
+    - name: "other_rate"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "other_rate"
+    - name: "abs_diff"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "abs_diff"
+    - name: "self_rate_sq"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "self_rate"
+        - "self_rate^2"
+    - name: "other_rate_sq"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "other_rate"
+        - "other_rate^2"
+    - name: "abs_diff_sq"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "abs_diff"
+        - "abs_diff^2"
+  n_jobs: 1
+
+# ============================================================
+# INDUCED TRF (Hilbert-based)
+# ============================================================
+
+induced_trf:
+  downsample_hz: 100.0
+  bands: ["theta", "alpha", "beta"]
+
+  bands_hz:
+    theta: [4.0, 7.0]
+    alpha: [8.0, 12.0]
+    beta:  [13.0, 30.0]
+
+  models:
+    - name: "baseline"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
         - "emg"
     - name: "self_rate"
       regressors:
@@ -140,40 +193,6 @@ evoked_trf:
         - "other_ipu_offset"
         - "emg"
         - "abs_diff"
-    - name: "self_rate_sq"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
-        - "self_rate"
-        - "self_rate^2"
-    - name: "other_rate_sq"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
-        - "other_rate"
-        - "other_rate^2"
-    - name: "abs_diff_sq"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
-        - "abs_diff"
-        - "abs_diff^2"
-  n_jobs: 1
-
-# ============================================================
-# INDUCED TRF (Hilbert-based)
-# ============================================================
-
-induced_trf:
-  downsample_hz: 100.0
-
-  bands_hz:
-    theta: [4.0, 7.0]
-    alpha: [8.0, 12.0]
-    beta:  [13.0, 30.0]
 
   power:
     method: "hilbert"

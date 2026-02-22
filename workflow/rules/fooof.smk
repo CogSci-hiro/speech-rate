@@ -12,7 +12,7 @@ rule fooof:
     input:
         dataset_index=f"{OUT_DIR}/dataset/index_resampled.parquet",
         events=f"{OUT_DIR}/events/events.parquet",
-        config="config/config.yaml",
+        config="config/compute.yaml",
         config_validated=f"{OUT_DIR}/_meta/config_validated.json",
         run_manifest=f"{OUT_DIR}/_meta/run_manifest.json",
     output:
@@ -28,6 +28,6 @@ rule fooof:
         set -euo pipefail
         PYTHONPATH=src python -u -m rate.cli.main fooof \
             --config {input.config} \
-            --out-dir {config[paths][out_dir]} \
+            --out-dir {OUT_DIR} \
             2>&1 | tee {log}
         """

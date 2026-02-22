@@ -5,7 +5,7 @@ META_DIR = f"{OUT_DIR}/_meta"
 
 rule dataset_index:
     input:
-        config_path="config/config.yaml",
+        config_path="config/compute.yaml",
         schema_path="config/schema.json",
         validated=f"{META_DIR}/config_validated.json",
         manifest=f"{META_DIR}/run_manifest.json",
