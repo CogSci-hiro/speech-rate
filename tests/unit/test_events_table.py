@@ -19,6 +19,9 @@ REQUIRED_EVENT_COLUMNS = {
     "other_rate",
     "latency",
     "abs_diff",
+    "self_rate_sq",
+    "other_rate_sq",
+    "abs_diff_sq",
     "time_within_run",
 }
 
@@ -170,6 +173,9 @@ def test_other_rate_and_abs_diff_present_for_two_subject_streams(tmp_path: Path)
     assert events_df["other_rate"].notna().all()
     assert events_df["latency"].notna().all()
     assert events_df["abs_diff"].notna().all()
+    assert events_df["self_rate_sq"].notna().all()
+    assert events_df["other_rate_sq"].notna().all()
+    assert events_df["abs_diff_sq"].notna().all()
 
 
 def test_other_rate_falls_back_to_nearest_partner_when_window_empty(tmp_path: Path) -> None:
@@ -227,6 +233,9 @@ def test_other_rate_falls_back_to_nearest_partner_when_window_empty(tmp_path: Pa
     assert events_df["other_rate"].notna().all()
     assert events_df["latency"].notna().all()
     assert events_df["abs_diff"].notna().all()
+    assert events_df["self_rate_sq"].notna().all()
+    assert events_df["other_rate_sq"].notna().all()
+    assert events_df["abs_diff_sq"].notna().all()
 
 
 def test_latency_is_self_onset_minus_matched_other_offset(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -148,3 +149,8 @@ def test_fooof_cli_smoke_writes_canonical_channel_table(tmp_path: Path, monkeypa
         "fit_success",
     }
     assert required_cols.issubset(set(channels_df.columns))
+    assert {"fooof_aperiodic_mode", "fooof_peak_params_json"}.issubset(set(channels_df.columns))
+    assert set(channels_df["fooof_aperiodic_mode"].dropna().astype(str).unique()) <= {"fixed", "knee"}
+    for payload in channels_df["fooof_peak_params_json"].dropna().astype(str):
+        parsed = json.loads(payload)
+        assert isinstance(parsed, list)

@@ -8,8 +8,7 @@ from rate.evoked_trf.spec import get_models
 
 def test_get_models_baseline_contains_emg() -> None:
     models = get_models()
-    assert len(models) == 1
-    model = models[0]
+    model = next(m for m in models if m.model_name == "baseline")
     assert model.model_name == "baseline"
     assert [reg.name for reg in model.regressors] == ["self_onset_impulse", "other_offset_impulse", "emg"]
 
