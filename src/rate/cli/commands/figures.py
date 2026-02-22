@@ -139,8 +139,22 @@ def run_trf_figures(
             )
             return
 
+        alpha = float(config.get("reporting", {}).get("alpha", 0.05))
+        stat_map = _load_topomap_stat_map(
+            out_dir=out_dir,
+            family=family,
+            regressor=reg_name,
+            fallback=evoked.data.T,
+        )
+        sig_mask = _load_topomap_significance_mask(
+            out_dir=out_dir,
+            family=family,
+            regressor=reg_name,
+            alpha=alpha,
+            expected_shape=stat_map.shape,
+        )
         plot_stat_topomap_sequence(
-            stat=evoked.data.T,
+            stat=stat_map,
             info=evoked.info,
             data_tmin=float(evoked.times[0]),
             tmin=float(evoked.times[0]),
@@ -150,6 +164,13 @@ def run_trf_figures(
             out_dir=out_dir,
             family=family,
             name=f"topomap_{reg_name}",
+            mask=sig_mask,
+            mask_params={
+                "marker": "o",
+                "markerfacecolor": "0.5",
+                "markeredgecolor": "0.5",
+                "markersize": 10,
+            },
         )
         return
 
@@ -243,6 +264,11 @@ def _cluster_path(*, out_dir: Path, family: str, regressor: str) -> Path:
     return legacy
 
 
+def _stats_feature_dir(*, out_dir: Path, family: str, regressor: str) -> Path:
+    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    return out_dir / "stats" / family / model / str(regressor)
+
+
 def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
     """Load first evoked entry for a frozen group kernel file."""
     kernel_path = _kernel_path(out_dir=out_dir, family=family, regressor=regressor)
@@ -289,3 +315,58 @@ def _load_cluster_intervals(cluster_path: Path) -> list[tuple[float, float]] | N
     for start, end in table[[CLUSTER_TSTART_COL, CLUSTER_TEND_COL]].itertuples(index=False):
         intervals.append((float(start), float(end)))
     return intervals
+
+
+def _load_topomap_stat_map(
+    *,
+    out_dir: Path,
+    family: str,
+    regressor: str,
+    fallback: np.ndarray,
+) -> np.ndarray:
+    stats_dir = _stats_feature_dir(out_dir=out_dir, family=family, regressor=regressor)
+    t_obs_map_path = stats_dir / "t_obs_map.npy"
+    if t_obs_map_path.exists():
+        arr = np.asarray(np.load(t_obs_map_path), dtype=float)
+        if arr.ndim == 2 and arr.size > 0:
+            return arr
+    return np.asarray(fallback, dtype=float)
+
+
+def _load_topomap_significance_mask(
+    *,
+    out_dir: Path,
+    family: str,
+    regressor: str,
+    alpha: float,
+    expected_shape: tuple[int, int],
+) -> np.ndarray | None:
+    if not (0.0 < float(alpha) < 1.0):
+        return None
+
+    stats_dir = _stats_feature_dir(out_dir=out_dir, family=family, regressor=regressor)
+    labels_path = stats_dir / "cluster_labels.npy"
+    cluster_path = _cluster_path(out_dir=out_dir, family=family, regressor=regressor)
+    if not labels_path.exists() or not cluster_path.exists():
+        return None
+
+    labels = np.asarray(np.load(labels_path), dtype=np.int32)
+    if labels.shape != expected_shape:
+        return None
+
+    if cluster_path.suffix.lower() == ".csv":
+        table = pd.read_csv(cluster_path)
+    else:
+        table = pd.read_parquet(cluster_path)
+    if "cluster_id" not in table.columns or "p_value" not in table.columns:
+        return None
+
+    sig_ids = (
+        table.loc[pd.to_numeric(table["p_value"], errors="coerce") <= float(alpha), "cluster_id"]
+        .astype(int)
+        .to_numpy()
+        + 1
+    )
+    if sig_ids.size == 0:
+        return np.zeros_like(labels, dtype=bool)
+    return np.isin(labels, sig_ids)

@@ -1097,7 +1097,12 @@ def aggregate_subject_scores(*, out_dir: Path) -> pd.DataFrame:
     if not subject_paths:
         raise ValueError(f"No subject score files found under: {subjects_root}")
 
-    frames = [pd.read_parquet(path) for path in subject_paths]
+    frames = []
+    for path in subject_paths:
+        try:
+            frames.append(pd.read_parquet(path))
+        except Exception as exc:
+            raise ValueError(f"Failed to read subject scores parquet: {path}") from exc
     scores = pd.concat(frames, ignore_index=True)
     return scores.sort_values(
         ["dyad_id", "subject", "run", "model", "fold_id"],

@@ -52,6 +52,14 @@ rule stats_kernel0:
             f"{OUT_DIR}/stats/"
             "{analysis}/{model}/{feature_name}/clusters." + TABLE_EXT
         ),
+        cluster_labels=(
+            f"{OUT_DIR}/stats/"
+            "{analysis}/{model}/{feature_name}/cluster_labels.npy"
+        ),
+        t_obs_map=(
+            f"{OUT_DIR}/stats/"
+            "{analysis}/{model}/{feature_name}/t_obs_map.npy"
+        ),
         subject_z_maps=(
             f"{OUT_DIR}/stats/"
             "{analysis}/{model}/{feature_name}/subject_z_maps.npy"

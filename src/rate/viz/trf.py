@@ -167,6 +167,7 @@ def plot_stat_topomap_sequence(
     family: str,
     name: str,
     mask: Optional[np.ndarray] = None,
+    mask_params: Optional[dict] = None,
     lim_val: float | None = None,
     max_cols: int = 10,
     cmap: str = "RdBu_r",
@@ -218,11 +219,23 @@ def plot_stat_topomap_sequence(
 
     fig, axes, cbar_ax = _make_topomap_grid(n_maps=int(plot_times.size), max_cols=max_cols)
 
+    topomap_mask_params = None
+    if mask is not None:
+        topomap_mask_params = {
+            "marker": "o",
+            "markerfacecolor": "0.5",
+            "markeredgecolor": "0.5",
+            "markersize": 10,
+        }
+        if mask_params is not None:
+            topomap_mask_params.update(mask_params)
+
     evoked.plot_topomap(
         times=plot_times,
         axes=axes,
         show=False,
         mask=None if mask is None else mask.T,
+        mask_params=topomap_mask_params,
         vlim=(-limit, limit),
         cmap=cmap,
         colorbar=False,
