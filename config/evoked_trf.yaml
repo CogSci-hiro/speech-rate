@@ -25,7 +25,7 @@ evoked_trf:
   ridge_alpha_grid:
     min: 2
     max: 6
-    n_alpha: 10
+    n_alpha: 20
   models:
     - name: "baseline"
       regressors:
@@ -50,25 +50,25 @@ evoked_trf:
         - "other_ipu_offset"
         - "emg"
         - "abs_diff"
-    - name: "self_rate_sq"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
-        - "self_rate"
-        - "self_rate^2"
-    - name: "other_rate_sq"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
-        - "other_rate"
-        - "other_rate^2"
-    - name: "abs_diff_sq"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
-        - "abs_diff"
-        - "abs_diff^2"
+    #- name: "self_rate_sq"
+    #  regressors:
+    #    - "self_ipu_onset"
+    #    - "other_ipu_offset"
+    #    - "emg"
+    #    - "self_rate"
+    #    - "self_rate^2"
+    #- name: "other_rate_sq"
+    #  regressors:
+    #    - "self_ipu_onset"
+    #    - "other_ipu_offset"
+    #    - "emg"
+    #    - "other_rate"
+    #    - "other_rate^2"
+    #- name: "abs_diff_sq"
+    #  regressors:
+    #    - "self_ipu_onset"
+    #    - "other_ipu_offset"
+    #    - "emg"
+    #    - "abs_diff"
+    #    - "abs_diff^2"
   n_jobs: 1
