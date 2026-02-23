@@ -59,6 +59,29 @@ class _NoOpProgressBar:
         return
 
 
+def _is_truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "t"}
+
+
+def _assert_non_resampled_eeg_inputs(dataset_index: pd.DataFrame) -> None:
+    if "eeg_is_resampled" in dataset_index.columns and dataset_index["eeg_is_resampled"].map(_is_truthy).any():
+        raise ValueError(
+            "FOOOF pipeline received resampled EEG rows (eeg_is_resampled=True). "
+            "FOOOF must run on non-downsampled EEG inputs."
+        )
+    if "eeg_path" in dataset_index.columns:
+        eeg_paths = dataset_index["eeg_path"].astype(str)
+        if eeg_paths.str.contains(r"(?:^|[/\\\\])eeg_resampled(?:[/\\\\]|$)", regex=True, na=False).any():
+            raise ValueError(
+                "FOOOF pipeline received eeg_resampled file paths. "
+                "FOOOF must run on non-downsampled EEG inputs."
+            )
+
+
 def _finite_float_or_none(value: object) -> float | None:
     try:
         out = float(value)
@@ -151,6 +174,7 @@ def _validate_inputs(dataset_index: pd.DataFrame, events_df: pd.DataFrame) -> No
         raise ValueError(f"dataset_index missing required columns: {sorted(ds_missing)}")
     if ev_missing:
         raise ValueError(f"events_df missing required columns: {sorted(ev_missing)}")
+    _assert_non_resampled_eeg_inputs(dataset_index)
 
 
 def _events_for_dataset_row(events_df: pd.DataFrame, ds_row: pd.Series) -> pd.DataFrame:

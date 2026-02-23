@@ -25,6 +25,14 @@ paths:
   eeg_dir: "/Volumes/work-4T/hyperscanning-testing/derived/eeg/filtered"
   annotations_dir: "/Users/hiro/PycharmProjects/hyperscanning-working/data/annotations"
 
+# ============================================================
+# GLOBAL SAMPLING
+# ============================================================
+# Project-wide resampling / TRF sampling rate (Hz). Compute code prefers this
+# value and falls back to branch-local downsample_hz for backward compatibility.
+sampling:
+  downsample_hz: 32.0
+
 
 # ============================================================
 # DATASET

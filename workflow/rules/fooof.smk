@@ -10,7 +10,7 @@ FOOOF_TARGETS = [
 
 rule fooof:
     input:
-        dataset_index=f"{OUT_DIR}/dataset/index_resampled.parquet",
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
         events=f"{OUT_DIR}/events/events.parquet",
         config="config/config.yaml",
         config_validated=f"{OUT_DIR}/_meta/config_validated.json",

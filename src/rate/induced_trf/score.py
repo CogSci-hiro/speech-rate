@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from rate.config import get_project_downsample_hz
 
 from rate.evoked_trf.feature_sources import emg_for_run_aligned, load_subject_emg
 from rate.evoked_trf.fit import fit_receptive_field, predict_receptive_field
@@ -103,7 +104,7 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         ridge_alpha_grid = [float(a) for a in grid_cfg]
 
     return InducedTrfConfig(
-        downsample_hz=float(ind["downsample_hz"]),
+        downsample_hz=get_project_downsample_hz(cfg, fallback_section="induced_trf"),
         bands=bands,
         bands_hz=bands_hz,
         edge_drop=edge_drop,

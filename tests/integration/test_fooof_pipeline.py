@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import yaml
 
 
@@ -99,7 +100,7 @@ def test_fooof_cli_smoke_writes_canonical_channel_table(tmp_path: Path, monkeypa
             }
         ]
     )
-    write_parquet_dataframe(dataset_index, out_dir / "dataset" / "index_resampled.parquet")
+    write_parquet_dataframe(dataset_index, out_dir / "dataset" / "index.parquet")
 
     events_df = pd.DataFrame(
         [
@@ -154,3 +155,65 @@ def test_fooof_cli_smoke_writes_canonical_channel_table(tmp_path: Path, monkeypa
     for payload in channels_df["fooof_peak_params_json"].dropna().astype(str):
         parsed = json.loads(payload)
         assert isinstance(parsed, list)
+
+
+def test_fooof_cli_rejects_resampled_dataset_index(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MPLCONFIGDIR", str(tmp_path / "mpl"))
+    monkeypatch.setenv("MNE_DONTWRITE_HOME", "true")
+    monkeypatch.setenv("NUMBA_DISABLE_JIT", "1")
+
+    import mne
+    from rate.cli.main import main
+    from rate.util import write_parquet_dataframe
+
+    out_dir = tmp_path / "outputs"
+    (out_dir / "dataset").mkdir(parents=True, exist_ok=True)
+    (out_dir / "events").mkdir(parents=True, exist_ok=True)
+
+    sfreq = 100.0
+    t = np.arange(0.0, 4.0, 1.0 / sfreq)
+    data = np.vstack([np.sin(2 * np.pi * 10.0 * t), np.sin(2 * np.pi * 8.0 * t)])
+    info = mne.create_info(ch_names=["Fz", "Cz"], sfreq=sfreq, ch_types=["eeg", "eeg"])
+    raw = mne.io.RawArray(data, info, verbose="ERROR")
+
+    resampled_dir = out_dir / "eeg_resampled"
+    resampled_dir.mkdir(parents=True, exist_ok=True)
+    fif_path = resampled_dir / "sub-001_run-1_32Hz_raw.fif"
+    raw.save(fif_path, overwrite=True, verbose="ERROR")
+
+    dataset_index = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "run": 1,
+                "task": "conversation",
+                "eeg_path": str(fif_path),
+                "status": "ok",
+                "eeg_is_resampled": True,
+                "eeg_downsample_hz": 32.0,
+            }
+        ]
+    )
+    write_parquet_dataframe(dataset_index, out_dir / "dataset" / "index_resampled.parquet")
+
+    events_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "run": 1,
+                "task": "conversation",
+                "event_id": "dyad-001_1_conversation_ev00001",
+                "t_onset": 2.0,
+            }
+        ]
+    )
+    write_parquet_dataframe(events_df, out_dir / "events" / "events.parquet")
+
+    cfg_path = tmp_path / "config.yaml"
+    _write_yaml(cfg_path, _make_config(out_dir))
+
+    with pytest.raises((FileNotFoundError, ValueError), match="FOOOF.*non-downsampled|index_resampled"):
+        main(["fooof", "--config", str(cfg_path), "--out-dir", str(out_dir)])

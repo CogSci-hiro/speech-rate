@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from rate.config import ConfigValidationError, load_and_validate_config
+from rate.config import ConfigValidationError, get_project_downsample_hz, load_and_validate_config
 from rate.features.emg import compute_emg_envelope
 from rate.features.io import write_subject_emg_parquet
 
@@ -92,7 +92,12 @@ def compute_subject_emg(
     l_freq = float(emg_cfg.get("l_freq", 30.0))
     h_freq = float(emg_cfg.get("h_freq", 150.0))
     log_transform = bool(emg_cfg.get("log_transform", True))
-    target_sfreq = float(emg_cfg.get("target_sfreq", cfg["evoked_trf"]["downsample_hz"]))
+    target_sfreq = float(
+        emg_cfg.get(
+            "target_sfreq",
+            get_project_downsample_hz(cfg, fallback_section="evoked_trf"),
+        )
+    )
 
     rows = _subject_rows(ds_index, dyad_id=str(dyad_id), subject=str(subject))
     out_rows: list[pd.DataFrame] = []

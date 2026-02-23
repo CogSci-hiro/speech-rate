@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from rate.config import get_project_downsample_hz
 
 from rate.evoked_trf.fit import (
     fit_receptive_field,
@@ -84,7 +85,7 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
         raise ValueError("evoked_trf.emg must be a mapping when provided")
 
     return EvokedTrfConfig(
-        downsample_hz=float(ev["downsample_hz"]),
+        downsample_hz=get_project_downsample_hz(cfg, fallback_section="evoked_trf"),
         tmin_s=float(ev["lags_s"]["tmin"]),
         tmax_s=float(ev["lags_s"]["tmax"]),
         scheme=scheme,
