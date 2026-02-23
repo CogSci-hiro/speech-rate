@@ -1,13 +1,115 @@
+from pathlib import Path
+import re
 import yaml
 
-configfile: "config/compute.yaml"
+configfile: "config/config.yaml"
+
+# =============================================================================
+# Configuration Lifecycle Separation (Hard Boundary)
+# =============================================================================
+# Compute layer (heavy / expensive):
+#   - Uses Snakemake `config` loaded from config/config.yaml (+ modular compute YAMLs)
+#   - May read modular compute configs for local metadata checks/documentation
+#   - MUST NOT depend on config/stats.yaml or config/viz.yaml
+#
+# Inference layer (stats):
+#   - Uses config/stats.yaml and frozen compute outputs
+#   - MUST NOT depend on config/viz.yaml
+#
+# Visualization layer (figures):
+#   - Uses config/viz.yaml and frozen stats outputs
+#   - MUST NOT depend on compute config internals for rule expansion
+#
+# Cross-layer config dependencies are forbidden because they cause accidental
+# recompute cascades (e.g., editing viz.yaml retriggering heavy compute jobs).
+# =============================================================================
+
+def _load_yaml_config(path: str):
+    with open(path, "r", encoding="utf-8") as _f:
+        return yaml.safe_load(_f) or {}
+
+
+def _assert_mapping(name: str, payload):
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{name} must load as a YAML mapping.")
+
+
+class _ForbiddenConfigProxy:
+    def __init__(self, name: str):
+        self._name = name
+
+    def _fail(self):
+        raise RuntimeError(
+            f"{self._name} must not be accessed in compute rule scope. "
+            "Use the layer-specific config handles instead."
+        )
+
+    def __getattr__(self, _attr):
+        self._fail()
+
+    def __getitem__(self, _key):
+        self._fail()
+
+    def get(self, *_args, **_kwargs):
+        self._fail()
+
+    def keys(self):
+        self._fail()
+
+    def items(self):
+        self._fail()
+
+    def values(self):
+        self._fail()
+
+    def __iter__(self):
+        self._fail()
+
+    def __repr__(self):
+        return f"<ForbiddenConfigProxy {self._name}>"
+
+
+# Load modular YAMLs explicitly.
+trf_config = _load_yaml_config("config/trf.yaml")
+evoked_trf_config = _load_yaml_config("config/evoked_trf.yaml")
+induced_trf_config = _load_yaml_config("config/induced_trf.yaml")
+fooof_config = _load_yaml_config("config/fooof.yaml")
+ddc_config = _load_yaml_config("config/ddc.yaml")
 
 # Load viz/stats configs manually so edits there do not become Snakemake `config`
 # changes that retrigger expensive compute jobs.
-with open("config/viz.yaml", "r", encoding="utf-8") as _f:
-    viz_config = yaml.safe_load(_f) or {}
-with open("config/stats.yaml", "r", encoding="utf-8") as _f:
-    stats_config = yaml.safe_load(_f) or {}
+viz_config = _load_yaml_config("config/viz.yaml")
+stats_config = _load_yaml_config("config/stats.yaml")
+
+for _name, _cfg in (
+    ("trf_config", trf_config),
+    ("evoked_trf_config", evoked_trf_config),
+    ("induced_trf_config", induced_trf_config),
+    ("fooof_config", fooof_config),
+    ("ddc_config", ddc_config),
+    ("viz_config", viz_config),
+    ("stats_config", stats_config),
+):
+    _assert_mapping(_name, _cfg)
+
+if "paths" not in config or "out_dir" not in (config.get("paths") or {}):
+    raise RuntimeError("config/config.yaml must define paths.out_dir")
+if "paths" not in stats_config or "out_dir" not in (stats_config.get("paths") or {}):
+    raise RuntimeError("config/stats.yaml must define paths.out_dir")
+if "paths" not in viz_config or "out_dir" not in (viz_config.get("paths") or {}):
+    raise RuntimeError("config/viz.yaml must define paths.out_dir")
+
+# Forbidden aliases for compute rule scope. Any accidental use should fail fast.
+cfg_stats = _ForbiddenConfigProxy("cfg_stats")
+cfg_viz = _ForbiddenConfigProxy("cfg_viz")
+
+# Explicit sub-config handles used by non-compute rules.
+compute_config = config
+compute_paths_config = compute_config.get("paths", {}) or {}
+COMPUTE_OUT_DIR = str(compute_paths_config["out_dir"])
+compute_induced_trf_config = induced_trf_config.get("induced_trf", {}) or {}
+stats_induced_trf_config = stats_config.get("induced_trf", {}) or {}
+viz_induced_trf_config = viz_config.get("induced_trf", {}) or {}
 
 include: "rules/common.smk"
 include: "rules/dataset.smk"
@@ -22,7 +124,98 @@ include: "rules/figures.smk"
 include: "rules/tests.smk"
 
 
+def _rule_file_config_refs(path: str) -> list[str]:
+    text = Path(path).read_text(encoding="utf-8")
+    refs = sorted(set(re.findall(r"config/[A-Za-z0-9_./-]+\.ya?ml", text)))
+    return refs
+
+
+def _assert_no_match(path: str, patterns: list[str], *, reason: str):
+    text = Path(path).read_text(encoding="utf-8")
+    for pattern in patterns:
+        if re.search(pattern, text, flags=re.MULTILINE):
+            raise RuntimeError(f"{path}: {reason} (matched /{pattern}/)")
+
+
+def _validate_config_isolation(*, emit_summary: bool = False):
+    compute_rule_files = [
+        "workflow/rules/common.smk",
+        "workflow/rules/dataset.smk",
+        "workflow/rules/events.smk",
+        "workflow/rules/eeg_resample.smk",
+        "workflow/rules/features.smk",
+        "workflow/rules/evoked_trf.smk",
+        "workflow/rules/induced_trf.smk",
+        "workflow/rules/fooof.smk",
+    ]
+    stats_rule_files = ["workflow/rules/stats.smk"]
+    figure_rule_files = ["workflow/rules/figures.smk"]
+    all_rule_files = compute_rule_files + stats_rule_files + figure_rule_files + ["workflow/rules/tests.smk"]
+
+    if emit_summary:
+        print("Config references by rule file:")
+        for rule_file in all_rule_files:
+            print(f"  {rule_file}: {_rule_file_config_refs(rule_file)}")
+
+    for rule_file in compute_rule_files:
+        _assert_no_match(
+            rule_file,
+            [
+                r"config/stats\.ya?ml",
+                r"config/viz\.ya?ml",
+                r"\bcfg_stats\b",
+                r"\bcfg_viz\b",
+                r"\bstats_config\b",
+                r"\bviz_config\b",
+                r"\bstats_induced_trf_config\b",
+                r"\bviz_induced_trf_config\b",
+            ],
+            reason="compute rules must not depend on stats/viz config",
+        )
+
+    for rule_file in stats_rule_files:
+        _assert_no_match(
+            rule_file,
+            [r"config/viz\.ya?ml", r"\bviz_config\b", r"\bviz_induced_trf_config\b"],
+            reason="stats rules must not depend on viz config",
+        )
+
+    for rule_file in figure_rule_files:
+        _assert_no_match(
+            rule_file,
+            [r"config/stats\.ya?ml", r"\bstats_config\b", r"\bstats_induced_trf_config\b"],
+            reason="figure rules must not depend on stats config files directly",
+        )
+        refs = _rule_file_config_refs(rule_file)
+        if "config/viz.yaml" not in refs:
+            raise RuntimeError(f"{rule_file}: figure rules must depend on config/viz.yaml")
+
+    for rule_file in all_rule_files:
+        _assert_no_match(
+            rule_file,
+            [r"\bconfig\b\s*\[", r"\bconfig\b\s*\.\s*get\s*\("],
+            reason="global Snakemake config dict access is forbidden in rule files",
+        )
+        _assert_no_match(
+            rule_file,
+            [r"params:\s*\n\s*config\s*="],
+            reason="full-config passing via params.config is forbidden",
+        )
+
+
+# Load-time structural validation: fail early before DAG execution if a rule file
+# reintroduces forbidden cross-layer config coupling.
+_validate_config_isolation()
+
+
 rule pipeline:
     input:
         KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS + FOOOF_TARGETS
     default_target: True
+
+
+rule config_sanity:
+    message:
+        "Checking config dependency isolation..."
+    run:
+        _validate_config_isolation(emit_summary=True)

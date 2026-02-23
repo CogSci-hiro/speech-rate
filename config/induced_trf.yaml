@@ -1,0 +1,44 @@
+# Phase 1 modular config duplicate from config/config.yaml
+induced_trf:
+  downsample_hz: 100.0
+  bands: ["theta", "alpha", "beta"]
+
+  bands_hz:
+    theta: [4.0, 7.0]
+    alpha: [8.0, 12.0]
+    beta:  [13.0, 30.0]
+
+  models:
+    - name: "baseline"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+    - name: "self_rate"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "self_rate"
+    - name: "other_rate"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "other_rate"
+    - name: "abs_diff"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "abs_diff"
+
+  power:
+    method: "hilbert"
+    log_transform: "log10"   # options: none | log10 | ln
+
+  fooof_sliding:
+    window_s: 1.0
+    step_s: 0.1
+    fit_range_hz: [2.0, 40.0]
+    edge_drop: "half_window"

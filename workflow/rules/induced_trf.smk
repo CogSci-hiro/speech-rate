@@ -1,6 +1,6 @@
 import pandas as pd
 
-OUT_DIR = config["paths"]["out_dir"]
+OUT_DIR = COMPUTE_OUT_DIR
 
 
 def _subject_pairs():
@@ -10,7 +10,7 @@ def _subject_pairs():
 
 
 def _induced_bands():
-    ind_cfg = config.get("induced_trf", {}) or {}
+    ind_cfg = compute_induced_trf_config
     bands = ind_cfg.get("bands")
     if bands:
         return [str(b) for b in bands]
@@ -45,7 +45,7 @@ rule induced_trf_subject:
             --dyad-id {wildcards.dyad_id} \
             --subject {wildcards.subject} \
             --band {wildcards.band} \
-            --config config/compute.yaml \
+            --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}
@@ -68,7 +68,7 @@ rule induced_trf_aggregate:
         r"""
         set -euo pipefail
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main induced-trf-aggregate \
-            --config config/compute.yaml \
+            --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}

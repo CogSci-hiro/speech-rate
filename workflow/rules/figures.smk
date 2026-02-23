@@ -24,7 +24,7 @@ if not REGRESSORS:
 
 
 def _induced_bands():
-    ind_cfg = config.get("induced_trf", {}) or {}
+    ind_cfg = viz_induced_trf_config
     bands = ind_cfg.get("bands")
     if bands:
         return [str(b) for b in bands]
@@ -92,6 +92,7 @@ AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY = {
     family: _available_regressors_for_family(family)
     for family in INDUCED_FAMILIES
 }
+VIZ_OUT_DIR = _viz_out_dir()
 
 EVOKED_JOINT_TARGETS = [f"{_viz_out_dir()}/final/figures/evoked_trf/joint_{reg}.pdf" for reg in AVAILABLE_EVOKED_REGRESSORS]
 EVOKED_TOPO_TARGETS = [f"{_viz_out_dir()}/final/figures/evoked_trf/topomap_{reg}.pdf" for reg in AVAILABLE_EVOKED_REGRESSORS]
@@ -122,13 +123,14 @@ rule figure_evoked_trf_joint_by_regressor:
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/joint_{{regressor}}.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family evoked_trf \
             --figure joint \
+            --config config/viz.yaml \
             --regressor {wildcards.regressor}
         """
 
@@ -145,13 +147,14 @@ rule figure_evoked_trf_topo_by_regressor:
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/topomap_{{regressor}}.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family evoked_trf \
             --figure topo \
+            --config config/viz.yaml \
             --regressor {wildcards.regressor}
         """
 
@@ -170,13 +173,14 @@ rule figure_induced_trf_joint_by_regressor:
     output:
         f"{_viz_out_dir()}/final/figures/{{family}}/joint_{{regressor}}.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family {wildcards.family} \
             --figure joint \
+            --config config/viz.yaml \
             --regressor {wildcards.regressor}
         """
 
@@ -195,13 +199,14 @@ rule figure_induced_trf_topo_by_regressor:
     output:
         f"{_viz_out_dir()}/final/figures/{{family}}/topomap_{{regressor}}.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family {wildcards.family} \
             --figure topo \
+            --config config/viz.yaml \
             --regressor {wildcards.regressor}
         """
 
@@ -217,13 +222,14 @@ rule figure_evoked_trf_timecourse:
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family evoked_trf \
-            --figure timecourse
+            --figure timecourse \
+            --config config/viz.yaml
         """
 
 
@@ -235,13 +241,14 @@ rule figure_induced_trf_timecourse:
     output:
         f"{_viz_out_dir()}/final/figures/{{family}}/timecourse_panel.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family {wildcards.family} \
-            --figure timecourse
+            --figure timecourse \
+            --config config/viz.yaml
         """
 
 
@@ -255,13 +262,14 @@ rule figure_evoked_trf_reconstruction_erp_linear:
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family evoked_trf \
-            --figure reconstruction_erp_linear
+            --figure reconstruction_erp_linear \
+            --config config/viz.yaml
         """
 
 
@@ -274,13 +282,14 @@ rule figure_evoked_trf_reconstruction_erp_quadratic:
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"
     params:
-        out_dir=lambda wildcards: _viz_out_dir()
+        out_dir=VIZ_OUT_DIR
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
             --family evoked_trf \
-            --figure reconstruction_erp_quadratic
+            --figure reconstruction_erp_quadratic \
+            --config config/viz.yaml
         """
 
 

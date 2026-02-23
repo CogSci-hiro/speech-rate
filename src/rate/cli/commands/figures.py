@@ -10,9 +10,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from rate.config import load_yaml_config
 
 LOGGER = logging.getLogger(__name__)
-REQUIRES_CONFIG = True
+REQUIRES_CONFIG = False
 
 FIGURE_JOINT = "joint"
 FIGURE_TOPO = "topo"
@@ -74,10 +75,9 @@ def register_subparser(subparsers) -> ArgumentParser:
 
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     """Run TRF figure generation from CLI arguments."""
-    if config is None:
-        raise ValueError("figures command requires validated config.")
-
     try:
+        if config is None:
+            config = load_yaml_config(Path(args.config))
         run_trf_figures(
             out_dir=Path(args.out_dir),
             family=str(args.family),
@@ -262,25 +262,39 @@ def run_trf_figures(
             if panel_kind == "linear"
             else {"self": "self_rate_sq", "other": "other_rate_sq", "abs_diff": "abs_diff_sq"}
         )
-        panel_data = _build_reconstruction_erp_panel_data(
-            mne=mne,
-            out_dir=out_dir,
-            condition_to_model=condition_to_model,
-            electrodes=("Fz", "Pz"),
-        )
-        plot_reconstruction_erp_grid(
-            panel_data=panel_data,
-            colors={
-                "self": "#0B3C5D",      # dark blue
-                "other": "#8B1E1E",     # dark red
-                "abs_diff": "#1B5E20",  # dark green
-            },
-            out_dir=out_dir,
-            family=family,
-            name=f"reconstruction_erp_{panel_kind}",
-            title=f"Evoked TRF Reconstruction ERP ({panel_kind})",
-            electrodes=("Fz", "Pz"),
-        )
+        try:
+            panel_data = _build_reconstruction_erp_panel_data(
+                mne=mne,
+                out_dir=out_dir,
+                condition_to_model=condition_to_model,
+                electrodes=("Fz", "Pz"),
+            )
+            plot_reconstruction_erp_grid(
+                panel_data=panel_data,
+                colors={
+                    "self": "#0B3C5D",      # dark blue
+                    "other": "#8B1E1E",     # dark red
+                    "abs_diff": "#1B5E20",  # dark green
+                },
+                out_dir=out_dir,
+                family=family,
+                name=f"reconstruction_erp_{panel_kind}",
+                title=f"Evoked TRF Reconstruction ERP ({panel_kind})",
+                electrodes=("Fz", "Pz"),
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "Falling back to placeholder reconstruction ERP figure (%s): %s",
+                panel_kind,
+                exc,
+            )
+            _write_placeholder_figure(
+                out_dir=out_dir,
+                family=family,
+                name=f"reconstruction_erp_{panel_kind}",
+                title=f"Evoked TRF Reconstruction ERP ({panel_kind})",
+                message=f"Unavailable in current run ({exc.__class__.__name__}).",
+            )
         return
 
     raise ValueError(f"Unsupported figure mode: {figure}")
@@ -364,6 +378,30 @@ def _require_regressor(*, regressor: str | None, figure: str) -> str:
     if regressor is None or not regressor.strip():
         raise ValueError(f"--regressor is required when --figure is '{figure}'")
     return regressor.strip()
+
+
+def _write_placeholder_figure(
+    *,
+    out_dir: Path,
+    family: str,
+    name: str,
+    title: str,
+    message: str,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    fig_dir = out_dir / "final" / "figures" / family
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    fig_path = fig_dir / f"{name}.pdf"
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.axis("off")
+    ax.text(0.5, 0.68, title, ha="center", va="center", fontsize=14, weight="bold")
+    ax.text(0.5, 0.45, message, ha="center", va="center", fontsize=11)
+    ax.text(0.5, 0.25, "Placeholder figure generated to keep debug pipeline runnable.", ha="center", va="center", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(fig_path, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:

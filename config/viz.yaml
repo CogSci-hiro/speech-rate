@@ -4,6 +4,40 @@ paths:
   out_dir: "/Volumes/work-4T/speech-rate-testing"
 
 reporting:
+  alpha: 0.05
   tables_format: "csv"  # csv | parquet
   trf:
     regressors: ["self_rate", "other_rate", "abs_diff", "self_rate_sq", "other_rate_sq", "abs_diff_sq"]
+    electrodes: ["Fz", "Pz"]
+
+# Keep induced band metadata local to viz config so figure rule expansion does not
+# depend on the tracked compute config.
+induced_trf:
+  bands: ["theta"]
+  bands_hz:
+    theta: [4.0, 7.0]
+
+# Phase 1 modular duplicate from config/config.yaml.
+# Kept under a non-active key to avoid changing current pipeline behavior.
+phase1_master_viz_copy:
+  reporting:
+    alpha: 0.05
+
+    trf:
+
+      regressors: ["self_rate", "other_rate", "abs_diff", "self_rate_sq", "other_rate_sq", "abs_diff_sq"]
+      electrodes: ["Fz", "Pz"]
+      # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
+      # Global for all regressors:
+      # joint_times_s: [-0.10, 0.00, 0.10]
+      # Per regressor ("default" optional fallback):
+      # joint_times_s:
+      #   default: [-0.10, 0.00, 0.10]
+      #   self_rate: [-0.12, -0.02, 0.08]
+      #   other_rate: [-0.08, 0.04, 0.16]
+
+    tables_format: "csv"         # csv | parquet
+
+    figures:
+      formats: ["png", "tiff"]
+      dpi: 300

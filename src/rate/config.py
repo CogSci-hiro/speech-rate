@@ -20,6 +20,12 @@ DEFAULT_MATCHING_ABSDIFF_WINDOW_S = 1.0
 DEFAULT_DEBUG_ENABLED = False
 DEFAULT_DEBUG_MAX_FILES: int | None = None
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config" / "schema.json"
+MODULAR_COMPUTE_FILES = {
+    "evoked_trf": "evoked_trf.yaml",
+    "induced_trf": "induced_trf.yaml",
+    "fooof": "fooof.yaml",
+    "ddc": "ddc.yaml",
+}
 
 
 class ConfigValidationError(RuntimeError):
@@ -57,6 +63,47 @@ def load_yaml_config(config_path: Path | str) -> dict[str, Any]:
         raise ConfigValidationError(f"Config root must be a mapping: {path}")
 
     return payload
+
+
+def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if key in out and isinstance(out[key], Mapping) and isinstance(value, Mapping):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _maybe_attach_modular_compute_sections(
+    raw_config: Mapping[str, Any],
+    *,
+    config_path: Path | str,
+) -> dict[str, Any]:
+    """Attach modular compute sections when loading the base `config/config.yaml`.
+
+    This keeps CLI commands schema-valid after the monolithic `compute.yaml` is retired.
+    Only compute-layer sections are attached here; stats/viz remain separate.
+    """
+    path = Path(config_path)
+    out: dict[str, Any] = dict(raw_config)
+    if path.name != "config.yaml":
+        return out
+
+    parent = path.parent
+    for section_key, filename in MODULAR_COMPUTE_FILES.items():
+        if section_key in out:
+            continue
+        modular_path = parent / filename
+        if not modular_path.exists():
+            continue
+        modular_payload = load_yaml_config(modular_path)
+        if section_key in modular_payload:
+            out[section_key] = modular_payload[section_key]
+        else:
+            # Allow whole-file payloads to be merged if future modular files expand.
+            out = _deep_merge(out, modular_payload)
+    return out
 
 
 def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -195,6 +242,7 @@ def load_and_validate_config(
         Resolved and validated config dictionary.
     """
     raw_config = load_yaml_config(config_path)
+    raw_config = _maybe_attach_modular_compute_sections(raw_config, config_path=config_path)
     resolved_config = apply_config_defaults(raw_config)
     validate_config(resolved_config, schema_path=schema_path)
     LOGGER.info("Validated config: %s", config_path)

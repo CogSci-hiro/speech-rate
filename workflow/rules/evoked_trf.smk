@@ -1,6 +1,6 @@
 import pandas as pd
 
-OUT_DIR = config["paths"]["out_dir"]
+OUT_DIR = COMPUTE_OUT_DIR
 
 
 def _subject_pairs():
@@ -58,7 +58,7 @@ rule evoked_trf_subject:
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-subject \
             --dyad-id {wildcards.dyad_id} \
             --subject {wildcards.subject} \
-            --config config/compute.yaml \
+            --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}
@@ -76,7 +76,7 @@ rule evoked_trf_aggregate:
         r"""
         set -euo pipefail
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-aggregate \
-            --config config/compute.yaml \
+            --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}
@@ -120,7 +120,7 @@ rule evoked_trf_reconstruction_aggregate:
         r"""
         set -euo pipefail
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-reconstruction-aggregate \
-            --config config/compute.yaml \
+            --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}
@@ -138,7 +138,7 @@ rule evoked_trf_similarity_aggregate:
         r"""
         set -euo pipefail
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main evoked-trf-similarity-aggregate \
-            --config config/compute.yaml \
+            --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}

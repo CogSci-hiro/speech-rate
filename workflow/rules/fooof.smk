@@ -1,4 +1,4 @@
-OUT_DIR = config["paths"]["out_dir"]
+OUT_DIR = COMPUTE_OUT_DIR
 
 FOOOF_TARGETS = [
     f"{OUT_DIR}/fooof/trial_level/fooof_trial_channels.parquet",
@@ -12,7 +12,7 @@ rule fooof:
     input:
         dataset_index=f"{OUT_DIR}/dataset/index_resampled.parquet",
         events=f"{OUT_DIR}/events/events.parquet",
-        config="config/compute.yaml",
+        config="config/config.yaml",
         config_validated=f"{OUT_DIR}/_meta/config_validated.json",
         run_manifest=f"{OUT_DIR}/_meta/run_manifest.json",
     output:

@@ -1,4 +1,4 @@
-OUT_DIR = config["paths"]["out_dir"]
+OUT_DIR = COMPUTE_OUT_DIR
 RESAMPLED_DIR = f"{OUT_DIR}/eeg_resampled"
 INDEX_RESAMPLED = f"{OUT_DIR}/dataset/index_resampled.parquet"
 
@@ -20,7 +20,7 @@ rule eeg_resampled_raws:
     shell:
         r"""
         set -euo pipefail
-        PYTHONPATH=src python -m rate.cli.main resample-eeg --config config/compute.yaml --schema config/schema.json 2>&1 | tee {log}
+        PYTHONPATH=src python -m rate.cli.main resample-eeg --config config/config.yaml --schema config/schema.json 2>&1 | tee {log}
         test -d {output.resampled_dir}
         find {output.resampled_dir} -type f -name "*.fif" -print -quit | grep -q .
         """

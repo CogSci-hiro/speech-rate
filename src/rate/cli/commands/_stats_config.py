@@ -27,15 +27,18 @@ def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[st
 
 
 def _looks_like_stats_overlay(raw: Mapping[str, Any]) -> bool:
-    keys = set(raw.keys())
-    return bool(keys) and keys.issubset({"paths", "reporting", "stats", "debug"})
+    keys = {
+        key for key in raw.keys()
+        if not str(key).startswith("phase1_")
+    }
+    return bool(keys) and keys.issubset({"paths", "reporting", "stats", "debug", "induced_trf"})
 
 
 def load_stats_command_config(
     config_path: Path | str,
     *,
     schema_path: Path | str,
-    base_config_path: Path | str = Path("config/compute.yaml"),
+    base_config_path: Path | str = Path("config/config.yaml"),
 ) -> dict[str, Any]:
     """
     Load stats command config.
@@ -54,7 +57,7 @@ def load_stats_command_config(
         if not _looks_like_stats_overlay(raw_overlay):
             raise
 
-        raw_base = load_yaml_config(Path(base_config_path))
+        raw_base = load_and_validate_config(Path(base_config_path), schema_path=schema)
         merged = _deep_merge(raw_base, raw_overlay)
         resolved = apply_config_defaults(merged)
         validate_config(resolved, schema_path=schema)

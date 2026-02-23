@@ -14,7 +14,7 @@ def _stats_table_ext() -> str:
 
 
 def _induced_bands():
-    ind_cfg = config.get("induced_trf", {}) or {}
+    ind_cfg = stats_induced_trf_config
     bands = ind_cfg.get("bands")
     if bands:
         return [str(b) for b in bands]

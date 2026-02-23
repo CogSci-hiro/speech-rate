@@ -8,8 +8,7 @@
     "events",
     "evoked_trf",
     "induced_trf",
-    "ddc",
-    "reporting"
+    "ddc"
   ],
   "properties": {
     "paths": {

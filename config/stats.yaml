@@ -6,12 +6,47 @@ paths:
 reporting:
   tables_format: "csv"  # csv | parquet
 
+# Keep induced band metadata local to stats config so stats rule expansion does not
+# depend on the tracked compute config.
+induced_trf:
+  bands: ["theta"]
+  bands_hz:
+    theta: [4.0, 7.0]
+
 stats:
   kernel_cluster:
     method: "tfce"   # tfce | threshold
     n_permutations: 10000
     seed: 42
     threshold_p: 0.9
+    tfce:
+      start: 0.0
+      step: 0.2
     tail: 0
     adjacency:
       montage_name: "biosemi64"
+
+# Phase 1 modular duplicate from config/config.yaml.
+# Kept under a non-active key to avoid changing current pipeline behavior.
+phase1_master_stats_copy:
+  stats:
+
+    kernel_cluster:
+
+      method: "threshold"          # tfce | threshold
+
+      n_permutations: 10000
+      seed: 42
+
+      # Only used if method = threshold
+      threshold_p: 0.001
+
+      # Only used if method = tfce
+      tfce:
+        start: 0.0
+        step: 0.2
+
+      tail: 0                 # -1 | 0 | 1
+
+      adjacency:
+        montage_name: "biosemi64"

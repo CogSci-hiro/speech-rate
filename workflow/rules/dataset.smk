@@ -1,11 +1,11 @@
-OUT_DIR = config["paths"]["out_dir"]
+OUT_DIR = COMPUTE_OUT_DIR
 DATASET_DIR = f"{OUT_DIR}/dataset"
 META_DIR = f"{OUT_DIR}/_meta"
 
 
 rule dataset_index:
     input:
-        config_path="config/compute.yaml",
+        config_path="config/config.yaml",
         schema_path="config/schema.json",
         validated=f"{META_DIR}/config_validated.json",
         manifest=f"{META_DIR}/run_manifest.json",
