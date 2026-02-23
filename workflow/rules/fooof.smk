@@ -31,3 +31,8 @@ rule fooof:
             --out-dir {OUT_DIR} \
             2>&1 | tee {log}
         """
+
+
+rule fooof_all:
+    input:
+        FOOOF_TARGETS
