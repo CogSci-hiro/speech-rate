@@ -12,6 +12,18 @@ def _stats_table_ext() -> str:
     tables_format = str(stats_config.get("reporting", {}).get("tables_format", "parquet")).lower()
     return "csv" if tables_format == "csv" else "parquet"
 
+
+def _induced_bands():
+    ind_cfg = config.get("induced_trf", {}) or {}
+    bands = ind_cfg.get("bands")
+    if bands:
+        return [str(b) for b in bands]
+    bands_hz = ind_cfg.get("bands_hz", {}) or {}
+    return sorted(str(k) for k in bands_hz.keys())
+
+
+INDUCED_ANALYSES = [f"induced_trf_{band}" for band in _induced_bands()]
+
 KERNEL0_BEHAVIOR_MODEL_FEATURES = {
     # Linear models: [self_onset_impulse, other_offset_impulse, target]
     "self_rate": {"feature_index": 2, "feature_name": "self_rate"},
@@ -33,11 +45,28 @@ def _kernel0_feature_name(wildcards):
     return str(KERNEL0_BEHAVIOR_MODEL_FEATURES[str(wildcards.model)]["feature_name"])
 
 
+def _kernel0_scores_input(wildcards):
+    analysis = str(wildcards.analysis)
+    if analysis == "evoked_trf":
+        return f"{_stats_out_dir()}/evoked_trf/scores/scores.parquet"
+    if analysis.startswith("induced_trf_"):
+        return f"{_stats_out_dir()}/induced_trf/scores/scores.parquet"
+    raise ValueError(f"Unsupported analysis for stats_kernel0 rule: {analysis}")
+
+
 KERNEL0_BEHAVIOR_TARGETS = [
     (
         f"{_stats_out_dir()}/stats/"
         f"evoked_trf/{model}/{KERNEL0_BEHAVIOR_MODEL_FEATURES[model]['feature_name']}/clusters.{_stats_table_ext()}"
     )
+    for model in KERNEL0_BEHAVIOR_MODELS
+]
+KERNEL0_BEHAVIOR_TARGETS += [
+    (
+        f"{_stats_out_dir()}/stats/"
+        f"{analysis}/{model}/{KERNEL0_BEHAVIOR_MODEL_FEATURES[model]['feature_name']}/clusters.{_stats_table_ext()}"
+    )
+    for analysis in INDUCED_ANALYSES
     for model in KERNEL0_BEHAVIOR_MODELS
 ]
 KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS = [
@@ -50,11 +79,22 @@ KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS = [
     )
     for model in KERNEL0_BEHAVIOR_MODELS
 ]
+KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS += [
+    (
+        f"{_stats_out_dir()}/stats/"
+        f"{analysis}/"
+        f"{model}/"
+        f"{KERNEL0_BEHAVIOR_MODEL_FEATURES[model]['feature_name']}/"
+        f"subject_level/subject_z_map_index.{_stats_table_ext()}"
+    )
+    for analysis in INDUCED_ANALYSES
+    for model in KERNEL0_BEHAVIOR_MODELS
+]
 
 rule stats_kernel0:
     input:
         index=f"{_stats_out_dir()}/dataset/index.parquet",
-        evoked_scores=f"{_stats_out_dir()}/evoked_trf/scores/scores.parquet",
+        scores=_kernel0_scores_input,
     output:
         clusters=(
             f"{_stats_out_dir()}/stats/"
@@ -84,7 +124,9 @@ rule stats_kernel0:
             --analysis {wildcards.analysis} \
             --model {wildcards.model} \
             --feature-index {params.feature_index} \
-            --feature-name {wildcards.feature_name}
+            --feature-name {wildcards.feature_name} \
+            --config config/stats.yaml \
+            --schema config/schema.json
         """
 
 
@@ -114,7 +156,9 @@ rule stats_kernel0_subject_level:
             --analysis {wildcards.analysis} \
             --model {wildcards.model} \
             --feature-index {params.feature_index} \
-            --feature-name {wildcards.feature_name}
+            --feature-name {wildcards.feature_name} \
+            --config config/stats.yaml \
+            --schema config/schema.json
         """
 
 

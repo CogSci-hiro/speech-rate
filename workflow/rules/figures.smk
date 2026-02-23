@@ -23,55 +23,92 @@ if not REGRESSORS:
     raise ValueError("config/viz.yaml reporting.trf.regressors must define at least one TRF regressor")
 
 
-def _evoked_model_for_regressor(regressor: str) -> str:
+def _induced_bands():
+    ind_cfg = config.get("induced_trf", {}) or {}
+    bands = ind_cfg.get("bands")
+    if bands:
+        return [str(b) for b in bands]
+    bands_hz = ind_cfg.get("bands_hz", {}) or {}
+    return sorted(str(k) for k in bands_hz.keys())
+
+
+INDUCED_FAMILIES = [f"induced_trf_{band}" for band in _induced_bands()]
+
+
+def _trf_model_for_regressor(regressor: str) -> str:
     return "baseline" if str(regressor) == "emg" else str(regressor)
 
 
 def _evoked_kernel_input(wildcards):
-    model = _evoked_model_for_regressor(str(wildcards.regressor))
+    model = _trf_model_for_regressor(str(wildcards.regressor))
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
 
 
 def _evoked_cluster_input(wildcards):
-    model = _evoked_model_for_regressor(str(wildcards.regressor))
+    model = _trf_model_for_regressor(str(wildcards.regressor))
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
 
 
 def _evoked_timecourse_kernel_inputs(_wildcards):
     return [
-        f"{_viz_out_dir()}/stats/evoked_trf/{_evoked_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
+        f"{_viz_out_dir()}/stats/evoked_trf/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
         for reg in REGRESSORS
     ]
 
 
-def _available_evoked_regressors():
+def _family_kernel_input(wildcards):
+    model = _trf_model_for_regressor(str(wildcards.regressor))
+    family = str(wildcards.family)
+    return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
+
+
+def _family_cluster_input(wildcards):
+    model = _trf_model_for_regressor(str(wildcards.regressor))
+    family = str(wildcards.family)
+    return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
+
+
+def _family_timecourse_kernel_inputs(wildcards):
+    family = str(wildcards.family)
+    return [
+        f"{_viz_out_dir()}/stats/{family}/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
+        for reg in REGRESSORS
+    ]
+
+
+def _available_regressors_for_family(family: str):
     out = []
     for reg in REGRESSORS:
-        model = _evoked_model_for_regressor(reg)
-        kernel = Path(f"{_viz_out_dir()}/stats/evoked_trf/{model}/{reg}/grand_average_trfs-ave.fif")
-        clusters = Path(f"{_viz_out_dir()}/stats/evoked_trf/{model}/{reg}/clusters.{_viz_table_ext()}")
+        model = _trf_model_for_regressor(reg)
+        kernel = Path(f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/grand_average_trfs-ave.fif")
+        clusters = Path(f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/clusters.{_viz_table_ext()}")
         if kernel.exists() and clusters.exists():
             out.append(reg)
     return out
 
 
-def _available_induced_regressors():
-    out = []
-    for reg in REGRESSORS:
-        kernel = Path(f"{_viz_out_dir()}/induced_trf/group_kernel_{reg}.fif")
-        clusters = Path(f"{_viz_out_dir()}/induced_trf/clusters_{reg}.parquet")
-        if kernel.exists() and clusters.exists():
-            out.append(reg)
-    return out
-
-
-AVAILABLE_EVOKED_REGRESSORS = _available_evoked_regressors()
-AVAILABLE_INDUCED_REGRESSORS = _available_induced_regressors()
+AVAILABLE_EVOKED_REGRESSORS = _available_regressors_for_family("evoked_trf")
+AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY = {
+    family: _available_regressors_for_family(family)
+    for family in INDUCED_FAMILIES
+}
 
 EVOKED_JOINT_TARGETS = [f"{_viz_out_dir()}/final/figures/evoked_trf/joint_{reg}.pdf" for reg in AVAILABLE_EVOKED_REGRESSORS]
 EVOKED_TOPO_TARGETS = [f"{_viz_out_dir()}/final/figures/evoked_trf/topomap_{reg}.pdf" for reg in AVAILABLE_EVOKED_REGRESSORS]
-INDUCED_JOINT_TARGETS = [f"{_viz_out_dir()}/final/figures/induced_trf/joint_{reg}.pdf" for reg in AVAILABLE_INDUCED_REGRESSORS]
-INDUCED_TOPO_TARGETS = [f"{_viz_out_dir()}/final/figures/induced_trf/topomap_{reg}.pdf" for reg in AVAILABLE_INDUCED_REGRESSORS]
+INDUCED_JOINT_TARGETS = [
+    f"{_viz_out_dir()}/final/figures/{family}/joint_{reg}.pdf"
+    for family, regs in AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY.items()
+    for reg in regs
+]
+INDUCED_TOPO_TARGETS = [
+    f"{_viz_out_dir()}/final/figures/{family}/topomap_{reg}.pdf"
+    for family, regs in AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY.items()
+    for reg in regs
+]
+INDUCED_TIMECOURSE_TARGETS = [
+    f"{_viz_out_dir()}/final/figures/{family}/timecourse_panel.pdf"
+    for family in INDUCED_FAMILIES
+]
 EVOKED_RECONSTRUCTION_ERP_TARGETS = [
     f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf",
     f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf",
@@ -125,18 +162,20 @@ rule figure_evoked_trf_topo:
 
 
 rule figure_induced_trf_joint_by_regressor:
+    wildcard_constraints:
+        family="induced_trf_.+"
     input:
-        kernel=f"{_viz_out_dir()}/induced_trf/group_kernel_{{regressor}}.fif",
-        clusters=f"{_viz_out_dir()}/induced_trf/clusters_{{regressor}}.parquet",
+        kernel=_family_kernel_input,
+        clusters=_family_cluster_input,
     output:
-        f"{_viz_out_dir()}/final/figures/induced_trf/joint_{{regressor}}.pdf"
+        f"{_viz_out_dir()}/final/figures/{{family}}/joint_{{regressor}}.pdf"
     params:
         out_dir=lambda wildcards: _viz_out_dir()
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
-            --family induced_trf \
+            --family {wildcards.family} \
             --figure joint \
             --regressor {wildcards.regressor}
         """
@@ -148,18 +187,20 @@ rule figure_induced_trf_joint:
 
 
 rule figure_induced_trf_topo_by_regressor:
+    wildcard_constraints:
+        family="induced_trf_.+"
     input:
-        kernel=f"{_viz_out_dir()}/induced_trf/group_kernel_{{regressor}}.fif",
-        clusters=f"{_viz_out_dir()}/induced_trf/clusters_{{regressor}}.parquet",
+        kernel=_family_kernel_input,
+        clusters=_family_cluster_input,
     output:
-        f"{_viz_out_dir()}/final/figures/induced_trf/topomap_{{regressor}}.pdf"
+        f"{_viz_out_dir()}/final/figures/{{family}}/topomap_{{regressor}}.pdf"
     params:
         out_dir=lambda wildcards: _viz_out_dir()
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
-            --family induced_trf \
+            --family {wildcards.family} \
             --figure topo \
             --regressor {wildcards.regressor}
         """
@@ -187,20 +228,19 @@ rule figure_evoked_trf_timecourse:
 
 
 rule figure_induced_trf_timecourse:
+    wildcard_constraints:
+        family="induced_trf_.+"
     input:
-        expand(
-            f"{_viz_out_dir()}/induced_trf/group_kernel_{{regressor}}.fif",
-            regressor=REGRESSORS,
-        )
+        _family_timecourse_kernel_inputs
     output:
-        f"{_viz_out_dir()}/final/figures/induced_trf/timecourse_panel.pdf"
+        f"{_viz_out_dir()}/final/figures/{{family}}/timecourse_panel.pdf"
     params:
         out_dir=lambda wildcards: _viz_out_dir()
     shell:
         """
         python -m rate.cli.main figures \
             --out-dir {params.out_dir} \
-            --family induced_trf \
+            --family {wildcards.family} \
             --figure timecourse
         """
 
@@ -248,10 +288,10 @@ rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
         + EVOKED_TOPO_TARGETS
-        # + INDUCED_JOINT_TARGETS
-        # + INDUCED_TOPO_TARGETS
+        + INDUCED_JOINT_TARGETS
+        + INDUCED_TOPO_TARGETS
         + [
             f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
             *EVOKED_RECONSTRUCTION_ERP_TARGETS,
-            # f"{_viz_out_dir()}/final/figures/induced_trf/timecourse_panel.pdf",
         ]
+        + INDUCED_TIMECOURSE_TARGETS

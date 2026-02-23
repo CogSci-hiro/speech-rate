@@ -8,10 +8,10 @@ reporting:
 
 stats:
   kernel_cluster:
-    method: "threshold"   # tfce | threshold
+    method: "tfce"   # tfce | threshold
     n_permutations: 10000
     seed: 42
-    threshold_p: 0.001
+    threshold_p: 0.9
     tail: 0
     adjacency:
       montage_name: "biosemi64"

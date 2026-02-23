@@ -8,11 +8,12 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from rate.config import ConfigValidationError, load_and_validate_config
+from rate.config import ConfigValidationError
+from rate.cli.commands._stats_config import load_stats_command_config
 from rate.stats.io import discover_subject_keys_with_model
 
 LOGGER = logging.getLogger(__name__)
-REQUIRES_CONFIG = True
+REQUIRES_CONFIG = False
 
 
 def _resolve_feature_dir(feature_name: str, feature_index: int) -> str:
@@ -30,7 +31,7 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--model", required=True, help="Model name.")
     parser.add_argument("--feature-index", required=True, type=int, help="Feature index in kernels.")
     parser.add_argument("--feature-name", required=True, help="Feature name (for output path).")
-    parser.add_argument("--config", default="config/config.yaml", help="Path to YAML config file.")
+    parser.add_argument("--config", default="config/stats.yaml", help="Path to YAML config file.")
     parser.add_argument("--schema", default="config/schema.json", help="Path to JSON schema file.")
     parser.set_defaults(command_func=run)
     return parser
@@ -43,7 +44,7 @@ def register_subparser(subparsers) -> ArgumentParser:
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     if config is None:
         try:
-            cfg = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))
+            cfg = load_stats_command_config(Path(args.config), schema_path=Path(args.schema))
         except ConfigValidationError as exc:
             LOGGER.error("%s", exc)
             return 1
