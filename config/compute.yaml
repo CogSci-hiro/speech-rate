@@ -161,13 +161,13 @@ evoked_trf:
 # ============================================================
 
 induced_trf:
-  downsample_hz: 100.0
-  bands: ["theta", "alpha", "beta"]
+  downsample_hz: 32.0
+  bands: ["theta"] # , "alpha", "beta"]
 
   bands_hz:
     theta: [4.0, 7.0]
-    alpha: [8.0, 12.0]
-    beta:  [13.0, 30.0]
+    # alpha: [8.0, 12.0]
+    # beta:  [13.0, 30.0]
 
   models:
     - name: "baseline"
