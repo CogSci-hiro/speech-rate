@@ -198,6 +198,99 @@ def plot_electrode_timecourse_panel(
     save_figure(fig, out_dir, family, name)
 
 
+def plot_reconstruction_erp_grid(
+    *,
+    panel_data: Dict[str, Dict[str, Dict[str, np.ndarray]]],
+    colors: Dict[str, str],
+    out_dir: Path,
+    family: str,
+    name: str,
+    title: str,
+    electrodes: Sequence[str] = ("Fz", "Pz"),
+    signal_order: Sequence[str] = ("original", "reconstruction"),
+    xlabel: str = "Time (s)",
+    ylabel: str = "Amplitude",
+) -> None:
+    """Plot a 2x2 ERP panel (rows=electrodes, cols=original/reconstruction).
+
+    ``panel_data`` is expected as:
+    ``panel_data[electrode][signal][condition] -> array(n_time, 3)``, where columns are
+    ``time_s, mean, se``.
+    """
+    if len(electrodes) != 2:
+        raise ValueError("electrodes must contain exactly two entries for the 2x2 layout")
+    if len(signal_order) != 2:
+        raise ValueError("signal_order must contain exactly two entries for the 2x2 layout")
+
+    all_times: list[np.ndarray] = []
+    ymins: list[float] = []
+    ymaxs: list[float] = []
+    for electrode in electrodes:
+        if electrode not in panel_data:
+            raise ValueError(f"Missing panel data for electrode: {electrode}")
+        for signal in signal_order:
+            if signal not in panel_data[electrode]:
+                raise ValueError(f"Missing signal='{signal}' for electrode='{electrode}'")
+            for condition, arr in panel_data[electrode][signal].items():
+                vals = np.asarray(arr, dtype=float)
+                if vals.ndim != 2 or vals.shape[1] != 3:
+                    raise ValueError(f"Expected shape (n_time, 3) for {electrode}/{signal}/{condition}")
+                t = vals[:, 0]
+                m = vals[:, 1]
+                se = vals[:, 2]
+                all_times.append(t)
+                finite_lo = (m - se)[np.isfinite(m - se)]
+                finite_hi = (m + se)[np.isfinite(m + se)]
+                if finite_lo.size:
+                    ymins.append(float(np.min(finite_lo)))
+                if finite_hi.size:
+                    ymaxs.append(float(np.max(finite_hi)))
+
+    if not all_times or not ymins or not ymaxs:
+        raise ValueError("panel_data does not contain plottable values")
+
+    xmin = min(float(np.min(t)) for t in all_times if t.size)
+    xmax = max(float(np.max(t)) for t in all_times if t.size)
+    ymin = min(ymins)
+    ymax = max(ymaxs)
+    if not np.isfinite(ymin) or not np.isfinite(ymax):
+        ymin, ymax = -1.0, 1.0
+    if np.isclose(ymin, ymax):
+        pad = 1.0 if np.isclose(ymax, 0.0) else abs(ymax) * 0.1
+        ymin -= pad
+        ymax += pad
+
+    fig, axes = plt.subplots(2, 2, figsize=(9.0, 6.0), sharex=True, sharey=True)
+    signal_titles = {"original": "Original", "reconstruction": "Reconstruction"}
+
+    for row, electrode in enumerate(electrodes):
+        for col, signal in enumerate(signal_order):
+            ax = axes[row, col]
+            for condition, arr in panel_data[electrode][signal].items():
+                vals = np.asarray(arr, dtype=float)
+                t = vals[:, 0]
+                m = vals[:, 1]
+                se = vals[:, 2]
+                color = colors.get(condition)
+                ax.fill_between(t, m - se, m + se, color=color, alpha=0.18, linewidth=0)
+                ax.plot(t, m, color=color, linewidth=2.2, label=condition)
+            ax.axvline(0.0, linestyle="--", color="black", linewidth=1.0)
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            if row == 0:
+                ax.set_title(signal_titles.get(signal, str(signal).title()))
+            if col == 0:
+                ax.set_ylabel(f"{electrode}\n{ylabel}")
+            if row == 1:
+                ax.set_xlabel(xlabel)
+
+    axes[0, 0].legend(frameon=False, loc="best")
+    fig.suptitle(title)
+    fig.tight_layout()
+
+    save_figure(fig, out_dir, family, name)
+
+
 def plot_stat_topomap_sequence(
     *,
     stat: np.ndarray,

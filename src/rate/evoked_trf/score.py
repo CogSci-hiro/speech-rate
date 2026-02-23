@@ -32,31 +32,6 @@ LOGGER = logging.getLogger(__name__)
 PHASE5_PRIMARY_MODELS = ("baseline", "self_rate", "other_rate", "abs_diff")
 
 
-class _NoOpProgressBar:
-    def update(self, _n: int = 1) -> None:
-        return
-
-    def close(self) -> None:
-        return
-
-
-def _outer_cv_progress_bar(*, dyad_id: str, subject: str, total: int):
-    if total <= 0:
-        return _NoOpProgressBar()
-    try:
-        from tqdm.auto import tqdm  # type: ignore
-    except Exception:
-        return _NoOpProgressBar()
-    return tqdm(
-        total=int(total),
-        desc=f"outer-cv {dyad_id}/{subject}",
-        unit="model-fold",
-        leave=True,
-        ascii=True,
-        dynamic_ncols=True,
-    )
-
-
 # =============================================================================
 # Config
 # =============================================================================
@@ -268,14 +243,8 @@ def _compute_one_dyad_subject(
     lags_s = _canonical_lags_s(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s)
     gap_samples = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s) + 1
 
-    progress = _outer_cv_progress_bar(
-        dyad_id=dyad_id,
-        subject=subject,
-        total=len(runs) * len(models),
-    )
-    try:
-        for model_name in models:
-            trf_result = run_trf(
+    for model_name in models:
+        trf_result = run_trf(
                 X_by_run={r: per_run_X[r][model_name] for r in runs},  # type: ignore[arg-type]
                 y_by_run={r: per_run_y[r] for r in runs},  # type: ignore[arg-type]
                 lags=np.asarray(lags_s, dtype=float),
@@ -307,6 +276,9 @@ def _compute_one_dyad_subject(
                         "subject": subject,
                         "model": model_name,
                     },
+                    "outer_progress_enabled": True,
+                    "outer_progress_desc": f"outer-cv {dyad_id}/{subject}/{model_name}",
+                    "outer_progress_unit": "fold",
                     "collect_predictions": False,
                     "enable_reconstruction": True,
                     "reconstruction_fn": compute_reconstruction_metrics_df,
@@ -319,15 +291,12 @@ def _compute_one_dyad_subject(
                     },
                 },
             )
-            trf_results_by_model[model_name] = trf_result
-            if trf_result.inner_scores is not None:
-                inner_rows.append(trf_result.inner_scores)
-            outer_rows.append(trf_result.outer_scores)
-            if trf_result.best_alpha_table is not None:
-                best_alpha_frames.append(trf_result.best_alpha_table)
-            progress.update(len(runs))
-    finally:
-        progress.close()
+        trf_results_by_model[model_name] = trf_result
+        if trf_result.inner_scores is not None:
+            inner_rows.append(trf_result.inner_scores)
+        outer_rows.append(trf_result.outer_scores)
+        if trf_result.best_alpha_table is not None:
+            best_alpha_frames.append(trf_result.best_alpha_table)
 
     inner_scores = pd.concat(inner_rows, ignore_index=True) if inner_rows else pd.DataFrame()
     if not inner_scores.empty:

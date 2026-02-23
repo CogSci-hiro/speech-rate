@@ -17,7 +17,15 @@ REQUIRES_CONFIG = True
 FIGURE_JOINT = "joint"
 FIGURE_TOPO = "topo"
 FIGURE_TIMECOURSE = "timecourse"
-FIGURE_CHOICES = (FIGURE_JOINT, FIGURE_TOPO, FIGURE_TIMECOURSE)
+FIGURE_RECON_ERP_LINEAR = "reconstruction_erp_linear"
+FIGURE_RECON_ERP_QUADRATIC = "reconstruction_erp_quadratic"
+FIGURE_CHOICES = (
+    FIGURE_JOINT,
+    FIGURE_TOPO,
+    FIGURE_TIMECOURSE,
+    FIGURE_RECON_ERP_LINEAR,
+    FIGURE_RECON_ERP_QUADRATIC,
+)
 
 DEFAULT_ELECTRODES = ["Fz", "Pz"]
 DEFAULT_TOPO_STEP_MS = 50.0
@@ -116,6 +124,7 @@ def run_trf_figures(
     from rate.viz.trf import (
         plot_electrode_timecourse_panel,
         plot_joint_kernel,
+        plot_reconstruction_erp_grid,
         plot_stat_topomap_sequence,
     )
 
@@ -241,6 +250,36 @@ def run_trf_figures(
             family=family,
             name="timecourse_panel",
             ylabel="Amplitude",
+        )
+        return
+
+    if figure in (FIGURE_RECON_ERP_LINEAR, FIGURE_RECON_ERP_QUADRATIC):
+        if family != "evoked_trf":
+            raise ValueError(f"{figure} is only supported for family='evoked_trf'")
+        panel_kind = "linear" if figure == FIGURE_RECON_ERP_LINEAR else "quadratic"
+        condition_to_model = (
+            {"self": "self_rate", "other": "other_rate", "abs_diff": "abs_diff"}
+            if panel_kind == "linear"
+            else {"self": "self_rate_sq", "other": "other_rate_sq", "abs_diff": "abs_diff_sq"}
+        )
+        panel_data = _build_reconstruction_erp_panel_data(
+            mne=mne,
+            out_dir=out_dir,
+            condition_to_model=condition_to_model,
+            electrodes=("Fz", "Pz"),
+        )
+        plot_reconstruction_erp_grid(
+            panel_data=panel_data,
+            colors={
+                "self": "#0B3C5D",      # dark blue
+                "other": "#8B1E1E",     # dark red
+                "abs_diff": "#1B5E20",  # dark green
+            },
+            out_dir=out_dir,
+            family=family,
+            name=f"reconstruction_erp_{panel_kind}",
+            title=f"Evoked TRF Reconstruction ERP ({panel_kind})",
+            electrodes=("Fz", "Pz"),
         )
         return
 
@@ -452,6 +491,127 @@ def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
     """Build deterministic color mapping for regressor overlays."""
     palette = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:brown", "tab:pink"]
     return {name: palette[idx % len(palette)] for idx, name in enumerate(regressors)}
+
+
+def _build_reconstruction_erp_panel_data(
+    *,
+    mne,
+    out_dir: Path,
+    condition_to_model: Mapping[str, str],
+    electrodes: tuple[str, str],
+) -> dict[str, dict[str, dict[str, np.ndarray]]]:
+    """Aggregate subject-level reconstruction ERP traces into plotting arrays."""
+    per_condition: dict[str, pd.DataFrame] = {}
+    for condition, model in condition_to_model.items():
+        per_condition[condition] = _load_reconstruction_waveform_subject_means(
+            mne=mne,
+            out_dir=out_dir,
+            model=model,
+            electrodes=electrodes,
+        )
+
+    panel_data: dict[str, dict[str, dict[str, np.ndarray]]] = {
+        elec: {"original": {}, "reconstruction": {}} for elec in electrodes
+    }
+    for condition, df in per_condition.items():
+        for electrode in electrodes:
+            dfe = df.loc[df["electrode"] == electrode].copy()
+            if dfe.empty:
+                raise ValueError(f"No reconstruction ERP rows for model='{condition_to_model[condition]}' electrode='{electrode}'")
+            grp = (
+                dfe.groupby("time_s", as_index=False)
+                .agg(
+                    orig_mean=("orig_amp", "mean"),
+                    orig_se=("orig_amp", _se_series),
+                    rec_mean=("rec_amp", "mean"),
+                    rec_se=("rec_amp", _se_series),
+                )
+                .sort_values("time_s", kind="mergesort")
+                .reset_index(drop=True)
+            )
+            panel_data[electrode]["original"][condition] = np.column_stack(
+                [
+                    grp["time_s"].to_numpy(dtype=float),
+                    grp["orig_mean"].to_numpy(dtype=float),
+                    grp["orig_se"].to_numpy(dtype=float),
+                ]
+            )
+            panel_data[electrode]["reconstruction"][condition] = np.column_stack(
+                [
+                    grp["time_s"].to_numpy(dtype=float),
+                    grp["rec_mean"].to_numpy(dtype=float),
+                    grp["rec_se"].to_numpy(dtype=float),
+                ]
+            )
+    return panel_data
+
+
+def _load_reconstruction_waveform_subject_means(
+    *,
+    mne,
+    out_dir: Path,
+    model: str,
+    electrodes: tuple[str, str],
+) -> pd.DataFrame:
+    """Return subject-averaged (across folds) reconstruction ERP waveforms for one model."""
+    subjects_root = out_dir / "evoked_trf" / "subjects"
+    if not subjects_root.exists():
+        raise FileNotFoundError(f"Subjects root not found: {subjects_root}")
+
+    wanted = set(str(e) for e in electrodes)
+    rows: list[pd.DataFrame] = []
+    for metrics_path in sorted(subjects_root.rglob(f"models/{model}/reconstruction_metrics.parquet")):
+        df = pd.read_parquet(metrics_path)
+        required = {"channel", "time_s", "orig_amp", "rec_amp"}
+        missing = required.difference(df.columns)
+        if missing:
+            raise ValueError(
+                f"{metrics_path} is missing columns {sorted(missing)}. "
+                "Re-run evoked_trf subject jobs with the updated code to regenerate reconstruction waveforms."
+            )
+
+        dyad_id = str(df["dyad_id"].iloc[0]) if "dyad_id" in df.columns and not df.empty else str(metrics_path.parents[3].name)
+        subject = str(df["subject"].iloc[0]) if "subject" in df.columns and not df.empty else str(metrics_path.parents[2].name)
+
+        kernel_path = metrics_path.parent / f"{model}-ave.fif"
+        if not kernel_path.exists():
+            raise FileNotFoundError(f"Subject kernel file not found for channel mapping: {kernel_path}")
+        evokeds = mne.read_evokeds(kernel_path)
+        if not evokeds:
+            raise ValueError(f"No evoked entries found in {kernel_path}")
+        ch_names = list(evokeds[0].ch_names)
+        idx_to_name = {int(i): str(name) for i, name in enumerate(ch_names)}
+
+        dfx = df.copy()
+        dfx["channel"] = pd.to_numeric(dfx["channel"], errors="coerce").astype("Int64")
+        dfx = dfx.dropna(subset=["channel", "time_s", "orig_amp", "rec_amp"]).copy()
+        dfx["channel"] = dfx["channel"].astype(int)
+        dfx["electrode"] = dfx["channel"].map(idx_to_name)
+        dfx = dfx.loc[dfx["electrode"].isin(wanted)].copy()
+        if dfx.empty:
+            continue
+
+        # Subject-level waveform = average across outer folds before group averaging.
+        dfx["dyad_id"] = dyad_id
+        dfx["subject"] = subject
+        rows.append(
+            dfx.groupby(["dyad_id", "subject", "electrode", "time_s"], as_index=False)
+            .agg(orig_amp=("orig_amp", "mean"), rec_amp=("rec_amp", "mean"))
+            .sort_values(["dyad_id", "subject", "electrode", "time_s"], kind="mergesort")
+            .reset_index(drop=True)
+        )
+
+    if not rows:
+        raise FileNotFoundError(f"No reconstruction metrics found for model='{model}' under {subjects_root}")
+    return pd.concat(rows, ignore_index=True)
+
+
+def _se_series(values: pd.Series) -> float:
+    arr = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size < 2:
+        return 0.0
+    return float(np.std(arr, ddof=1) / np.sqrt(float(arr.size)))
 
 
 def _load_cluster_intervals(cluster_path: Path) -> list[tuple[float, float]] | None:

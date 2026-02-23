@@ -145,6 +145,8 @@ def compute_reconstruction_erp(
       - ``r_channel`` : (n_channels,)
       - ``r_time``    : (n_channels, n_times_epoch)  [time-resolved pseudo-R^2]
       - ``times``     : (n_times_epoch,)
+      - ``orig_evoked`` : (n_channels, n_times_epoch) event-locked ERP from original signal
+      - ``rec_evoked``  : (n_channels, n_times_epoch) event-locked ERP from reconstructed signal
     """
     rec = np.asarray(reconstructed_raw, dtype=float)
     orig = np.asarray(original_raw, dtype=float)
@@ -184,6 +186,8 @@ def compute_reconstruction_erp(
             "r_channel": np.full(n_channels, np.nan, dtype=float),
             "r_time": np.full((n_channels, n_times_epoch), np.nan, dtype=float),
             "times": np.asarray(times_rel, dtype=float),
+            "orig_evoked": np.full((n_channels, n_times_epoch), np.nan, dtype=float),
+            "rec_evoked": np.full((n_channels, n_times_epoch), np.nan, dtype=float),
             "n_events_total": np.full(n_channels, n_events_total, dtype=int),
             "n_events_used": np.full(n_channels, n_events_used, dtype=int),
         }
@@ -201,6 +205,8 @@ def compute_reconstruction_erp(
         "r_channel": r_channel,
         "r_time": r_time,
         "times": np.asarray(times_rel, dtype=float),
+        "orig_evoked": np.asarray(orig_evoked, dtype=float),
+        "rec_evoked": np.asarray(rec_evoked, dtype=float),
         "n_events_total": np.full(n_channels, n_events_total, dtype=int),
         "n_events_used": np.full(n_channels, n_events_used, dtype=int),
     }
@@ -245,6 +251,8 @@ def compute_reconstruction_metrics_df(
     r_channel = np.asarray(metrics["r_channel"], dtype=float)
     r_time = np.asarray(metrics["r_time"], dtype=float)
     times = np.asarray(metrics["times"], dtype=float)
+    orig_evoked = np.asarray(metrics["orig_evoked"], dtype=float)
+    rec_evoked = np.asarray(metrics["rec_evoked"], dtype=float)
     n_events_total = np.asarray(metrics["n_events_total"])
     n_events_used = np.asarray(metrics["n_events_used"])
     rows: list[dict[str, object]] = []
@@ -256,6 +264,8 @@ def compute_reconstruction_metrics_df(
                     "time_s": float(times[ti]),
                     "r_time": float(r_time[ch, ti]),
                     "r_channel": float(r_channel[ch]),
+                    "orig_amp": float(orig_evoked[ch, ti]),
+                    "rec_amp": float(rec_evoked[ch, ti]),
                     "n_events_total": int(n_events_total[ch]),
                     "n_events_used": int(n_events_used[ch]),
                 }

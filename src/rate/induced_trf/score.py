@@ -258,6 +258,9 @@ def write_subject_output(
                     tmax_s=trf_cfg.tmax_s,
                 ),
                 "table_meta": {"dyad_id": str(dyad_id), "subject": str(subject), "model": model.model_name},
+                "outer_progress_enabled": True,
+                "outer_progress_desc": f"outer-cv {dyad_id}/{subject}/{model.model_name}/{band}",
+                "outer_progress_unit": "fold",
                 "enable_reconstruction": True,
                 "reconstruction_fn": compute_reconstruction_r2,
                 "events_by_run": per_run_events,
@@ -342,3 +345,36 @@ def compute_scores(model, X: np.ndarray, y: np.ndarray, metadata: dict) -> pd.Da
     r = float(model.score(X, y))
     baseline = 0.0
     return pd.DataFrame([{**metadata, "r": r, "r_baseline": baseline, "delta_r": r - baseline}])
+
+
+def aggregate_subject_scores(*, out_dir: Path) -> pd.DataFrame:
+    subject_paths = sorted(out_dir.glob("induced_trf_*/subjects/*/*/scores.parquet"))
+    if not subject_paths:
+        raise ValueError(f"No induced TRF subject score files found under: {out_dir}")
+
+    frames: list[pd.DataFrame] = []
+    for path in subject_paths:
+        try:
+            df = pd.read_parquet(path)
+        except Exception as exc:
+            raise ValueError(f"Failed to read induced TRF subject scores parquet: {path}") from exc
+        analysis_name = str(path.parents[3].name)
+        if analysis_name.startswith("induced_trf_"):
+            df = df.copy()
+            df["band"] = analysis_name.removeprefix("induced_trf_")
+        frames.append(df)
+
+    scores = pd.concat(frames, ignore_index=True)
+    sort_cols = [c for c in ["band", "dyad_id", "subject", "run", "model", "fold_id"] if c in scores.columns]
+    if sort_cols:
+        scores = scores.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+    return scores
+
+
+def write_aggregate_output(*, out_dir: Path) -> Path:
+    scores = aggregate_subject_scores(out_dir=out_dir)
+    _validate_scores_table(scores=scores)
+    out_path = out_dir / "induced_trf" / "scores" / "scores.parquet"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    scores.to_parquet(out_path, index=False)
+    return out_path

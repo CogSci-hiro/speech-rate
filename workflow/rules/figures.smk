@@ -72,6 +72,10 @@ EVOKED_JOINT_TARGETS = [f"{_viz_out_dir()}/final/figures/evoked_trf/joint_{reg}.
 EVOKED_TOPO_TARGETS = [f"{_viz_out_dir()}/final/figures/evoked_trf/topomap_{reg}.pdf" for reg in AVAILABLE_EVOKED_REGRESSORS]
 INDUCED_JOINT_TARGETS = [f"{_viz_out_dir()}/final/figures/induced_trf/joint_{reg}.pdf" for reg in AVAILABLE_INDUCED_REGRESSORS]
 INDUCED_TOPO_TARGETS = [f"{_viz_out_dir()}/final/figures/induced_trf/topomap_{reg}.pdf" for reg in AVAILABLE_INDUCED_REGRESSORS]
+EVOKED_RECONSTRUCTION_ERP_TARGETS = [
+    f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf",
+    f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf",
+]
 
 
 rule figure_evoked_trf_joint_by_regressor:
@@ -201,6 +205,45 @@ rule figure_induced_trf_timecourse:
         """
 
 
+rule figure_evoked_trf_reconstruction_erp_linear:
+    input:
+        # Stats outputs ensure upstream compute/stats are available before rendering.
+        expand(
+            f"{_viz_out_dir()}/stats/evoked_trf/{{model}}/{{model}}/grand_average_trfs-ave.fif",
+            model=["self_rate", "other_rate", "abs_diff"],
+        )
+    output:
+        f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf"
+    params:
+        out_dir=lambda wildcards: _viz_out_dir()
+    shell:
+        """
+        python -m rate.cli.main figures \
+            --out-dir {params.out_dir} \
+            --family evoked_trf \
+            --figure reconstruction_erp_linear
+        """
+
+
+rule figure_evoked_trf_reconstruction_erp_quadratic:
+    input:
+        expand(
+            f"{_viz_out_dir()}/stats/evoked_trf/{{model}}/{{model}}/grand_average_trfs-ave.fif",
+            model=["self_rate_sq", "other_rate_sq", "abs_diff_sq"],
+        )
+    output:
+        f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"
+    params:
+        out_dir=lambda wildcards: _viz_out_dir()
+    shell:
+        """
+        python -m rate.cli.main figures \
+            --out-dir {params.out_dir} \
+            --family evoked_trf \
+            --figure reconstruction_erp_quadratic
+        """
+
+
 rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
@@ -209,5 +252,6 @@ rule figures_all:
         # + INDUCED_TOPO_TARGETS
         + [
             f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
+            *EVOKED_RECONSTRUCTION_ERP_TARGETS,
             # f"{_viz_out_dir()}/final/figures/induced_trf/timecourse_panel.pdf",
         ]
