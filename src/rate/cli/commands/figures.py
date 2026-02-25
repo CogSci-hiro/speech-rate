@@ -244,6 +244,7 @@ def run_trf_figures(
                 family=family,
                 regressor=reg,
                 template_evoked=condition_evokeds[reg],
+                config=config,
             )) is not None
         }
         for reg in regressors:
@@ -611,8 +612,20 @@ def _load_condition_standard_error(
     family: str,
     regressor: str,
     template_evoked,
+    config: Mapping[str, Any] | None = None,
 ) -> np.ndarray | None:
     """Load subject-level kernels and return SEM array matching ``template_evoked.data``."""
+    # Preferred source: subject-level z maps written by stats pipeline. This matches
+    # the quantity plotted in `grand_average_trfs-ave.fif` for figure timecourses.
+    zmap_se = _load_condition_standard_error_from_subject_zmaps(
+        out_dir=out_dir,
+        family=family,
+        regressor=regressor,
+        template_evoked=template_evoked,
+    )
+    if zmap_se is not None:
+        return zmap_se
+
     subject_evokeds = _load_subject_evokeds(mne=mne, out_dir=out_dir, family=family, regressor=regressor)
     ref_shape = tuple(template_evoked.data.shape)
     ref_times = np.asarray(template_evoked.times, dtype=float)
@@ -642,6 +655,31 @@ def _load_condition_standard_error(
 
     stack = np.stack(matched, axis=0)
     return np.nanstd(stack, axis=0, ddof=1) / np.sqrt(float(stack.shape[0]))
+
+
+def _load_condition_standard_error_from_subject_zmaps(
+    *,
+    out_dir: Path,
+    family: str,
+    regressor: str,
+    template_evoked,
+) -> np.ndarray | None:
+    """Return SEM from `subject_z_maps.npy` when available (subjects x channels x lags)."""
+    stats_dir = _stats_feature_dir(out_dir=out_dir, family=family, regressor=regressor)
+    path = stats_dir / "subject_z_maps.npy"
+    if not path.exists():
+        return None
+    try:
+        subj = np.asarray(np.load(path), dtype=float)
+    except Exception:
+        return None
+    if subj.ndim != 3 or subj.shape[0] < 2:
+        return None
+    ref_shape = tuple(np.asarray(template_evoked.data).shape)
+    if tuple(subj.shape[1:]) != ref_shape:
+        return None
+    sem = np.nanstd(subj, axis=0, ddof=1) / np.sqrt(float(subj.shape[0]))
+    return np.asarray(sem, dtype=float)
 
 
 def _load_subject_evokeds(*, mne, out_dir: Path, family: str, regressor: str) -> list[Any]:
@@ -686,6 +724,11 @@ def _load_subject_kernel_arrays_from_trf_artifacts(
     model = "baseline" if str(regressor) == "emg" else str(regressor)
     lags_ref = np.asarray(template_evoked.times, dtype=float)
     shape_ref = tuple(np.asarray(template_evoked.data).shape)
+    LOGGER.info(
+        "SEM fallback for %s/%s: using per-subject kernels_outer with last feature slice after fold averaging",
+        family,
+        regressor,
+    )
 
     arrays: list[np.ndarray] = []
     for kernels_path in sorted(subjects_root.rglob(f"models/{model}/kernels_outer.npy")):
@@ -725,52 +768,17 @@ def _subject_kernel_mean_from_outer_folds(
     n_channels: int,
     n_lags: int,
 ) -> np.ndarray | None:
-    """Collapse outer-fold TRF kernels to one subject-level (channels x lags) array.
-
-    Handles common TRF kernel layouts by inferring feature/channel/lag axes.
-    """
+    """Collapse outer-fold TRF kernels to one subject-level (channels x lags) array."""
     arr = np.asarray(kernels, dtype=float)
-    if arr.ndim < 2:
+    if arr.ndim != 4:
         return None
-
-    subj = np.nanmean(arr, axis=0)
-    if subj.ndim == 2:
-        if subj.shape == (n_channels, n_lags):
-            return np.asarray(subj, dtype=float)
-        if subj.shape == (n_lags, n_channels):
-            return np.asarray(subj.T, dtype=float)
+    _, arr_n_channels, n_features, arr_n_lags = arr.shape
+    if int(arr_n_channels) != int(n_channels) or int(arr_n_lags) != int(n_lags):
         return None
-
-    if subj.ndim != 3:
-        return None
-
-    shape = tuple(int(x) for x in subj.shape)
-    lag_axes = [ax for ax, sz in enumerate(shape) if sz == n_lags]
-    ch_axes = [ax for ax, sz in enumerate(shape) if sz == n_channels]
-    for ch_ax in ch_axes:
-        for lag_ax in lag_axes:
-            if ch_ax == lag_ax:
-                continue
-            feat_ax = next(ax for ax in range(3) if ax not in (ch_ax, lag_ax))
-            if shape[feat_ax] != 1:
-                continue
-            out = np.take(subj, indices=0, axis=feat_ax)
-            # After squeezing feature axis, map remaining axes to (channels, lags)
-            if ch_ax < feat_ax:
-                ch_ax2 = ch_ax
-            else:
-                ch_ax2 = ch_ax - 1
-            if lag_ax < feat_ax:
-                lag_ax2 = lag_ax
-            else:
-                lag_ax2 = lag_ax - 1
-            if out.ndim != 2:
-                continue
-            if (ch_ax2, lag_ax2) == (0, 1):
-                return np.asarray(out, dtype=float)
-            if (ch_ax2, lag_ax2) == (1, 0):
-                return np.asarray(out.T, dtype=float)
-    return None
+    # Per user request: subject estimate = mean across outer folds, then take the
+    # target kernel as the last feature in the model design.
+    subj_mean = np.nanmean(arr, axis=0)          # (n_channels, n_features, n_lags)
+    return np.asarray(subj_mean[:, -1, :], dtype=float)
 
 
 def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
