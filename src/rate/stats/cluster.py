@@ -96,7 +96,8 @@ def run_cluster_1samp(
         out_type="indices",
         step_down_p=0.0,
         buffer_size=None,
-        verbose=False,
+        # MNE uses a tqdm-backed ProgressBar internally for permutations when verbose is enabled.
+        verbose=True,
     )
 
     return ClusterPermutationResult(

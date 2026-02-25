@@ -399,6 +399,76 @@ def plot_stat_topomap_sequence(
     save_figure(fig, out_dir, family, name)
 
 
+def plot_spatial_stat_topomap(
+    *,
+    stat: np.ndarray,
+    info: mne.Info,
+    title: str,
+    out_dir: Path,
+    family: str,
+    name: str,
+    mask: Optional[np.ndarray] = None,
+    mask_params: Optional[dict] = None,
+    lim_val: float | None = None,
+    cmap: str = "RdBu_r",
+    cbar_label: str = "Value",
+) -> None:
+    """Plot a single-channel-space topomap (no time axis) with optional significance markers."""
+    values = np.asarray(stat, dtype=float).reshape(-1)
+    if values.size != len(info["ch_names"]):
+        raise ValueError("stat length must match number of channels in info")
+
+    sig_mask = None
+    if mask is not None:
+        sig_mask = np.asarray(mask, dtype=bool).reshape(-1)
+        if sig_mask.shape != values.shape:
+            raise ValueError("mask must match stat shape")
+
+    if lim_val is None:
+        finite = values[np.isfinite(values)]
+        limit = float(np.max(np.abs(finite))) if finite.size else 1.0
+        if not np.isfinite(limit) or limit <= 0.0:
+            limit = 1.0
+    else:
+        limit = _resolve_lim_val(stat=values, lim_val=lim_val)
+
+    topomap_mask_params = {
+        "marker": "o",
+        "markerfacecolor": "0.75",
+        "markeredgecolor": "black",
+        "markersize": 10,
+    }
+    if mask_params is not None:
+        topomap_mask_params.update(mask_params)
+
+    fig = plt.figure(figsize=(5.8, 4.8))
+    gs = GridSpec(1, 2, width_ratios=[20, 1], figure=fig, wspace=0.15)
+    ax = fig.add_subplot(gs[0, 0])
+    cax = fig.add_subplot(gs[0, 1])
+
+    topo_out = mne.viz.plot_topomap(
+        values,
+        info,
+        axes=ax,
+        show=False,
+        cmap=cmap,
+        vlim=(-limit, limit),
+        mask=sig_mask,
+        mask_params=topomap_mask_params if sig_mask is not None else None,
+    )
+    im = topo_out[0] if isinstance(topo_out, tuple) else topo_out
+    ax.set_title(title)
+
+    norm = mpl.colors.Normalize(vmin=-limit, vmax=limit)
+    sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    fig.colorbar(sm, cax=cax, label=cbar_label)
+    # Suppress "im" unused complaints in some linters while keeping MNE call explicit.
+    _ = im
+
+    save_figure(fig, out_dir, family, name)
+
+
 def _find_time_axis(fig: plt.Figure) -> Optional[plt.Axes]:
     """Return the most likely time-course axis from an MNE joint figure."""
     for ax in fig.axes:

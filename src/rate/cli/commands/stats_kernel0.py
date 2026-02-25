@@ -4,7 +4,6 @@ import logging
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Mapping
-import traceback
 
 from mne.channels import make_standard_montage
 import numpy as np
@@ -195,30 +194,40 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         )
         return 1
 
+    allow_placeholders = bool(stats_cfg.get("allow_placeholder_outputs", False))
+
     montage_name = stats_cfg["adjacency"]["montage_name"]
     montage = make_standard_montage(montage_name)
     ch_names = montage.ch_names
 
     if not subject_keys:
-        LOGGER.warning(
-            "No subject kernels found under %s for analysis=%s model=%s. "
-            "Writing placeholder empty stats outputs (debug-friendly).",
+        if allow_placeholders:
+            LOGGER.warning(
+                "No subject kernels found under %s for analysis=%s model=%s. "
+                "Writing placeholder empty stats outputs because allow_placeholder_outputs=true.",
+                out_dir / str(args.analysis) / "subjects",
+                args.analysis,
+                args.model,
+            )
+            ok = _write_placeholder_stats_result(
+                out_dir=out_dir,
+                analysis=str(args.analysis),
+                model=str(args.model),
+                feature_index=int(args.feature_index),
+                feature_name=str(args.feature_name),
+                ch_names=ch_names,
+                lags=None,
+                tables_format=tables_format,
+                subject_keys=[],
+            )
+            return 0 if ok else 1
+        LOGGER.error(
+            "No subject kernels found under %s for analysis=%s model=%s.",
             out_dir / str(args.analysis) / "subjects",
             args.analysis,
             args.model,
         )
-        ok = _write_placeholder_stats_result(
-            out_dir=out_dir,
-            analysis=str(args.analysis),
-            model=str(args.model),
-            feature_index=int(args.feature_index),
-            feature_name=str(args.feature_name),
-            ch_names=ch_names,
-            lags=None,
-            tables_format=tables_format,
-            subject_keys=[],
-        )
-        return 0 if ok else 1
+        return 1
 
     cluster_method = ClusterMethod(stats_cfg["method"])
     cluster_block = stats_cfg.get("cluster", stats_cfg)
@@ -281,30 +290,36 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
             model=args.model,
         )
     except Exception as exc:
-        LOGGER.warning(
-            "stats-kernel0 fallback for analysis=%s model=%s feature=%s due to %s: %s",
+        if allow_placeholders:
+            LOGGER.warning(
+                "stats-kernel0 fallback for analysis=%s model=%s feature=%s due to %s: %s",
+                args.analysis,
+                args.model,
+                args.feature_name,
+                exc.__class__.__name__,
+                exc,
+            )
+            ok = _write_placeholder_stats_result(
+                out_dir=out_dir,
+                analysis=str(args.analysis),
+                model=str(args.model),
+                feature_index=int(args.feature_index),
+                feature_name=str(args.feature_name),
+                ch_names=ch_names,
+                lags=None,
+                tables_format=tables_format,
+                subject_keys=list(subject_keys),
+            )
+            if ok:
+                LOGGER.info("Wrote placeholder stats outputs for %s/%s/%s", args.analysis, args.model, args.feature_name)
+                return 0
+        LOGGER.exception(
+            "stats-kernel0 failed for analysis=%s model=%s feature=%s",
             args.analysis,
             args.model,
             args.feature_name,
-            exc.__class__.__name__,
-            exc,
         )
-        ok = _write_placeholder_stats_result(
-            out_dir=out_dir,
-            analysis=str(args.analysis),
-            model=str(args.model),
-            feature_index=int(args.feature_index),
-            feature_name=str(args.feature_name),
-            ch_names=ch_names,
-            lags=None,
-            tables_format=tables_format,
-            subject_keys=list(subject_keys),
-        )
-        if ok:
-            LOGGER.info("Wrote placeholder stats outputs for %s/%s/%s", args.analysis, args.model, args.feature_name)
-            return 0
-        LOGGER.debug("Original stats-kernel0 exception:\n%s", traceback.format_exc())
-        raise
+        return 1
 
     write_two_level_cluster_result(
         result=result,

@@ -20,12 +20,14 @@ FIGURE_TOPO = "topo"
 FIGURE_TIMECOURSE = "timecourse"
 FIGURE_RECON_ERP_LINEAR = "reconstruction_erp_linear"
 FIGURE_RECON_ERP_QUADRATIC = "reconstruction_erp_quadratic"
+FIGURE_RECON_ERP_R2_TOPO = "reconstruction_erp_r2_topo"
 FIGURE_CHOICES = (
     FIGURE_JOINT,
     FIGURE_TOPO,
     FIGURE_TIMECOURSE,
     FIGURE_RECON_ERP_LINEAR,
     FIGURE_RECON_ERP_QUADRATIC,
+    FIGURE_RECON_ERP_R2_TOPO,
 )
 
 DEFAULT_ELECTRODES = ["Fz", "Pz"]
@@ -125,6 +127,7 @@ def run_trf_figures(
         plot_electrode_timecourse_panel,
         plot_joint_kernel,
         plot_reconstruction_erp_grid,
+        plot_spatial_stat_topomap,
         plot_stat_topomap_sequence,
     )
 
@@ -297,6 +300,36 @@ def run_trf_figures(
             )
         return
 
+    if figure == FIGURE_RECON_ERP_R2_TOPO:
+        if family != "evoked_trf":
+            raise ValueError(f"{figure} is only supported for family='evoked_trf'")
+        model = _require_regressor(regressor=regressor, figure=figure)
+        if model == "baseline":
+            raise ValueError(f"{figure} expects a non-baseline model in --regressor")
+        stats_dir = _reconstruction_erp_r2_stats_dir(out_dir=out_dir, family=family, model=model)
+        mean_delta = np.asarray(np.load(stats_dir / "mean_delta_r2.npy"), dtype=float).reshape(-1)
+        ch_names = _load_reconstruction_erp_r2_channel_names(stats_dir=stats_dir)
+        info = _make_reconstruction_topomap_info(config=config, mne=mne, ch_names=ch_names)
+        alpha = float(config.get("reporting", {}).get("alpha", 0.05))
+        sig_mask = _load_reconstruction_erp_r2_significance_mask(stats_dir=stats_dir, alpha=alpha, n_channels=mean_delta.size)
+        plot_spatial_stat_topomap(
+            stat=mean_delta,
+            info=info,
+            title=f"{family} reconstruction ERP ΔR² ({model} - baseline)",
+            out_dir=out_dir,
+            family=family,
+            name=f"reconstruction_erp_r2_topomap_{model}_vs_baseline",
+            mask=sig_mask,
+            mask_params={
+                "marker": "o",
+                "markerfacecolor": "0.75",
+                "markeredgecolor": "black",
+                "markersize": 10,
+            },
+            cbar_label="Mean ΔR²",
+        )
+        return
+
     raise ValueError(f"Unsupported figure mode: {figure}")
 
 
@@ -432,6 +465,10 @@ def _stats_feature_dir(*, out_dir: Path, family: str, regressor: str) -> Path:
     return out_dir / "stats" / family / model / str(regressor)
 
 
+def _reconstruction_erp_r2_stats_dir(*, out_dir: Path, family: str, model: str) -> Path:
+    return out_dir / "stats" / family / str(model) / "reconstruction_erp_r2_vs_baseline"
+
+
 def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
     """Load first evoked entry for a frozen group kernel file."""
     kernel_path = _kernel_path(out_dir=out_dir, family=family, regressor=regressor)
@@ -442,6 +479,65 @@ def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
     if not evokeds:
         raise ValueError(f"No evoked entries found in kernel file: {kernel_path}")
     return evokeds[0]
+
+
+def _load_reconstruction_erp_r2_channel_names(*, stats_dir: Path) -> list[str]:
+    path = stats_dir / "channel_names.npy"
+    if not path.exists():
+        raise FileNotFoundError(f"Channel names not found: {path}")
+    arr = np.load(path)
+    vals = [str(x) for x in np.asarray(arr).reshape(-1)]
+    if not vals:
+        raise ValueError(f"No channel names found in {path}")
+    return vals
+
+
+def _make_reconstruction_topomap_info(*, config: Mapping[str, Any], mne, ch_names: Sequence[str]):
+    stats_root = config.get("stats", {})
+    stats_cfg = stats_root.get("kernel_cluster") or stats_root.get("kernel") or {}
+    adjacency_cfg = stats_cfg.get("adjacency", {}) if isinstance(stats_cfg, Mapping) else {}
+    montage_name = str(adjacency_cfg.get("montage_name", "biosemi64"))
+    info = mne.create_info(ch_names=list(ch_names), sfreq=1.0, ch_types="eeg")
+    montage = mne.channels.make_standard_montage(montage_name)
+    info.set_montage(montage, on_missing="ignore")
+    return info
+
+
+def _load_reconstruction_erp_r2_significance_mask(
+    *,
+    stats_dir: Path,
+    alpha: float,
+    n_channels: int,
+) -> np.ndarray | None:
+    if not (0.0 < float(alpha) < 1.0):
+        return None
+
+    labels_path = stats_dir / "cluster_labels.npy"
+    if not labels_path.exists():
+        return None
+    labels = np.asarray(np.load(labels_path), dtype=np.int32).reshape(-1)
+    if labels.size != int(n_channels):
+        return None
+
+    cluster_csv = stats_dir / "clusters.csv"
+    cluster_parquet = stats_dir / "clusters.parquet"
+    if cluster_csv.exists():
+        table = pd.read_csv(cluster_csv)
+    elif cluster_parquet.exists():
+        table = pd.read_parquet(cluster_parquet)
+    else:
+        return None
+    if "cluster_id" not in table.columns or "p_value" not in table.columns:
+        return None
+    sig_ids = (
+        table.loc[pd.to_numeric(table["p_value"], errors="coerce") <= float(alpha), "cluster_id"]
+        .astype(int)
+        .to_numpy()
+        + 1
+    )
+    if sig_ids.size == 0:
+        return np.zeros(int(n_channels), dtype=bool)
+    return np.isin(labels, sig_ids)
 
 
 def _global_axis_bounds(

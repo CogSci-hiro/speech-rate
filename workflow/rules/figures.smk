@@ -1,6 +1,3 @@
-from pathlib import Path
-
-
 def _viz_out_dir() -> str:
     # Read from viz.yaml (loaded manually in Snakefile) so visualization changes do
     # not retrigger compute jobs via the tracked Snakemake `config`.
@@ -17,9 +14,9 @@ def _viz_table_ext() -> str:
     return "csv" if tables_format == "csv" else "parquet"
 
 
-REGRESSORS = _viz_regressors()
+RAW_REGRESSORS = _viz_regressors()
 
-if not REGRESSORS:
+if not RAW_REGRESSORS:
     raise ValueError("config/viz.yaml reporting.trf.regressors must define at least one TRF regressor")
 
 
@@ -39,6 +36,28 @@ def _trf_model_for_regressor(regressor: str) -> str:
     return "baseline" if str(regressor) == "emg" else str(regressor)
 
 
+def _active_model_names(branch_cfg, branch_key: str):
+    block = branch_cfg.get(branch_key, {}) or {}
+    specs = block.get("models", []) or []
+    out = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        name = str(spec.get("name", "")).strip()
+        if name:
+            out.append(name)
+    return out
+
+
+ACTIVE_EVOKED_MODELS = set(_active_model_names(evoked_trf_config, "evoked_trf"))
+ACTIVE_INDUCED_MODELS = set(_active_model_names(induced_trf_config, "induced_trf"))
+
+
+def _configured_regressors_for_family(family: str):
+    active_models = ACTIVE_EVOKED_MODELS if family == "evoked_trf" else ACTIVE_INDUCED_MODELS
+    return [reg for reg in RAW_REGRESSORS if _trf_model_for_regressor(reg) in active_models]
+
+
 def _evoked_kernel_input(wildcards):
     model = _trf_model_for_regressor(str(wildcards.regressor))
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
@@ -52,7 +71,7 @@ def _evoked_cluster_input(wildcards):
 def _evoked_timecourse_kernel_inputs(_wildcards):
     return [
         f"{_viz_out_dir()}/stats/evoked_trf/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
-        for reg in REGRESSORS
+        for reg in AVAILABLE_EVOKED_REGRESSORS
     ]
 
 
@@ -72,24 +91,21 @@ def _family_timecourse_kernel_inputs(wildcards):
     family = str(wildcards.family)
     return [
         f"{_viz_out_dir()}/stats/{family}/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
-        for reg in REGRESSORS
+        for reg in AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY.get(family, [])
     ]
 
 
-def _available_regressors_for_family(family: str):
-    out = []
-    for reg in REGRESSORS:
-        model = _trf_model_for_regressor(reg)
-        kernel = Path(f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/grand_average_trfs-ave.fif")
-        clusters = Path(f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/clusters.{_viz_table_ext()}")
-        if kernel.exists() and clusters.exists():
-            out.append(reg)
-    return out
+def _has_evoked_models(models):
+    return all(str(model) in ACTIVE_EVOKED_MODELS for model in models)
 
 
-AVAILABLE_EVOKED_REGRESSORS = _available_regressors_for_family("evoked_trf")
+AVAILABLE_EVOKED_REGRESSORS = _configured_regressors_for_family("evoked_trf")
+AVAILABLE_EVOKED_RECONSTRUCTION_R2_MODELS = [
+    str(model) for model in sorted(ACTIVE_EVOKED_MODELS)
+    if str(model) != "baseline"
+]
 AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY = {
-    family: _available_regressors_for_family(family)
+    family: _configured_regressors_for_family(family)
     for family in INDUCED_FAMILIES
 }
 VIZ_OUT_DIR = _viz_out_dir()
@@ -112,7 +128,14 @@ INDUCED_TIMECOURSE_TARGETS = [
 ]
 EVOKED_RECONSTRUCTION_ERP_TARGETS = [
     f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf",
-    f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf",
+]
+if _has_evoked_models(["self_rate_sq", "other_rate_sq", "abs_diff_sq"]):
+    EVOKED_RECONSTRUCTION_ERP_TARGETS.append(
+        f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"
+    )
+EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS = [
+    f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_r2_topomap_{model}_vs_baseline.pdf"
+    for model in AVAILABLE_EVOKED_RECONSTRUCTION_R2_MODELS
 ]
 
 
@@ -293,6 +316,40 @@ rule figure_evoked_trf_reconstruction_erp_quadratic:
         """
 
 
+rule figure_evoked_trf_reconstruction_erp_r2_topo_by_model:
+    input:
+        mean_delta=(
+            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/mean_delta_r2.npy"
+        ),
+        labels=(
+            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/cluster_labels.npy"
+        ),
+        clusters=(
+            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/clusters.{_viz_table_ext()}"
+        ),
+        ch_names=(
+            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/channel_names.npy"
+        ),
+    output:
+        f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_r2_topomap_{{regressor}}_vs_baseline.pdf"
+    params:
+        out_dir=VIZ_OUT_DIR
+    shell:
+        """
+        python -m rate.cli.main figures \
+            --out-dir {params.out_dir} \
+            --family evoked_trf \
+            --figure reconstruction_erp_r2_topo \
+            --config config/viz.yaml \
+            --regressor {wildcards.regressor}
+        """
+
+
+rule figure_evoked_trf_reconstruction_erp_r2_topo:
+    input:
+        EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
+
+
 rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
@@ -303,4 +360,5 @@ rule figures_all:
             f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
             *EVOKED_RECONSTRUCTION_ERP_TARGETS,
         ]
+        + EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
         + INDUCED_TIMECOURSE_TARGETS

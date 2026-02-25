@@ -1,6 +1,6 @@
 # Phase 1 modular config duplicate from config/config.yaml
 evoked_trf:
-  downsample_hz: 64.0
+  downsample_hz: 32.0
   emg:
     channels: ["EMG1", "EMG2"]
     channel_patterns: ["\\bEMG\\b", "\\bEXG\\b", "masseter", "jaw"]
@@ -8,11 +8,11 @@ evoked_trf:
     l_freq: 30.0
     h_freq: 150.0
     log_transform: true
-    target_sfreq: 64.0
+    target_sfreq: 32.0
     zscore_within_run: true
 
   lags_s:
-    tmin: -2.0
+    tmin: -1.5
     tmax: 0.5
 
   cv:
@@ -25,7 +25,7 @@ evoked_trf:
   ridge_alpha_grid:
     min: 2
     max: 6
-    n_alpha: 20
+    n_alpha: 3
   models:
     - name: "baseline"
       regressors:

@@ -760,15 +760,15 @@ def write_subject_output(
     )
 
     # Keep existing subject-level score output for aggregation compatibility.
-    subject_tables.summary_fold_sorted.to_parquet(out_path, index=False)
-    subject_tables.alpha_grid.to_parquet(subject_dir / "alpha_grid.parquet", index=False)
-    subject_tables.inner_cv.to_parquet(subject_dir / "inner_cv.parquet", index=False)
-    subject_tables.model_comparison.to_parquet(subject_dir / "model_comparison.parquet", index=False)
-    subject_tables.summary.to_parquet(subject_dir / "summary.parquet", index=False)
+    write_parquet(subject_tables.summary_fold_sorted, out_path)
+    write_parquet(subject_tables.alpha_grid, subject_dir / "alpha_grid.parquet")
+    write_parquet(subject_tables.inner_cv, subject_dir / "inner_cv.parquet")
+    write_parquet(subject_tables.model_comparison, subject_dir / "model_comparison.parquet")
+    write_parquet(subject_tables.summary, subject_dir / "summary.parquet")
     # Backward-compatible detailed filenames retained.
-    subject_tables.alpha_grid.to_parquet(subject_dir / "alpha_grid_scores.parquet", index=False)
-    subject_tables.inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
-    subject_tables.outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
+    write_parquet(subject_tables.alpha_grid, subject_dir / "alpha_grid_scores.parquet")
+    write_parquet(subject_tables.inner_sorted, subject_dir / "inner_cv_scores.parquet")
+    write_parquet(subject_tables.outer_sorted, subject_dir / "outer_cv_scores.parquet")
 
     model_to_regs = {m.model_name: [r.name for r in m.regressors] for m in trf_cfg.models}
     for model_name in model_to_regs:
@@ -904,7 +904,7 @@ def write_aggregate_output(*, out_dir: Path) -> Path:
 
     out_path = out_dir / "evoked_trf" / "scores" / "scores.parquet"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    scores.to_parquet(out_path, index=False)
+    write_parquet(scores, out_path)
     return out_path
 
 
@@ -928,7 +928,7 @@ def write_reconstruction_aggregate(*, out_dir: Path) -> list[Path]:
     for model, frames in sorted(by_model.items()):
         out_path = agg_root / f"{model}_group.parquet"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.concat(frames, ignore_index=True).to_parquet(out_path, index=False)
+        write_parquet(pd.concat(frames, ignore_index=True), out_path)
         out_paths.append(out_path)
     return out_paths
 
@@ -1055,8 +1055,8 @@ def write_outputs(*, cfg: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
 
     _validate_output_tables(scores=scores, splits=splits)
 
-    scores.to_parquet(scores_out, index=False)
-    splits.to_parquet(splits_out, index=False)
+    write_parquet(scores, scores_out)
+    write_parquet(splits, splits_out)
     return scores_out, splits_out
 
 

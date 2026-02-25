@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -44,7 +45,15 @@ def write_parquet(df: pd.DataFrame, path: Path) -> None:
         write_parquet(df, Path("out.parquet"))
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(path, index=False)
+    tmp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        df.to_parquet(tmp_path, index=False)
+        # Read-back verification avoids propagating silently corrupted outputs.
+        pd.read_parquet(tmp_path)
+        tmp_path.replace(path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def save_receptive_field_npz(

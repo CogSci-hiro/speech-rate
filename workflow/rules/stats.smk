@@ -24,16 +24,56 @@ def _induced_bands():
 
 INDUCED_ANALYSES = [f"induced_trf_{band}" for band in _induced_bands()]
 
-KERNEL0_BEHAVIOR_MODEL_FEATURES = {
-    # Linear models: [self_onset_impulse, other_offset_impulse, target]
-    "self_rate": {"feature_index": 2, "feature_name": "self_rate"},
-    "other_rate": {"feature_index": 2, "feature_name": "other_rate"},
-    "abs_diff": {"feature_index": 2, "feature_name": "abs_diff"},
-    # Quadratic extensions: [self_onset_impulse, other_offset_impulse, linear, squared]
-    "self_rate_sq": {"feature_index": 3, "feature_name": "self_rate_sq"},
-    "other_rate_sq": {"feature_index": 3, "feature_name": "other_rate_sq"},
-    "abs_diff_sq": {"feature_index": 3, "feature_name": "abs_diff_sq"},
-}
+
+def _branch_behavior_model_features(branch_cfg, branch_key):
+    block = branch_cfg.get(branch_key, {}) or {}
+    specs = block.get("models", []) or []
+    out = {}
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        model_name = str(spec.get("name", "")).strip()
+        if not model_name or model_name == "baseline":
+            continue
+        regressors = [str(r) for r in (spec.get("regressors", []) or [])]
+        if not regressors:
+            continue
+
+        target_regressor = model_name
+        if model_name.endswith("_sq"):
+            base = model_name[:-3]
+            squared_name = f"{base}^2"
+            if squared_name in regressors:
+                target_regressor = squared_name
+
+        if target_regressor not in regressors:
+            raise ValueError(
+                f"{branch_key} model '{model_name}' is missing expected target regressor "
+                f"'{target_regressor}' in config/{branch_key}.yaml-like model spec."
+            )
+
+        out[model_name] = {
+            "feature_index": int(regressors.index(target_regressor)),
+            "feature_name": model_name,
+        }
+    return out
+
+
+def _common_behavior_model_features():
+    evoked = _branch_behavior_model_features(evoked_trf_config, "evoked_trf")
+    induced = _branch_behavior_model_features(induced_trf_config, "induced_trf")
+    common = [name for name in evoked.keys() if name in induced]
+    if not common:
+        raise ValueError("No shared non-baseline behavior models found across evoked_trf and induced_trf configs.")
+    mismatched = [name for name in common if evoked[name] != induced[name]]
+    if mismatched:
+        raise ValueError(
+            "Evoked/induced model feature mappings differ for: " + ", ".join(sorted(mismatched))
+        )
+    return {name: evoked[name] for name in common}
+
+
+KERNEL0_BEHAVIOR_MODEL_FEATURES = _common_behavior_model_features()
 KERNEL0_BEHAVIOR_MODELS = list(KERNEL0_BEHAVIOR_MODEL_FEATURES.keys())
 
 
@@ -89,6 +129,42 @@ KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS += [
     )
     for analysis in INDUCED_ANALYSES
     for model in KERNEL0_BEHAVIOR_MODELS
+]
+
+
+def _active_evoked_models(branch_cfg):
+    block = branch_cfg.get("evoked_trf", {}) or {}
+    specs = block.get("models", []) or []
+    out = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        name = str(spec.get("name", "")).strip()
+        if name:
+            out.append(name)
+    return out
+
+
+EVOKED_RECONSTRUCTION_R2_MODELS = [
+    model for model in _active_evoked_models(evoked_trf_config)
+    if str(model) != "baseline"
+]
+
+RECONSTRUCTION_ERP_R2_STAT_TARGETS = [
+    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/clusters.{_stats_table_ext()}"
+    for model in EVOKED_RECONSTRUCTION_R2_MODELS
+]
+RECONSTRUCTION_ERP_R2_MEAN_TARGETS = [
+    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/mean_delta_r2.npy"
+    for model in EVOKED_RECONSTRUCTION_R2_MODELS
+]
+RECONSTRUCTION_ERP_R2_LABEL_TARGETS = [
+    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/cluster_labels.npy"
+    for model in EVOKED_RECONSTRUCTION_R2_MODELS
+]
+RECONSTRUCTION_ERP_R2_CHNAME_TARGETS = [
+    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/channel_names.npy"
+    for model in EVOKED_RECONSTRUCTION_R2_MODELS
 ]
 
 rule stats_kernel0:
@@ -165,3 +241,20 @@ rule stats_kernel0_subject_level:
 rule stats_kernel0_behavior_subject_level:
     input:
         KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS
+
+
+rule stats_reconstruction_erp_r2_evoked:
+    input:
+        scores=f"{_stats_out_dir()}/evoked_trf/scores/scores.parquet",
+    output:
+        RECONSTRUCTION_ERP_R2_STAT_TARGETS
+        + RECONSTRUCTION_ERP_R2_MEAN_TARGETS
+        + RECONSTRUCTION_ERP_R2_LABEL_TARGETS
+        + RECONSTRUCTION_ERP_R2_CHNAME_TARGETS
+    shell:
+        """
+        python -m rate.cli.main stats-reconstruction-erp-r2 \
+            --analysis evoked_trf \
+            --config config/stats.yaml \
+            --schema config/schema.json
+        """
