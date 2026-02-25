@@ -61,6 +61,7 @@ def plot_joint_kernel(
             "marker": "o",
             "markerfacecolor": "0.75",
             "markeredgecolor": "none",
+            "linestyle": "None",
             "markersize": 10,
         }
         if mask_params is not None:

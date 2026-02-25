@@ -187,6 +187,7 @@ def run_trf_figures(
                     "marker": "o",
                     "markerfacecolor": "0.75",
                     "markeredgecolor": "none",
+                    "linestyle": "None",
                     "markersize": 10,
                 },
                 title=f"{family} kernel ({reg_name})",
@@ -245,6 +246,19 @@ def run_trf_figures(
                 template_evoked=condition_evokeds[reg],
             )) is not None
         }
+        for reg in regressors:
+            se = condition_se.get(reg)
+            if se is None:
+                LOGGER.warning("No SEM available for timecourse condition '%s' (%s)", reg, family)
+                continue
+            LOGGER.info(
+                "Loaded SEM for '%s' (%s): shape=%s, finite_range=[%.6g, %.6g]",
+                reg,
+                family,
+                tuple(se.shape),
+                float(np.nanmin(se)),
+                float(np.nanmax(se)),
+            )
         if not condition_se:
             LOGGER.warning(
                 "No subject-level SEM traces found for %s timecourse panel; rendering lines without SE shading.",
@@ -685,10 +699,18 @@ def _load_subject_kernel_arrays_from_trf_artifacts(
             continue
         if kernels.size == 0 or lags.size == 0:
             continue
-        if not np.allclose(lags, lags_ref):
+        if lags.shape != lags_ref.shape:
+            continue
+        step = float(np.nanmedian(np.abs(np.diff(lags_ref)))) if lags_ref.size > 1 else 0.0
+        atol = max(1e-8, step * 0.25 if np.isfinite(step) and step > 0 else 1e-8)
+        if not np.allclose(lags, lags_ref, atol=atol, rtol=1e-6):
             continue
 
-        subj_kernel = _subject_kernel_mean_from_outer_folds(kernels=kernels)
+        subj_kernel = _subject_kernel_mean_from_outer_folds(
+            kernels=kernels,
+            n_channels=int(shape_ref[0]),
+            n_lags=int(shape_ref[1]),
+        )
         if subj_kernel is None:
             continue
         if tuple(subj_kernel.shape) != shape_ref:
@@ -697,23 +719,58 @@ def _load_subject_kernel_arrays_from_trf_artifacts(
     return arrays
 
 
-def _subject_kernel_mean_from_outer_folds(*, kernels: np.ndarray) -> np.ndarray | None:
-    """Collapse outer-fold TRF kernels to one subject-level (channels x lags) array."""
+def _subject_kernel_mean_from_outer_folds(
+    *,
+    kernels: np.ndarray,
+    n_channels: int,
+    n_lags: int,
+) -> np.ndarray | None:
+    """Collapse outer-fold TRF kernels to one subject-level (channels x lags) array.
+
+    Handles common TRF kernel layouts by inferring feature/channel/lag axes.
+    """
     arr = np.asarray(kernels, dtype=float)
     if arr.ndim < 2:
         return None
 
-    # Expected shapes:
-    #   (n_folds, n_channels, n_features, n_lags)
-    #   (n_folds, n_channels, n_lags) for single-feature squeeze variants
     subj = np.nanmean(arr, axis=0)
-    if subj.ndim == 3:
-        if subj.shape[1] != 1:
-            return None
-        subj = subj[:, 0, :]
-    if subj.ndim != 2:
+    if subj.ndim == 2:
+        if subj.shape == (n_channels, n_lags):
+            return np.asarray(subj, dtype=float)
+        if subj.shape == (n_lags, n_channels):
+            return np.asarray(subj.T, dtype=float)
         return None
-    return np.asarray(subj, dtype=float)
+
+    if subj.ndim != 3:
+        return None
+
+    shape = tuple(int(x) for x in subj.shape)
+    lag_axes = [ax for ax, sz in enumerate(shape) if sz == n_lags]
+    ch_axes = [ax for ax, sz in enumerate(shape) if sz == n_channels]
+    for ch_ax in ch_axes:
+        for lag_ax in lag_axes:
+            if ch_ax == lag_ax:
+                continue
+            feat_ax = next(ax for ax in range(3) if ax not in (ch_ax, lag_ax))
+            if shape[feat_ax] != 1:
+                continue
+            out = np.take(subj, indices=0, axis=feat_ax)
+            # After squeezing feature axis, map remaining axes to (channels, lags)
+            if ch_ax < feat_ax:
+                ch_ax2 = ch_ax
+            else:
+                ch_ax2 = ch_ax - 1
+            if lag_ax < feat_ax:
+                lag_ax2 = lag_ax
+            else:
+                lag_ax2 = lag_ax - 1
+            if out.ndim != 2:
+                continue
+            if (ch_ax2, lag_ax2) == (0, 1):
+                return np.asarray(out, dtype=float)
+            if (ch_ax2, lag_ax2) == (1, 0):
+                return np.asarray(out.T, dtype=float)
+    return None
 
 
 def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
