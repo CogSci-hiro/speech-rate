@@ -59,6 +59,12 @@ def add_subparser(subparsers) -> ArgumentParser:
         "--dataset-index",
         help="Optional explicit dataset index parquet path. Must reference non-downsampled EEG (default: <out_dir>/dataset/index.parquet).",
     )
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Optional override for fooof.n_jobs (parallel subject-run workers).",
+    )
     parser.set_defaults(command_func=run)
     return parser
 
@@ -78,6 +84,12 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
             return 1
     else:
         resolved = dict(config)
+    if args.n_jobs is not None:
+        if int(args.n_jobs) < 1:
+            raise ValueError("--n-jobs must be >= 1")
+        fooof_block = dict(resolved.get("fooof") or {})
+        fooof_block["n_jobs"] = int(args.n_jobs)
+        resolved["fooof"] = fooof_block
 
     out_dir = Path(args.out_dir) if args.out_dir else resolve_out_dir(resolved)
     if args.dataset_index:

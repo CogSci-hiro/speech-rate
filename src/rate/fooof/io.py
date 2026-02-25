@@ -88,3 +88,15 @@ def write_channel_ddc_table(df: pd.DataFrame, out_dir: Path) -> None:
     path = _aggregated_dir(out_dir) / "channel_level_for_ddc.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
     write_parquet_dataframe(df, path)
+
+
+def write_subject_psd_spectra(df: pd.DataFrame, out_dir: Path) -> None:
+    path = _aggregated_dir(out_dir) / "subject_psd_spectra.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet_dataframe(df, path)
+
+
+def write_trial_psd_spectra(df: pd.DataFrame, out_dir: Path) -> None:
+    path = _aggregated_dir(out_dir) / "trial_psd_spectra.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet_dataframe(df, path)

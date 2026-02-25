@@ -22,6 +22,10 @@ def _nan_result() -> dict[str, Any]:
         "r_squared": np.nan,
         "error": np.nan,
         "fit_success": False,
+        "freqs_hz": None,
+        "psd_raw": None,
+        "psd_aperiodic": None,
+        "psd_periodic": None,
     }
 
 
@@ -99,6 +103,53 @@ def fit_fooof_to_window(
         result["r_squared"] = float(getattr(fm, "r_squared_", np.nan))
         result["error"] = float(getattr(fm, "error_", np.nan))
         result["fit_success"] = bool(np.isfinite(result["offset"]) and np.isfinite(result["exponent"]))
+        _attach_spectra_to_result(result=result, fm=fm, freqs_input=freqs, psd_input=psd)
         return result
     except Exception:
         return _nan_result()
+
+
+def _attach_spectra_to_result(
+    *,
+    result: dict[str, Any],
+    fm: FOOOF,
+    freqs_input: np.ndarray,
+    psd_input: np.ndarray,
+) -> None:
+    """Attach fitted spectra components (in log10 power units) when available."""
+    freqs = np.asarray(getattr(fm, "freqs", freqs_input), dtype=float).reshape(-1)
+    if freqs.size == 0:
+        return
+
+    # FOOOF works on a restricted frequency range; prefer model-space arrays when present.
+    raw_model = getattr(fm, "power_spectrum", None)
+    raw = np.asarray(raw_model, dtype=float).reshape(-1) if raw_model is not None else np.array([], dtype=float)
+    if raw.size != freqs.size:
+        raw = np.log10(np.maximum(np.asarray(psd_input, dtype=float).reshape(-1), PSD_EPS))
+        if raw.size != freqs.size:
+            return
+
+    ap_fit = getattr(fm, "_ap_fit", None)
+    ap = np.asarray(ap_fit, dtype=float).reshape(-1) if ap_fit is not None else np.array([], dtype=float)
+    if ap.size != freqs.size:
+        return
+
+    peak_fit = getattr(fm, "_peak_fit", None)
+    periodic = np.asarray(peak_fit, dtype=float).reshape(-1) if peak_fit is not None else np.array([], dtype=float)
+    if periodic.size != freqs.size:
+        fooofed = getattr(fm, "fooofed_spectrum_", None)
+        fooofed_arr = np.asarray(fooofed, dtype=float).reshape(-1) if fooofed is not None else np.array([], dtype=float)
+        if fooofed_arr.size == freqs.size:
+            periodic = fooofed_arr - ap
+    if periodic.size != freqs.size:
+        flat = getattr(fm, "_spectrum_flat", None)
+        flat_arr = np.asarray(flat, dtype=float).reshape(-1) if flat is not None else np.array([], dtype=float)
+        if flat_arr.size == freqs.size:
+            periodic = flat_arr
+    if periodic.size != freqs.size:
+        return
+
+    result["freqs_hz"] = freqs
+    result["psd_raw"] = raw
+    result["psd_aperiodic"] = ap
+    result["psd_periodic"] = periodic

@@ -293,14 +293,18 @@ def run_trf_figures(
 
     if figure == FIGURE_FOOOF_PSD_PANEL:
         try:
-            df = _load_subject_psd_spectra_table(out_dir=out_dir)
+            df = _load_trial_psd_spectra_table(out_dir=out_dir)
             plot_psd_quantile_grid(
                 subject_spectra=df,
                 q=_get_fooof_psd_quantiles(config),
                 out_dir=out_dir,
                 family="fooof",
                 name="psd_quantile_grid",
+                subject_col="subject_key" if "subject_key" in df.columns else "subject_id",
+                trial_col="trial_key" if "trial_key" in df.columns else "event_id",
                 title="FOOOF PSD Quantile Panel",
+                log_y=_get_fooof_psd_log_y(config),
+                xlim_hz=_get_fooof_psd_xlim_hz(config),
             )
         except Exception as exc:
             LOGGER.warning("Falling back to placeholder FOOOF PSD panel: %s", exc)
@@ -485,6 +489,31 @@ def _get_fooof_psd_quantiles(config: Mapping[str, Any]) -> int:
     return q
 
 
+def _get_fooof_psd_log_y(config: Mapping[str, Any]) -> bool:
+    reporting = config.get("reporting", {})
+    fooof_block = reporting.get("fooof", {}) if isinstance(reporting, Mapping) else {}
+    if not isinstance(fooof_block, Mapping):
+        return False
+    return bool(fooof_block.get("psd_log_y", False))
+
+
+def _get_fooof_psd_xlim_hz(config: Mapping[str, Any]) -> tuple[float, float] | None:
+    reporting = config.get("reporting", {})
+    fooof_block = reporting.get("fooof", {}) if isinstance(reporting, Mapping) else {}
+    if not isinstance(fooof_block, Mapping):
+        return None
+    vals = fooof_block.get("psd_xlim_hz")
+    if vals is None:
+        return None
+    if not isinstance(vals, Sequence) or isinstance(vals, (str, bytes)) or len(vals) != 2:
+        raise ValueError("config.reporting.fooof.psd_xlim_hz must be [fmin, fmax]")
+    fmin = float(vals[0])
+    fmax = float(vals[1])
+    if not np.isfinite(fmin) or not np.isfinite(fmax) or fmin >= fmax:
+        raise ValueError("config.reporting.fooof.psd_xlim_hz must satisfy finite fmin < fmax")
+    return (fmin, fmax)
+
+
 def _require_regressor(*, regressor: str | None, figure: str) -> str:
     """Validate that per-regressor figure modes receive a regressor."""
     if regressor is None or not regressor.strip():
@@ -516,13 +545,11 @@ def _write_placeholder_figure(
     plt.close(fig)
 
 
-def _load_subject_psd_spectra_table(*, out_dir: Path) -> pd.DataFrame:
-    """Load a precomputed subject-level PSD spectra table for the FOOOF PSD panel.
-
-    This plotting path expects one row per subject-frequency pair with wide PSD columns
-    (`psd_raw`, `psd_aperiodic`, `psd_periodic`) plus subject-level target variables.
-    """
+def _load_trial_psd_spectra_table(*, out_dir: Path) -> pd.DataFrame:
+    """Load a trial-level PSD spectra table for within-subject quantile FOOOF plotting."""
     candidates = [
+        out_dir / "fooof" / "aggregated" / "trial_psd_spectra.parquet",
+        out_dir / "fooof" / "aggregated" / "trial_psd_spectra.csv",
         out_dir / "fooof" / "aggregated" / "subject_psd_spectra.parquet",
         out_dir / "fooof" / "aggregated" / "subject_psd_spectra.csv",
         out_dir / "fooof" / "aggregated" / "subject_level_psd_spectra.parquet",
@@ -542,9 +569,10 @@ def _load_subject_psd_spectra_table(*, out_dir: Path) -> pd.DataFrame:
         return df
 
     raise FileNotFoundError(
-        "Expected a subject-level PSD spectra table under fooof/aggregated "
-        "(e.g., subject_psd_spectra.parquet) with columns "
-        "subject_id,freq_hz,psd_raw,psd_aperiodic,psd_periodic,exponent,offset,theta_power,theta_cf"
+        "Expected a trial-level PSD spectra table under fooof/aggregated "
+        "(e.g., trial_psd_spectra.parquet) with columns "
+        "subject_key,trial_key,freq_hz,psd_raw,psd_aperiodic,psd_periodic,"
+        "exponent,offset,theta_power,theta_cf"
     )
 
 

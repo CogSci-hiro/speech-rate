@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,8 @@ from rate.fooof.io import (
     write_channel_ddc_table,
     write_qc_summary,
     write_settings,
+    write_trial_psd_spectra,
+    write_subject_psd_spectra,
     write_trial_channels,
     write_trial_rois,
 )
@@ -57,6 +61,13 @@ class _NoOpProgressBar:
 
     def close(self) -> None:
         return
+
+
+@dataclass(frozen=True)
+class SubjectRunFooofResult:
+    trial_channels: pd.DataFrame
+    trial_psd_spectra: pd.DataFrame
+    run_psd_spectra: pd.DataFrame
 
 
 def _is_truthy(value: object) -> bool:
@@ -142,6 +153,45 @@ def _outer_progress(iterable, *, enabled: bool, total: int | None = None):
         ascii=True,
         dynamic_ncols=True,
     )
+
+
+@contextmanager
+def _joblib_outer_progress(*, enabled: bool, total: int | None = None):
+    """Attach a tqdm progress bar to joblib task completion callbacks."""
+    if not enabled:
+        yield
+        return
+    try:
+        from tqdm.auto import tqdm  # type: ignore
+        import joblib.parallel as joblib_parallel
+    except Exception:
+        yield
+        return
+
+    pbar = tqdm(
+        total=total,
+        desc="fooof subject-runs",
+        unit="subrun",
+        leave=True,
+        ascii=True,
+        dynamic_ncols=True,
+    )
+    original_cb = joblib_parallel.BatchCompletionCallBack
+
+    class _TqdmBatchCompletionCallBack(original_cb):  # type: ignore[misc, valid-type]
+        def __call__(self, *args, **kwargs):
+            try:
+                pbar.update(getattr(self, "batch_size", 1))
+            except Exception:
+                pbar.update(1)
+            return super().__call__(*args, **kwargs)
+
+    joblib_parallel.BatchCompletionCallBack = _TqdmBatchCompletionCallBack  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        joblib_parallel.BatchCompletionCallBack = original_cb  # type: ignore[assignment]
+        pbar.close()
 
 
 def _run_token(value: object) -> str:
@@ -240,6 +290,152 @@ def _finalize_channel_concat(frames: list[pd.DataFrame]) -> pd.DataFrame:
     return df
 
 
+def _empty_run_psd_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "dyad_id",
+            "subject_id",
+            "subject_key",
+            "run",
+            "freq_hz",
+            "psd_raw",
+            "psd_aperiodic",
+            "psd_periodic",
+            "n_windows",
+        ]
+    )
+
+
+def _empty_trial_psd_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "dyad_id",
+            "subject_id",
+            "subject_key",
+            "run",
+            "event_id",
+            "trial_key",
+            "freq_hz",
+            "psd_raw",
+            "psd_aperiodic",
+            "psd_periodic",
+            "n_channels",
+            "exponent",
+            "offset",
+            "theta_power",
+            "theta_cf",
+        ]
+    )
+
+
+def _finalize_run_psd_concat(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    nonempty = [df for df in frames if not df.empty]
+    if not nonempty:
+        return _empty_run_psd_df()
+    df = pd.concat(nonempty, ignore_index=True)
+    return df.sort_values(["subject_key", "run", "freq_hz"], kind="mergesort").reset_index(drop=True)
+
+
+def _finalize_trial_psd_concat(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    nonempty = [df for df in frames if not df.empty]
+    if not nonempty:
+        return _empty_trial_psd_df()
+    df = pd.concat(nonempty, ignore_index=True)
+    return df.sort_values(["subject_key", "run", "event_id", "freq_hz"], kind="mergesort").reset_index(drop=True)
+
+
+def _aggregate_subject_psd_spectra(
+    *,
+    run_psd_df: pd.DataFrame,
+    trial_channels_df: pd.DataFrame,
+) -> pd.DataFrame:
+    if run_psd_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "dyad_id",
+                "subject_id",
+                "subject_key",
+                "freq_hz",
+                "psd_raw",
+                "psd_aperiodic",
+                "psd_periodic",
+                "exponent",
+                "offset",
+                "theta_power",
+                "theta_cf",
+            ]
+        )
+
+    run_df = run_psd_df.copy()
+    for col in ("freq_hz", "psd_raw", "psd_aperiodic", "psd_periodic", "n_windows"):
+        run_df[col] = pd.to_numeric(run_df[col], errors="coerce")
+    run_df = run_df.dropna(subset=["subject_key", "freq_hz", "psd_raw", "psd_aperiodic", "psd_periodic"])
+    if run_df.empty:
+        return pd.DataFrame()
+
+    # Weighted subject average across runs using contributing channel-window counts.
+    run_df["n_windows"] = pd.to_numeric(run_df["n_windows"], errors="coerce").fillna(0).clip(lower=0)
+    run_df["w_raw"] = run_df["psd_raw"] * run_df["n_windows"]
+    run_df["w_ap"] = run_df["psd_aperiodic"] * run_df["n_windows"]
+    run_df["w_per"] = run_df["psd_periodic"] * run_df["n_windows"]
+    subj_psd = (
+        run_df.groupby(["dyad_id", "subject_id", "subject_key", "freq_hz"], as_index=False)
+        .agg(
+            sum_w=("n_windows", "sum"),
+            w_raw=("w_raw", "sum"),
+            w_ap=("w_ap", "sum"),
+            w_per=("w_per", "sum"),
+        )
+        .sort_values(["subject_key", "freq_hz"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+    valid_w = subj_psd["sum_w"] > 0
+    subj_psd = subj_psd.loc[valid_w].copy()
+    if subj_psd.empty:
+        return pd.DataFrame()
+    subj_psd["psd_raw"] = subj_psd["w_raw"] / subj_psd["sum_w"]
+    subj_psd["psd_aperiodic"] = subj_psd["w_ap"] / subj_psd["sum_w"]
+    subj_psd["psd_periodic"] = subj_psd["w_per"] / subj_psd["sum_w"]
+
+    subj_targets = (
+        trial_channels_df.assign(
+            subject_key=lambda d: d["dyad_id"].astype(str) + "::" + d["subject_id"].astype(str),
+            exponent=lambda d: pd.to_numeric(d["exponent"], errors="coerce"),
+            offset=lambda d: pd.to_numeric(d["offset"], errors="coerce"),
+            theta_power=lambda d: pd.to_numeric(d["theta_power"], errors="coerce"),
+            theta_cf=lambda d: pd.to_numeric(d["theta_cf"], errors="coerce"),
+        )
+        .groupby(["dyad_id", "subject_id", "subject_key"], as_index=False)
+        .agg(
+            exponent=("exponent", "mean"),
+            offset=("offset", "mean"),
+            theta_power=("theta_power", "mean"),
+            theta_cf=("theta_cf", "mean"),
+        )
+    )
+    out = subj_psd.merge(
+        subj_targets,
+        on=["dyad_id", "subject_id", "subject_key"],
+        how="left",
+        validate="many_to_one",
+    )
+    return out[
+        [
+            "dyad_id",
+            "subject_id",
+            "subject_key",
+            "freq_hz",
+            "psd_raw",
+            "psd_aperiodic",
+            "psd_periodic",
+            "exponent",
+            "offset",
+            "theta_power",
+            "theta_cf",
+        ]
+    ].sort_values(["subject_key", "freq_hz"], kind="mergesort").reset_index(drop=True)
+
+
 def _run_to_int(run_value: object) -> int:
     text = str(run_value).strip()
     try:
@@ -249,29 +445,42 @@ def _run_to_int(run_value: object) -> int:
 
 
 def process_subject_run(
+    dyad_id: str,
     subject_id: str,
     run: int,
     dataset_index: pd.DataFrame,
     events_df: pd.DataFrame,
     spec: FooofSpec,
     config: dict,
-) -> pd.DataFrame:
-    """Process one (subject_id, run) block and return canonical channel-level rows only."""
+) -> SubjectRunFooofResult:
+    """Process one (dyad_id, subject_id, run) block and return channel rows + run-level mean PSD."""
     np.random.seed(resolve_random_seed(config))
 
     run_key = _run_token(run)
     ds_rows = dataset_index.loc[
-        (dataset_index["subject_id"].astype(str) == str(subject_id))
+        (dataset_index["dyad_id"].astype(str) == str(dyad_id))
+        & (dataset_index["subject_id"].astype(str) == str(subject_id))
         & (dataset_index["run"].map(_run_token) == run_key)
     ].copy()
     if ds_rows.empty:
-        return pd.DataFrame(columns=CANONICAL_CHANNEL_COLUMNS)
+        return SubjectRunFooofResult(
+            trial_channels=pd.DataFrame(columns=CANONICAL_CHANNEL_COLUMNS),
+            trial_psd_spectra=_empty_trial_psd_df(),
+            run_psd_spectra=_empty_run_psd_df(),
+        )
 
     worker_sort_cols = [col for col in ("dyad_id", "subject_id", "run", "task") if col in ds_rows.columns]
     ds_rows = ds_rows.sort_values(by=worker_sort_cols, kind="mergesort").reset_index(drop=True)
 
     records: list[dict[str, Any]] = []
     raw_cache: dict[str, mne.io.BaseRaw] = {}
+    psd_sum_raw: np.ndarray | None = None
+    psd_sum_ap: np.ndarray | None = None
+    psd_sum_per: np.ndarray | None = None
+    psd_freqs: np.ndarray | None = None
+    psd_count = 0
+    dyad_for_run: str | None = str(dyad_id)
+    event_psd_accum: dict[str, dict[str, Any]] = {}
 
     for _, ds_row in ds_rows.iterrows():
         eeg_path = Path(str(ds_row["eeg_path"])).expanduser()
@@ -321,6 +530,54 @@ def process_subject_run(
 
             fit_result = fit_fooof_to_window(window_data=window_data, sfreq=sfreq, spec=spec)
             band_features = extract_band_features(fit_result, spec)
+            freqs_arr = fit_result.get("freqs_hz")
+            raw_psd_arr = fit_result.get("psd_raw")
+            ap_psd_arr = fit_result.get("psd_aperiodic")
+            per_psd_arr = fit_result.get("psd_periodic")
+            if (
+                freqs_arr is not None
+                and raw_psd_arr is not None
+                and ap_psd_arr is not None
+                and per_psd_arr is not None
+            ):
+                freqs_vec = np.asarray(freqs_arr, dtype=float).reshape(-1)
+                raw_vec = np.asarray(raw_psd_arr, dtype=float).reshape(-1)
+                ap_vec = np.asarray(ap_psd_arr, dtype=float).reshape(-1)
+                per_vec = np.asarray(per_psd_arr, dtype=float).reshape(-1)
+                if (
+                    freqs_vec.size > 0
+                    and raw_vec.shape == freqs_vec.shape
+                    and ap_vec.shape == freqs_vec.shape
+                    and per_vec.shape == freqs_vec.shape
+                    and np.all(np.isfinite(freqs_vec))
+                ):
+                    if psd_freqs is None:
+                        psd_freqs = freqs_vec.copy()
+                        psd_sum_raw = np.zeros_like(raw_vec, dtype=float)
+                        psd_sum_ap = np.zeros_like(ap_vec, dtype=float)
+                        psd_sum_per = np.zeros_like(per_vec, dtype=float)
+                    if psd_freqs is not None and np.allclose(psd_freqs, freqs_vec, atol=1e-9, rtol=1e-6):
+                        psd_sum_raw = psd_sum_raw + raw_vec  # type: ignore[operator]
+                        psd_sum_ap = psd_sum_ap + ap_vec  # type: ignore[operator]
+                        psd_sum_per = psd_sum_per + per_vec  # type: ignore[operator]
+                        psd_count += 1
+                        dyad_for_run = str(ds_row["dyad_id"])
+                        ev_key = str(event_id)
+                        rec = event_psd_accum.get(ev_key)
+                        if rec is None:
+                            rec = {
+                                "freq_hz": freqs_vec.copy(),
+                                "sum_raw": np.zeros_like(raw_vec, dtype=float),
+                                "sum_ap": np.zeros_like(ap_vec, dtype=float),
+                                "sum_per": np.zeros_like(per_vec, dtype=float),
+                                "n_channels": 0,
+                            }
+                            event_psd_accum[ev_key] = rec
+                        if np.allclose(np.asarray(rec["freq_hz"], dtype=float), freqs_vec, atol=1e-9, rtol=1e-6):
+                            rec["sum_raw"] = np.asarray(rec["sum_raw"], dtype=float) + raw_vec
+                            rec["sum_ap"] = np.asarray(rec["sum_ap"], dtype=float) + ap_vec
+                            rec["sum_per"] = np.asarray(rec["sum_per"], dtype=float) + per_vec
+                            rec["n_channels"] = int(rec["n_channels"]) + 1
 
             records.append(
                 {
@@ -350,7 +607,76 @@ def process_subject_run(
                 }
             )
 
-    return _finalize_channel_df(records)
+    trial_df = _finalize_channel_df(records)
+    trial_psd_df = _empty_trial_psd_df()
+    if event_psd_accum and not trial_df.empty:
+        target_by_trial = (
+            trial_df.assign(
+                exponent=lambda d: pd.to_numeric(d["exponent"], errors="coerce"),
+                offset=lambda d: pd.to_numeric(d["offset"], errors="coerce"),
+                theta_power=lambda d: pd.to_numeric(d["theta_power"], errors="coerce"),
+                theta_cf=lambda d: pd.to_numeric(d["theta_cf"], errors="coerce"),
+            )
+            .groupby(["dyad_id", "subject_id", "run", "event_id"], as_index=False)
+            .agg(
+                exponent=("exponent", "mean"),
+                offset=("offset", "mean"),
+                theta_power=("theta_power", "mean"),
+                theta_cf=("theta_cf", "mean"),
+            )
+        )
+        rows: list[pd.DataFrame] = []
+        for ev_key, rec in event_psd_accum.items():
+            n_channels_ev = int(rec.get("n_channels", 0))
+            if n_channels_ev <= 0:
+                continue
+            freq_ev = np.asarray(rec["freq_hz"], dtype=float)
+            frame = pd.DataFrame(
+                {
+                    "dyad_id": str(dyad_for_run) if dyad_for_run is not None else str(dyad_id),
+                    "subject_id": str(subject_id),
+                    "subject_key": (f"{dyad_for_run}::{subject_id}" if dyad_for_run is not None else str(subject_id)),
+                    "run": int(run),
+                    "event_id": str(ev_key),
+                    "trial_key": f"{int(run)}::{str(ev_key)}",
+                    "freq_hz": freq_ev,
+                    "psd_raw": np.asarray(rec["sum_raw"], dtype=float) / float(n_channels_ev),
+                    "psd_aperiodic": np.asarray(rec["sum_ap"], dtype=float) / float(n_channels_ev),
+                    "psd_periodic": np.asarray(rec["sum_per"], dtype=float) / float(n_channels_ev),
+                    "n_channels": int(n_channels_ev),
+                }
+            )
+            rows.append(frame)
+        if rows:
+            trial_psd_df = pd.concat(rows, ignore_index=True)
+            target_by_trial_x = target_by_trial.copy()
+            target_by_trial_x["event_id"] = target_by_trial_x["event_id"].astype(str)
+            trial_psd_df = trial_psd_df.merge(
+                target_by_trial_x,
+                on=["dyad_id", "subject_id", "run", "event_id"],
+                how="left",
+                validate="many_to_one",
+            )
+    run_psd_df = _empty_run_psd_df()
+    if psd_count > 0 and psd_freqs is not None and psd_sum_raw is not None and psd_sum_ap is not None and psd_sum_per is not None:
+        run_psd_df = pd.DataFrame(
+            {
+                "dyad_id": str(dyad_for_run) if dyad_for_run is not None else "",
+                "subject_id": str(subject_id),
+                "subject_key": (f"{dyad_for_run}::{subject_id}" if dyad_for_run is not None else str(subject_id)),
+                "run": int(run),
+                "freq_hz": np.asarray(psd_freqs, dtype=float),
+                "psd_raw": np.asarray(psd_sum_raw, dtype=float) / float(psd_count),
+                "psd_aperiodic": np.asarray(psd_sum_ap, dtype=float) / float(psd_count),
+                "psd_periodic": np.asarray(psd_sum_per, dtype=float) / float(psd_count),
+                "n_windows": int(psd_count),
+            }
+        )
+    return SubjectRunFooofResult(
+        trial_channels=trial_df,
+        trial_psd_spectra=trial_psd_df,
+        run_psd_spectra=run_psd_df,
+    )
 
 
 def run_fooof_pipeline(
@@ -403,11 +729,11 @@ def run_fooof_pipeline(
 
     subject_run_pairs = sorted(
         {
-            (str(row.subject_id), _run_to_int(row.run))
+            (str(row.dyad_id), str(row.subject_id), _run_to_int(row.run))
             for row in ds_rows.itertuples(index=False)
-            if pd.notna(row.subject_id)
+            if pd.notna(row.dyad_id) and pd.notna(row.subject_id)
         },
-        key=lambda item: (item[0], item[1]),
+        key=lambda item: (item[0], item[1], item[2]),
     )
 
     if spec.n_jobs == 1:
@@ -418,6 +744,7 @@ def run_fooof_pipeline(
         )
         results = [
             process_subject_run(
+                dyad_id=dyad_id,
                 subject_id=subject_id,
                 run=run,
                 dataset_index=ds_rows,
@@ -425,37 +752,72 @@ def run_fooof_pipeline(
                 spec=spec,
                 config=config,
             )
-            for subject_id, run in serial_pairs
+            for dyad_id, subject_id, run in serial_pairs
         ]
     else:
-        results = Parallel(
-            n_jobs=spec.n_jobs,
-            backend="loky",
-            verbose=0,
-        )(
-            delayed(process_subject_run)(
-                subject_id=subject_id,
-                run=run,
-                dataset_index=ds_rows,
-                events_df=events_df,
-                spec=spec,
-                config=config,
+        with _joblib_outer_progress(enabled=True, total=len(subject_run_pairs)):
+            results = Parallel(
+                n_jobs=spec.n_jobs,
+                backend="loky",
+                verbose=0,
+            )(
+                delayed(process_subject_run)(
+                    dyad_id=dyad_id,
+                    subject_id=subject_id,
+                    run=run,
+                    dataset_index=ds_rows,
+                    events_df=events_df,
+                    spec=spec,
+                    config=config,
+                )
+                for dyad_id, subject_id, run in subject_run_pairs
             )
-            for subject_id, run in subject_run_pairs
-        )
+        
 
-    trial_channels_df = _finalize_channel_concat(results)
+    LOGGER.info("FOOOF post-processing 1/8: concatenating worker outputs")
+    trial_channels_df = _finalize_channel_concat([r.trial_channels for r in results])
+    trial_psd_df = _finalize_trial_psd_concat([r.trial_psd_spectra for r in results])
+    run_psd_df = _finalize_run_psd_concat([r.run_psd_spectra for r in results])
+    LOGGER.info(
+        "FOOOF post-processing 1/8 complete: trial_channels=%d rows, trial_psd=%d rows, run_psd=%d rows",
+        int(len(trial_channels_df)),
+        int(len(trial_psd_df)),
+        int(len(run_psd_df)),
+    )
     if not trial_channels_df.empty:
+        LOGGER.info("FOOOF post-processing 2/8: applying QC flags to channel rows")
         trial_channels_df = trial_channels_df.apply(apply_fit_qc, axis=1)
+        LOGGER.info("FOOOF post-processing 2/8 complete")
+    else:
+        LOGGER.info("FOOOF post-processing 2/8: skipped QC (no trial channel rows)")
 
+    LOGGER.info("FOOOF post-processing 3/8: writing trial-level channel table")
     write_trial_channels(trial_channels_df, out_dir)
+    LOGGER.info("FOOOF post-processing 3/8 complete")
 
+    LOGGER.info("FOOOF post-processing 4/8: aggregating + writing trial ROI table")
     trial_rois_df = aggregate_to_rois(trial_channels_df, spec)
     write_trial_rois(trial_rois_df, out_dir)
+    LOGGER.info("FOOOF post-processing 4/8 complete: trial_rois=%d rows", int(len(trial_rois_df)))
 
+    LOGGER.info("FOOOF post-processing 5/8: building + writing DDC channel table")
     ddc_channel_df = prepare_ddc_channel_table(trial_channels_df)
     write_channel_ddc_table(ddc_channel_df, out_dir)
+    LOGGER.info("FOOOF post-processing 5/8 complete: ddc_channel=%d rows", int(len(ddc_channel_df)))
 
+    LOGGER.info("FOOOF post-processing 6/8: writing trial PSD spectra table")
+    write_trial_psd_spectra(trial_psd_df, out_dir)
+    LOGGER.info("FOOOF post-processing 6/8 complete: trial_psd=%d rows", int(len(trial_psd_df)))
+
+    LOGGER.info("FOOOF post-processing 7/8: aggregating + writing subject PSD spectra table")
+    subject_psd_spectra_df = _aggregate_subject_psd_spectra(run_psd_df=run_psd_df, trial_channels_df=trial_channels_df)
+    write_subject_psd_spectra(subject_psd_spectra_df, out_dir)
+    LOGGER.info(
+        "FOOOF post-processing 7/8 complete: subject_psd=%d rows",
+        int(len(subject_psd_spectra_df)),
+    )
+
+    LOGGER.info("FOOOF post-processing 8/8: writing QC summary + settings")
     qc_summary_df = trial_channels_df.copy()
     if qc_meta_rows:
         meta_df = pd.DataFrame.from_records(qc_meta_rows)
@@ -464,3 +826,4 @@ def run_fooof_pipeline(
         meta_df.to_csv(meta_csv_path, index=False)
     write_qc_summary(qc_summary_df, out_dir)
     write_settings(spec, out_dir)
+    LOGGER.info("FOOOF post-processing 8/8 complete")

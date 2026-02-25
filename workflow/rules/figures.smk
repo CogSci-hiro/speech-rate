@@ -355,9 +355,7 @@ rule figure_evoked_trf_reconstruction_erp_r2_topo:
 
 rule figure_fooof_psd_panel:
     input:
-        # Depend on stable FOOOF outputs to ensure the pipeline has run. The figure CLI
-        # will render a placeholder if a subject-level PSD spectra table is not yet available.
-        trial_channels=f"{_viz_out_dir()}/fooof/trial_level/fooof_trial_channels.parquet",
+        trial_psd_spectra=f"{_viz_out_dir()}/fooof/aggregated/trial_psd_spectra.parquet",
         settings=f"{_viz_out_dir()}/fooof/meta/fooof_settings.json",
     output:
         f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_grid.pdf"

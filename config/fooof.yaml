@@ -1,6 +1,6 @@
 # Phase 1 modular config duplicate from config/config.yaml
 fooof:
-  n_jobs: 1
+  n_jobs: 10
 
   # Pre-speech causal window aligned to self speech onset (t+1)
   prespeech_window_s:
