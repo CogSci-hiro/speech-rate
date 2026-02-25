@@ -60,7 +60,7 @@ def plot_joint_kernel(
         topomap_mask_params = {
             "marker": "o",
             "markerfacecolor": "0.75",
-            "markeredgecolor": "black",
+            "markeredgecolor": "none",
             "markersize": 10,
         }
         if mask_params is not None:
@@ -74,6 +74,7 @@ def plot_joint_kernel(
         title=title,
         topomap_args=topomap_args if topomap_args else None,
     )
+    _style_joint_figure(fig)
     main_ax = _find_time_axis(fig)
 
     if main_ax is not None and time_clusters is not None:
@@ -155,6 +156,7 @@ def plot_electrode_timecourse_panel(
 
     n_rows = len(electrodes)
     fig, axes = plt.subplots(n_rows, 1, figsize=(6.0, 2.5 * n_rows), sharex=True)
+    info_for_insets = next(iter(condition_evokeds.values())).info if condition_evokeds else None
 
     if n_rows == 1:
         axes = [axes]
@@ -190,6 +192,7 @@ def plot_electrode_timecourse_panel(
         ax.axvline(0.0, linestyle="--", color="black", linewidth=1.0)
         ax.set_ylabel(ylabel)
         ax.set_title(electrode)
+        _add_electrode_inset(ax=ax, info=info_for_insets, electrode=electrode)
 
     axes[-1].set_xlabel(xlabel)
     axes[0].legend(frameon=False)
@@ -210,6 +213,7 @@ def plot_reconstruction_erp_grid(
     signal_order: Sequence[str] = ("original", "reconstruction"),
     xlabel: str = "Time (s)",
     ylabel: str = "Amplitude",
+    info: mne.Info | None = None,
 ) -> None:
     """Plot a 2x2 ERP panel (rows=electrodes, cols=original/reconstruction).
 
@@ -283,6 +287,7 @@ def plot_reconstruction_erp_grid(
                 ax.set_ylabel(f"{electrode}\n{ylabel}")
             if row == 1:
                 ax.set_xlabel(xlabel)
+            _add_electrode_inset(ax=ax, info=info, electrode=electrode)
 
     axes[0, 0].legend(frameon=False, loc="best")
     fig.suptitle(title)
@@ -479,6 +484,97 @@ def _find_time_axis(fig: plt.Figure) -> Optional[plt.Axes]:
     if fig.axes:
         return fig.axes[0]
     return None
+
+
+def _style_joint_figure(fig: plt.Figure, line_width: float = 2.0) -> None:
+    """Apply consistent styling to MNE joint plots."""
+    if not fig.axes:
+        return
+
+    # Convert topomap titles to ms when MNE leaves them in seconds.
+    for ax in fig.axes:
+        title = (ax.get_title() or "").strip()
+        if title.endswith(" s"):
+            try:
+                sec = float(title.replace(" s", "").strip())
+            except ValueError:
+                continue
+            ax.set_title(f"{int(round(sec * 1000.0))} ms")
+
+    for ax in fig.axes:
+        for line in ax.lines:
+            line.set_linewidth(line_width)
+
+    # MNE joint plots typically append a colorbar axis at the end.
+    last_ax = fig.axes[-1]
+    if not last_ax.lines and not last_ax.collections and not last_ax.images:
+        # empty/placeholder axis: keep it
+        pass
+    else:
+        bbox = last_ax.get_position()
+        if bbox.width < 0.06 and bbox.height > 0.2:
+            fig.delaxes(last_ax)
+
+    main_ax = _find_time_axis(fig)
+    if main_ax is not None:
+        main_ax.set_ylabel("A.U.")
+        main_ax.set_yticks([])
+        for text in list(main_ax.texts):
+            if "N$_" in text.get_text():
+                text.remove()
+
+
+def _add_electrode_inset(
+    *,
+    ax: plt.Axes,
+    info: mne.Info | None,
+    electrode: str,
+    bounds: tuple[float, float, float, float] = (0.80, 0.54, 0.18, 0.34),
+) -> None:
+    """Add a small head inset highlighting one electrode location."""
+    if info is None:
+        return
+    ch_names = list(info.get("ch_names", []))
+    if electrode not in ch_names:
+        return
+
+    idx = ch_names.index(electrode)
+    values = np.zeros(len(ch_names), dtype=float)
+    mask = np.zeros(len(ch_names), dtype=bool)
+    mask[idx] = True
+
+    inset_ax = ax.inset_axes(bounds)
+    try:
+        topo = mne.viz.plot_topomap(
+            values,
+            info,
+            axes=inset_ax,
+            show=False,
+            contours=0,
+            sensors=True,
+            cmap="Greys",
+            vlim=(-1.0, 1.0),
+            mask=mask,
+            mask_params={
+                "marker": "o",
+                "markerfacecolor": "white",
+                "markeredgecolor": "black",
+                "markersize": 6,
+            },
+        )
+        image = topo[0] if isinstance(topo, tuple) else topo
+        if image is not None and hasattr(image, "set_alpha"):
+            image.set_alpha(0.0)
+    except Exception:
+        inset_ax.remove()
+        return
+
+    inset_ax.set_xticks([])
+    inset_ax.set_yticks([])
+    inset_ax.set_title("")
+    inset_ax.set_facecolor("none")
+    for spine in inset_ax.spines.values():
+        spine.set_visible(False)
 
 
 def _validate_topomap_inputs(

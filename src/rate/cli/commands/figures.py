@@ -34,6 +34,16 @@ DEFAULT_ELECTRODES = ["Fz", "Pz"]
 DEFAULT_TOPO_STEP_MS = 50.0
 CLUSTER_TSTART_COL = "t_start"
 CLUSTER_TEND_COL = "t_end"
+SEMANTIC_COLOR_MAP = {
+    "self_rate": "firebrick",
+    "other_rate": "royalblue",
+    "abs_diff": "seagreen",
+    "self_rate_sq": "firebrick",
+    "other_rate_sq": "royalblue",
+    "abs_diff_sq": "seagreen",
+    "self": "firebrick",
+    "other": "royalblue",
+}
 
 KERNEL_FILE_TEMPLATE = "group_kernel_{regressor}.fif"
 CLUSTER_FILE_TEMPLATE = "clusters_{regressor}.parquet"
@@ -123,6 +133,7 @@ def run_trf_figures(
         Optional electrode override for the timecourse panel.
     """
     import mne
+    from rate.viz import evoked_trf as evoked_trf_viz
     from rate.viz.trf import (
         plot_electrode_timecourse_panel,
         plot_joint_kernel,
@@ -163,7 +174,8 @@ def run_trf_figures(
                 )
                 if collapsed_intervals is not None:
                     joint_time_clusters = collapsed_intervals
-            plot_joint_kernel(
+            joint_plot_fn = evoked_trf_viz.plot_joint_kernel if family == "evoked_trf" else plot_joint_kernel
+            joint_plot_fn(
                 evoked=evoked,
                 out_dir=out_dir,
                 family=family,
@@ -174,7 +186,7 @@ def run_trf_figures(
                 mask_params={
                     "marker": "o",
                     "markerfacecolor": "0.75",
-                    "markeredgecolor": "black",
+                    "markeredgecolor": "none",
                     "markersize": 10,
                 },
                 title=f"{family} kernel ({reg_name})",
@@ -233,6 +245,11 @@ def run_trf_figures(
                 template_evoked=condition_evokeds[reg],
             )) is not None
         }
+        if not condition_se:
+            LOGGER.warning(
+                "No subject-level SEM traces found for %s timecourse panel; rendering lines without SE shading.",
+                family,
+            )
         xmin, xmax, ymin, ymax = _global_axis_bounds(
             condition_evokeds.values(),
             se_by_condition=condition_se if condition_se else None,
@@ -266,6 +283,12 @@ def run_trf_figures(
             else {"self": "self_rate_sq", "other": "other_rate_sq", "abs_diff": "abs_diff_sq"}
         )
         try:
+            info_for_insets = _load_group_evoked(
+                mne=mne,
+                out_dir=out_dir,
+                family=family,
+                regressor=next(iter(condition_to_model.values())),
+            ).info
             panel_data = _build_reconstruction_erp_panel_data(
                 mne=mne,
                 out_dir=out_dir,
@@ -275,15 +298,16 @@ def run_trf_figures(
             plot_reconstruction_erp_grid(
                 panel_data=panel_data,
                 colors={
-                    "self": "#0B3C5D",      # dark blue
-                    "other": "#8B1E1E",     # dark red
-                    "abs_diff": "#1B5E20",  # dark green
+                    "self": SEMANTIC_COLOR_MAP["self"],
+                    "other": SEMANTIC_COLOR_MAP["other"],
+                    "abs_diff": SEMANTIC_COLOR_MAP["abs_diff"],
                 },
                 out_dir=out_dir,
                 family=family,
                 name=f"reconstruction_erp_{panel_kind}",
                 title=f"Evoked TRF Reconstruction ERP ({panel_kind})",
                 electrodes=("Fz", "Pz"),
+                info=info_for_insets,
             )
         except Exception as exc:
             LOGGER.warning(
@@ -576,18 +600,28 @@ def _load_condition_standard_error(
 ) -> np.ndarray | None:
     """Load subject-level kernels and return SEM array matching ``template_evoked.data``."""
     subject_evokeds = _load_subject_evokeds(mne=mne, out_dir=out_dir, family=family, regressor=regressor)
-    if not subject_evokeds:
-        return None
-
     ref_shape = tuple(template_evoked.data.shape)
     ref_times = np.asarray(template_evoked.times, dtype=float)
     matched = []
+
     for evoked in subject_evokeds:
         if tuple(evoked.data.shape) != ref_shape:
             continue
         if not np.allclose(np.asarray(evoked.times, dtype=float), ref_times):
             continue
         matched.append(np.asarray(evoked.data, dtype=float))
+
+    if len(matched) < 2:
+        # Fallback for analyses that do not persist subject-level per-regressor FIFs
+        # (e.g., induced TRF): derive one subject kernel per subject by averaging
+        # outer-fold kernels in `kernels_outer.npy`.
+        for arr in _load_subject_kernel_arrays_from_trf_artifacts(
+            out_dir=out_dir,
+            family=family,
+            regressor=regressor,
+            template_evoked=template_evoked,
+        ):
+            matched.append(arr)
 
     if len(matched) < 2:
         return None
@@ -598,10 +632,7 @@ def _load_condition_standard_error(
 
 def _load_subject_evokeds(*, mne, out_dir: Path, family: str, regressor: str) -> list[Any]:
     """Load subject-level TRF kernels for one regressor when available."""
-    if family != "evoked_trf":
-        return []
-
-    subjects_root = out_dir / "evoked_trf" / "subjects"
+    subjects_root = out_dir / str(family) / "subjects"
     if not subjects_root.exists():
         return []
 
@@ -611,7 +642,12 @@ def _load_subject_evokeds(*, mne, out_dir: Path, family: str, regressor: str) ->
     )
 
     evokeds: list[Any] = []
-    for path in sorted(subjects_root.rglob(f"models/{model}/{fname}")):
+    candidates = sorted(subjects_root.rglob(f"models/{model}/{fname}"))
+    # Some pipelines may store a regressor kernel under a model directory that differs
+    # from the regressor name; fall back to a broader search when the canonical path misses.
+    if not candidates:
+        candidates = sorted(subjects_root.rglob(f"models/*/{fname}"))
+    for path in candidates:
         try:
             loaded = mne.read_evokeds(path)
         except Exception:
@@ -621,10 +657,77 @@ def _load_subject_evokeds(*, mne, out_dir: Path, family: str, regressor: str) ->
     return evokeds
 
 
+def _load_subject_kernel_arrays_from_trf_artifacts(
+    *,
+    out_dir: Path,
+    family: str,
+    regressor: str,
+    template_evoked,
+) -> list[np.ndarray]:
+    """Return subject-level kernel arrays from `kernels_outer.npy`, averaged across folds."""
+    subjects_root = out_dir / str(family) / "subjects"
+    if not subjects_root.exists():
+        return []
+
+    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    lags_ref = np.asarray(template_evoked.times, dtype=float)
+    shape_ref = tuple(np.asarray(template_evoked.data).shape)
+
+    arrays: list[np.ndarray] = []
+    for kernels_path in sorted(subjects_root.rglob(f"models/{model}/kernels_outer.npy")):
+        lags_path = kernels_path.with_name("lags.npy")
+        if not lags_path.exists():
+            continue
+        try:
+            kernels = np.asarray(np.load(kernels_path), dtype=float)
+            lags = np.asarray(np.load(lags_path), dtype=float).reshape(-1)
+        except Exception:
+            continue
+        if kernels.size == 0 or lags.size == 0:
+            continue
+        if not np.allclose(lags, lags_ref):
+            continue
+
+        subj_kernel = _subject_kernel_mean_from_outer_folds(kernels=kernels)
+        if subj_kernel is None:
+            continue
+        if tuple(subj_kernel.shape) != shape_ref:
+            continue
+        arrays.append(subj_kernel)
+    return arrays
+
+
+def _subject_kernel_mean_from_outer_folds(*, kernels: np.ndarray) -> np.ndarray | None:
+    """Collapse outer-fold TRF kernels to one subject-level (channels x lags) array."""
+    arr = np.asarray(kernels, dtype=float)
+    if arr.ndim < 2:
+        return None
+
+    # Expected shapes:
+    #   (n_folds, n_channels, n_features, n_lags)
+    #   (n_folds, n_channels, n_lags) for single-feature squeeze variants
+    subj = np.nanmean(arr, axis=0)
+    if subj.ndim == 3:
+        if subj.shape[1] != 1:
+            return None
+        subj = subj[:, 0, :]
+    if subj.ndim != 2:
+        return None
+    return np.asarray(subj, dtype=float)
+
+
 def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
     """Build deterministic color mapping for regressor overlays."""
     palette = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:brown", "tab:pink"]
-    return {name: palette[idx % len(palette)] for idx, name in enumerate(regressors)}
+    colors: dict[str, str] = {}
+    fallback_idx = 0
+    for name in regressors:
+        if name in SEMANTIC_COLOR_MAP:
+            colors[name] = SEMANTIC_COLOR_MAP[name]
+            continue
+        colors[name] = palette[fallback_idx % len(palette)]
+        fallback_idx += 1
+    return colors
 
 
 def _build_reconstruction_erp_panel_data(
