@@ -31,6 +31,120 @@ DEFAULT_PSD_COLUMN_TITLES: dict[str, str] = {
 }
 
 
+def plot_psd_quantile_raw_row(
+    *,
+    subject_spectra: pd.DataFrame,
+    q: int,
+    out_dir: Path,
+    family: str,
+    name: str,
+    freq_col: str = "freq_hz",
+    subject_col: str = "subject_id",
+    trial_col: str = "trial_key",
+    raw_col: str = "psd_raw",
+    target_rows: Sequence[tuple[str, str]] = DEFAULT_PSD_TARGET_ROWS,
+    xlabel: str = "Frequency (Hz)",
+    ylabel: str = "Power",
+    title: str | None = None,
+    log_x: bool = False,
+    log_y: bool = False,
+    xlim_hz: tuple[float, float] | None = None,
+) -> None:
+    """Plot only the raw-PSD column as a single horizontal row (1x4)."""
+    if int(q) < 2:
+        raise ValueError("q must be >= 2")
+    if subject_spectra.empty:
+        raise ValueError("subject_spectra must not be empty")
+
+    _validate_psd_table(
+        df=subject_spectra,
+        freq_col=freq_col,
+        subject_col=subject_col,
+        trial_col=trial_col,
+        spectrum_cols={"raw": raw_col, "aperiodic": raw_col, "periodic": raw_col},
+        target_rows=target_rows,
+    )
+
+    n_panels = len(target_rows)
+    fig, axes = plt.subplots(1, n_panels, figsize=(14.0, 3.4), sharex=True)
+    axes = np.asarray(axes).reshape(-1)
+
+    cmap = plt.get_cmap("inferno")
+    quantile_colors = [cmap(v) for v in np.linspace(0.15, 0.95, int(q))]
+
+    for panel_idx, (target_col, panel_label) in enumerate(target_rows):
+        ax = axes[panel_idx]
+        quant_df = _assign_within_subject_trial_quantiles(
+            df=subject_spectra,
+            subject_col=subject_col,
+            trial_col=trial_col,
+            target_col=target_col,
+            q=int(q),
+        )
+        panel_df = subject_spectra.merge(
+            quant_df,
+            on=[subject_col, trial_col],
+            how="inner",
+            validate="many_to_one",
+        )
+
+        summary_df = panel_df
+        if log_y:
+            # Raw spectra are stored in log10-power units; convert back to linear power.
+            summary_df = panel_df.copy()
+            vals = pd.to_numeric(summary_df[raw_col], errors="coerce").to_numpy(dtype=float)
+            finite = np.isfinite(vals)
+            out = np.full(vals.shape, np.nan, dtype=float)
+            out[finite] = np.power(10.0, np.clip(vals[finite], -300.0, 300.0))
+            summary_df[raw_col] = out
+
+        summary = _summarize_quantile_spectra(
+            df=summary_df,
+            subject_col=subject_col,
+            trial_col=trial_col,
+            freq_col=freq_col,
+            value_col=raw_col,
+        )
+
+        plotted_y: list[np.ndarray] = []
+        plotted_mean_series: list[tuple[np.ndarray, np.ndarray]] = []
+        for q_idx in range(int(q)):
+            q_slice = summary.loc[summary["quantile_index"] == q_idx]
+            if q_slice.empty:
+                continue
+            x = q_slice[freq_col].to_numpy(dtype=float)
+            mean = q_slice["mean"].to_numpy(dtype=float)
+            se = q_slice["se"].to_numpy(dtype=float)
+            color = quantile_colors[q_idx]
+            ax.plot(x, mean, color=color, linewidth=1.8, label=f"Q{q_idx + 1}")
+            plotted_mean_series.append((x, mean))
+            plotted_y.append(mean)
+            if np.isfinite(se).any():
+                ax.fill_between(x, mean - se, mean + se, color=color, alpha=0.12, linewidth=0)
+                plotted_y.append(mean - se)
+                plotted_y.append(mean + se)
+
+        ax.set_title(panel_label)
+        ax.set_xlabel(xlabel)
+        if panel_idx == 0:
+            ax.set_ylabel(ylabel)
+        if log_x:
+            ax.set_xscale("log")
+        if log_y:
+            _set_safe_loglike_yscale(ax=ax, plotted_y=plotted_y)
+        if xlim_hz is not None:
+            ax.set_xlim(float(xlim_hz[0]), float(xlim_hz[1]))
+        _set_tight_subplot_ylim(ax=ax, plotted_y=plotted_y, mean_series=plotted_mean_series, xlim_hz=xlim_hz)
+
+    axes[-1].legend(title=f"Quantiles (Q={int(q)})", frameon=False, loc="best")
+    if title:
+        fig.suptitle(title)
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
+    else:
+        fig.tight_layout()
+    save_figure(fig, out_dir, family, name)
+
+
 def plot_psd_quantile_grid(
     *,
     subject_spectra: pd.DataFrame,
@@ -84,8 +198,6 @@ def plot_psd_quantile_grid(
 
     cmap = plt.get_cmap("inferno")
     quantile_colors = [cmap(v) for v in np.linspace(0.15, 0.95, int(q))]
-    panel_mean_values: dict[tuple[int, int], list[np.ndarray]] = {}
-
     for row_idx, (target_col, row_label) in enumerate(target_rows):
         quant_df = _assign_within_subject_trial_quantiles(
             df=subject_spectra,
@@ -104,14 +216,25 @@ def plot_psd_quantile_grid(
         for col_idx, spectrum_key in enumerate(expected_spectrum_keys):
             ax = axes[row_idx, col_idx]
             spectrum_col = spectrum_map[spectrum_key]
+            summary_df = panel_df
+            # Raw and aperiodic spectra are stored in log10-power units in the FOOOF
+            # pipeline; convert back to linear power so a true log y-axis is meaningful.
+            if log_y and spectrum_key in {"raw", "aperiodic"}:
+                summary_df = panel_df.copy()
+                vals = pd.to_numeric(summary_df[spectrum_col], errors="coerce").to_numpy(dtype=float)
+                finite = np.isfinite(vals)
+                out = np.full(vals.shape, np.nan, dtype=float)
+                out[finite] = np.power(10.0, np.clip(vals[finite], -300.0, 300.0))
+                summary_df[spectrum_col] = out
             summary = _summarize_quantile_spectra(
-                df=panel_df,
+                df=summary_df,
                 subject_col=subject_col,
                 trial_col=trial_col,
                 freq_col=freq_col,
                 value_col=spectrum_col,
             )
             plotted_y: list[np.ndarray] = []
+            plotted_mean_series: list[tuple[np.ndarray, np.ndarray]] = []
 
             for q_idx in range(int(q)):
                 q_slice = summary.loc[summary["quantile_index"] == q_idx]
@@ -122,10 +245,10 @@ def plot_psd_quantile_grid(
                 se = q_slice["se"].to_numpy(dtype=float)
                 color = quantile_colors[q_idx]
                 ax.plot(x, mean, color=color, linewidth=1.8, label=f"Q{q_idx + 1}")
-                panel_mean_values.setdefault((row_idx, col_idx), []).append(mean)
+                plotted_mean_series.append((x, mean))
                 plotted_y.append(mean)
                 if np.isfinite(se).any():
-                    ax.fill_between(x, mean - se, mean + se, color=color, alpha=0.12, linewidth=0)
+                    ax.fill_between(x, mean - se, mean + se, color=color, alpha=0.3, linewidth=0)
                     plotted_y.append(mean - se)
                     plotted_y.append(mean + se)
 
@@ -141,8 +264,12 @@ def plot_psd_quantile_grid(
                 _set_safe_loglike_yscale(ax=ax, plotted_y=plotted_y)
             if xlim_hz is not None:
                 ax.set_xlim(float(xlim_hz[0]), float(xlim_hz[1]))
-
-    _apply_robust_panel_ylims(axes=axes, panel_mean_values=panel_mean_values)
+            _set_tight_subplot_ylim(
+                ax=ax,
+                plotted_y=plotted_y,
+                mean_series=plotted_mean_series,
+                xlim_hz=xlim_hz,
+            )
     axes[0, -1].legend(title=f"Quantiles (Q={int(q)})", frameon=False, loc="best")
     if title:
         fig.suptitle(title)
@@ -172,42 +299,65 @@ def _set_safe_loglike_yscale(*, ax: plt.Axes, plotted_y: list[np.ndarray]) -> No
     ax.set_yscale("linear")
 
 
-def _apply_robust_panel_ylims(
+def _set_tight_subplot_ylim(
     *,
-    axes: np.ndarray,
-    panel_mean_values: Mapping[tuple[int, int], list[np.ndarray]],
+    ax: plt.Axes,
+    plotted_y: list[np.ndarray],
+    mean_series: list[tuple[np.ndarray, np.ndarray]] | None = None,
+    xlim_hz: tuple[float, float] | None = None,
 ) -> None:
-    """Tighten y-limits per subplot using robust quantiles of mean traces."""
-    if axes.ndim != 2:
+    vals = []
+    # Prefer mean curves only, and restrict to visible x-range.
+    if mean_series:
+        for x_arr, y_arr in mean_series:
+            x = np.asarray(x_arr, dtype=float).reshape(-1)
+            y = np.asarray(y_arr, dtype=float).reshape(-1)
+            if x.shape != y.shape:
+                continue
+            keep = np.isfinite(x) & np.isfinite(y)
+            if xlim_hz is not None:
+                keep &= (x >= float(xlim_hz[0])) & (x <= float(xlim_hz[1]))
+            y = y[keep]
+            if y.size:
+                vals.append(y)
+    # Fallback if no mean-series values survived.
+    if not vals:
+        for arr in plotted_y:
+            a = np.asarray(arr, dtype=float).reshape(-1)
+            a = a[np.isfinite(a)]
+            if a.size:
+                vals.append(a)
+    if not vals:
         return
-    n_rows, n_cols = axes.shape
-    for row_idx in range(n_rows):
-        for col_idx in range(n_cols):
-            arrays = panel_mean_values.get((row_idx, col_idx), [])
-            if not arrays:
-                continue
-            vals = []
-            for arr in arrays:
-                a = np.asarray(arr, dtype=float).reshape(-1)
-                a = a[np.isfinite(a)]
-                if a.size:
-                    vals.append(a)
-            if not vals:
-                continue
-            y = np.concatenate(vals)
-            if y.size < 2:
-                continue
-            lo = float(np.quantile(y, 0.01))
-            hi = float(np.quantile(y, 0.99))
-            if not np.isfinite(lo) or not np.isfinite(hi):
-                continue
-            if lo >= hi:
-                lo = float(np.min(y))
-                hi = float(np.max(y))
-                if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
-                    continue
-            pad = 0.05 * (hi - lo)
-            axes[row_idx, col_idx].set_ylim(lo - pad, hi + pad)
+    y = np.concatenate(vals)
+    if y.size == 0:
+        return
+
+    scale = ax.get_yscale()
+    if scale == "log":
+        y = y[y > 0]
+        if y.size == 0:
+            return
+        ymin = float(np.min(y))
+        ymax = float(np.max(y))
+        if not np.isfinite(ymin) or not np.isfinite(ymax) or ymin <= 0 or ymax <= 0:
+            return
+        if np.isclose(ymin, ymax):
+            ax.set_ylim(ymin / 1.2, ymax * 1.2)
+            return
+        ax.set_ylim(ymin / 1.02, ymax * 1.02)
+        return
+
+    ymin = float(np.min(y))
+    ymax = float(np.max(y))
+    if not np.isfinite(ymin) or not np.isfinite(ymax):
+        return
+    if np.isclose(ymin, ymax):
+        pad = 1.0 if np.isclose(ymax, 0.0) else abs(ymax) * 0.1
+        ax.set_ylim(ymin - pad, ymax + pad)
+        return
+    pad = 0.015 * (ymax - ymin)
+    ax.set_ylim(ymin - pad, ymax + pad)
 
 
 def _validate_psd_table(

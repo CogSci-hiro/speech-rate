@@ -19,6 +19,7 @@ FIGURE_JOINT = "joint"
 FIGURE_TOPO = "topo"
 FIGURE_TIMECOURSE = "timecourse"
 FIGURE_FOOOF_PSD_PANEL = "fooof_psd_panel"
+FIGURE_FOOOF_PSD_RAW_ROW = "fooof_psd_raw_row"
 FIGURE_RECON_ERP_LINEAR = "reconstruction_erp_linear"
 FIGURE_RECON_ERP_QUADRATIC = "reconstruction_erp_quadratic"
 FIGURE_RECON_ERP_R2_TOPO = "reconstruction_erp_r2_topo"
@@ -27,6 +28,7 @@ FIGURE_CHOICES = (
     FIGURE_TOPO,
     FIGURE_TIMECOURSE,
     FIGURE_FOOOF_PSD_PANEL,
+    FIGURE_FOOOF_PSD_RAW_ROW,
     FIGURE_RECON_ERP_LINEAR,
     FIGURE_RECON_ERP_QUADRATIC,
     FIGURE_RECON_ERP_R2_TOPO,
@@ -136,7 +138,7 @@ def run_trf_figures(
     """
     import mne
     from rate.viz import evoked_trf as evoked_trf_viz
-    from rate.viz.fooof import plot_psd_quantile_grid
+    from rate.viz.fooof import plot_psd_quantile_grid, plot_psd_quantile_raw_row
     from rate.viz.trf import (
         plot_electrode_timecourse_panel,
         plot_joint_kernel,
@@ -315,6 +317,35 @@ def run_trf_figures(
                 title="FOOOF PSD Quantile Panel",
                 message=(
                     "Subject-level PSD spectra table not available yet "
+                    f"({exc.__class__.__name__})."
+                ),
+            )
+        return
+
+    if figure == FIGURE_FOOOF_PSD_RAW_ROW:
+        try:
+            df = _load_trial_psd_spectra_table(out_dir=out_dir)
+            plot_psd_quantile_raw_row(
+                subject_spectra=df,
+                q=_get_fooof_psd_quantiles(config),
+                out_dir=out_dir,
+                family="fooof",
+                name="psd_quantile_raw_row",
+                subject_col="subject_key" if "subject_key" in df.columns else "subject_id",
+                trial_col="trial_key" if "trial_key" in df.columns else "event_id",
+                title="FOOOF Raw PSD Quantile Row",
+                log_y=_get_fooof_psd_log_y(config),
+                xlim_hz=_get_fooof_psd_xlim_hz(config),
+            )
+        except Exception as exc:
+            LOGGER.warning("Falling back to placeholder FOOOF raw PSD row: %s", exc)
+            _write_placeholder_figure(
+                out_dir=out_dir,
+                family="fooof",
+                name="psd_quantile_raw_row",
+                title="FOOOF Raw PSD Quantile Row",
+                message=(
+                    "Trial-level PSD spectra table not available yet "
                     f"({exc.__class__.__name__})."
                 ),
             )

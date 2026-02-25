@@ -139,6 +139,7 @@ EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS = [
 ]
 FOOOF_PSD_TARGETS = [
     f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_grid.pdf",
+    f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_raw_row.pdf",
 ]
 
 
@@ -367,6 +368,24 @@ rule figure_fooof_psd_panel:
             --out-dir {params.out_dir} \
             --family fooof \
             --figure fooof_psd_panel \
+            --config config/viz.yaml
+        """
+
+
+rule figure_fooof_psd_raw_row:
+    input:
+        trial_psd_spectra=f"{_viz_out_dir()}/fooof/aggregated/trial_psd_spectra.parquet",
+        settings=f"{_viz_out_dir()}/fooof/meta/fooof_settings.json",
+    output:
+        f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_raw_row.pdf"
+    params:
+        out_dir=VIZ_OUT_DIR
+    shell:
+        """
+        python -m rate.cli.main figures \
+            --out-dir {params.out_dir} \
+            --family fooof \
+            --figure fooof_psd_raw_row \
             --config config/viz.yaml
         """
 
