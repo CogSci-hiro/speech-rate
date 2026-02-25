@@ -18,6 +18,7 @@ REQUIRES_CONFIG = False
 FIGURE_JOINT = "joint"
 FIGURE_TOPO = "topo"
 FIGURE_TIMECOURSE = "timecourse"
+FIGURE_FOOOF_PSD_PANEL = "fooof_psd_panel"
 FIGURE_RECON_ERP_LINEAR = "reconstruction_erp_linear"
 FIGURE_RECON_ERP_QUADRATIC = "reconstruction_erp_quadratic"
 FIGURE_RECON_ERP_R2_TOPO = "reconstruction_erp_r2_topo"
@@ -25,6 +26,7 @@ FIGURE_CHOICES = (
     FIGURE_JOINT,
     FIGURE_TOPO,
     FIGURE_TIMECOURSE,
+    FIGURE_FOOOF_PSD_PANEL,
     FIGURE_RECON_ERP_LINEAR,
     FIGURE_RECON_ERP_QUADRATIC,
     FIGURE_RECON_ERP_R2_TOPO,
@@ -134,6 +136,7 @@ def run_trf_figures(
     """
     import mne
     from rate.viz import evoked_trf as evoked_trf_viz
+    from rate.viz.fooof import plot_psd_quantile_grid
     from rate.viz.trf import (
         plot_electrode_timecourse_panel,
         plot_joint_kernel,
@@ -286,6 +289,31 @@ def run_trf_figures(
             name="timecourse_panel",
             ylabel="Amplitude",
         )
+        return
+
+    if figure == FIGURE_FOOOF_PSD_PANEL:
+        try:
+            df = _load_subject_psd_spectra_table(out_dir=out_dir)
+            plot_psd_quantile_grid(
+                subject_spectra=df,
+                q=_get_fooof_psd_quantiles(config),
+                out_dir=out_dir,
+                family="fooof",
+                name="psd_quantile_grid",
+                title="FOOOF PSD Quantile Panel",
+            )
+        except Exception as exc:
+            LOGGER.warning("Falling back to placeholder FOOOF PSD panel: %s", exc)
+            _write_placeholder_figure(
+                out_dir=out_dir,
+                family="fooof",
+                name="psd_quantile_grid",
+                title="FOOOF PSD Quantile Panel",
+                message=(
+                    "Subject-level PSD spectra table not available yet "
+                    f"({exc.__class__.__name__})."
+                ),
+            )
         return
 
     if figure in (FIGURE_RECON_ERP_LINEAR, FIGURE_RECON_ERP_QUADRATIC):
@@ -445,6 +473,18 @@ def _get_trf_joint_times(
     return values
 
 
+def _get_fooof_psd_quantiles(config: Mapping[str, Any]) -> int:
+    reporting = config.get("reporting", {})
+    fooof_block = reporting.get("fooof", {}) if isinstance(reporting, Mapping) else {}
+    if not isinstance(fooof_block, Mapping):
+        return 4
+    value = fooof_block.get("psd_quantiles", fooof_block.get("q", 4))
+    q = int(value)
+    if q < 2:
+        raise ValueError("config.reporting.fooof.psd_quantiles must be >= 2")
+    return q
+
+
 def _require_regressor(*, regressor: str | None, figure: str) -> str:
     """Validate that per-regressor figure modes receive a regressor."""
     if regressor is None or not regressor.strip():
@@ -474,6 +514,38 @@ def _write_placeholder_figure(
     fig.tight_layout()
     fig.savefig(fig_path, bbox_inches="tight")
     plt.close(fig)
+
+
+def _load_subject_psd_spectra_table(*, out_dir: Path) -> pd.DataFrame:
+    """Load a precomputed subject-level PSD spectra table for the FOOOF PSD panel.
+
+    This plotting path expects one row per subject-frequency pair with wide PSD columns
+    (`psd_raw`, `psd_aperiodic`, `psd_periodic`) plus subject-level target variables.
+    """
+    candidates = [
+        out_dir / "fooof" / "aggregated" / "subject_psd_spectra.parquet",
+        out_dir / "fooof" / "aggregated" / "subject_psd_spectra.csv",
+        out_dir / "fooof" / "aggregated" / "subject_level_psd_spectra.parquet",
+        out_dir / "fooof" / "aggregated" / "subject_level_psd_spectra.csv",
+        out_dir / "fooof" / "aggregated" / "fooof_subject_psd_spectra.parquet",
+        out_dir / "fooof" / "aggregated" / "fooof_subject_psd_spectra.csv",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        if path.suffix.lower() == ".csv":
+            df = pd.read_csv(path)
+        else:
+            df = pd.read_parquet(path)
+        if df.empty:
+            raise ValueError(f"PSD spectra table is empty: {path}")
+        return df
+
+    raise FileNotFoundError(
+        "Expected a subject-level PSD spectra table under fooof/aggregated "
+        "(e.g., subject_psd_spectra.parquet) with columns "
+        "subject_id,freq_hz,psd_raw,psd_aperiodic,psd_periodic,exponent,offset,theta_power,theta_cf"
+    )
 
 
 def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:

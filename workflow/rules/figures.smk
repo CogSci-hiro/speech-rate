@@ -137,6 +137,9 @@ EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS = [
     f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_r2_topomap_{model}_vs_baseline.pdf"
     for model in AVAILABLE_EVOKED_RECONSTRUCTION_R2_MODELS
 ]
+FOOOF_PSD_TARGETS = [
+    f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_grid.pdf",
+]
 
 
 rule figure_evoked_trf_joint_by_regressor:
@@ -350,6 +353,31 @@ rule figure_evoked_trf_reconstruction_erp_r2_topo:
         EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
 
 
+rule figure_fooof_psd_panel:
+    input:
+        # Depend on stable FOOOF outputs to ensure the pipeline has run. The figure CLI
+        # will render a placeholder if a subject-level PSD spectra table is not yet available.
+        trial_channels=f"{_viz_out_dir()}/fooof/trial_level/fooof_trial_channels.parquet",
+        settings=f"{_viz_out_dir()}/fooof/meta/fooof_settings.json",
+    output:
+        f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_grid.pdf"
+    params:
+        out_dir=VIZ_OUT_DIR
+    shell:
+        """
+        python -m rate.cli.main figures \
+            --out-dir {params.out_dir} \
+            --family fooof \
+            --figure fooof_psd_panel \
+            --config config/viz.yaml
+        """
+
+
+rule figure_fooof_psd:
+    input:
+        FOOOF_PSD_TARGETS
+
+
 rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
@@ -362,3 +390,4 @@ rule figures_all:
         ]
         + EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
         + INDUCED_TIMECOURSE_TARGETS
+        + FOOOF_PSD_TARGETS

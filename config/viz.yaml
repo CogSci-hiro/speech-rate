@@ -17,6 +17,8 @@ reporting:
        default: [-0.50, 0.00, 0.20]
     #   self_rate: [-0.12, -0.02, 0.08]
     #   other_rate: [-0.08, 0.04, 0.16]
+  fooof:
+    psd_quantiles: 4
 
 # Keep induced band metadata local to viz config so figure rule expansion does not
 # depend on the tracked compute config.
