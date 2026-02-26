@@ -11,7 +11,7 @@ reporting:
 induced_trf:
   bands: ["theta"]
   bands_hz:
-    theta: [4.0, 7.0]
+    theta: [4.0, 8.0]
 
 stats:
   kernel_cluster:
@@ -22,7 +22,7 @@ stats:
     threshold_p: 0.9
     tfce:
       start: 0.0
-      step: 0.2
+      step: 0.05
     tail: 0
     adjacency:
       montage_name: "biosemi64"
