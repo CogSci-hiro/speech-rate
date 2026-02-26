@@ -21,6 +21,9 @@ class FooofSpec:
     spectrum_method: str
     welch_nperseg_s: float
     welch_overlap: float
+    multitaper_bandwidth_hz: float | None
+    multitaper_adaptive: bool
+    multitaper_low_bias: bool
     aperiodic_mode: str
     peak_width_limits_hz: tuple[float, float]
     min_peak_height: float
@@ -185,6 +188,9 @@ def build_fooof_spec(config: dict) -> FooofSpec:
             spectrum_method="welch",
             welch_nperseg_s=window_length_s,
             welch_overlap=0.5,
+            multitaper_bandwidth_hz=None,
+            multitaper_adaptive=False,
+            multitaper_low_bias=True,
             aperiodic_mode="fixed",
             peak_width_limits_hz=(1.0, 12.0),
             min_peak_height=0.0,
@@ -207,14 +213,20 @@ def build_fooof_spec(config: dict) -> FooofSpec:
     if not (freq_range[0] < freq_range[1]):
         raise ValueError("fooof.spectrum must satisfy fmin_hz < fmax_hz.")
     spectrum_method = str(spectrum_cfg.get("method", "welch")).strip().lower()
-    if spectrum_method != "welch":
-        raise ValueError(f"Unsupported fooof.spectrum.method={spectrum_method!r}; expected 'welch'.")
+    if spectrum_method not in {"welch", "multitaper"}:
+        raise ValueError(f"Unsupported fooof.spectrum.method={spectrum_method!r}; expected 'welch' or 'multitaper'.")
     welch_nperseg_s = float(spectrum_cfg.get("welch_nperseg_s", window_length_s))
     welch_overlap = float(spectrum_cfg.get("welch_overlap", 0.5))
     if welch_nperseg_s <= 0:
         raise ValueError("fooof.spectrum.welch_nperseg_s must be > 0.")
     if not (0 <= welch_overlap < 1):
         raise ValueError("fooof.spectrum.welch_overlap must be in [0, 1).")
+    mt_bw_raw = spectrum_cfg.get("multitaper_bandwidth_hz")
+    multitaper_bandwidth_hz = None if mt_bw_raw is None else float(mt_bw_raw)
+    if multitaper_bandwidth_hz is not None and multitaper_bandwidth_hz <= 0:
+        raise ValueError("fooof.spectrum.multitaper_bandwidth_hz must be > 0 when provided.")
+    multitaper_adaptive = bool(spectrum_cfg.get("multitaper_adaptive", False))
+    multitaper_low_bias = bool(spectrum_cfg.get("multitaper_low_bias", True))
 
     model_cfg = _as_mapping(fooof_cfg.get("model"), "fooof.model")
     max_n_peaks = int(model_cfg.get("max_n_peaks"))
@@ -267,6 +279,9 @@ def build_fooof_spec(config: dict) -> FooofSpec:
         spectrum_method=spectrum_method,
         welch_nperseg_s=welch_nperseg_s,
         welch_overlap=welch_overlap,
+        multitaper_bandwidth_hz=multitaper_bandwidth_hz,
+        multitaper_adaptive=multitaper_adaptive,
+        multitaper_low_bias=multitaper_low_bias,
         aperiodic_mode=aperiodic_mode,
         peak_width_limits_hz=peak_width_limits_hz,
         min_peak_height=min_peak_height,

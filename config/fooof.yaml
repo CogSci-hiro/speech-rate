@@ -4,7 +4,7 @@ fooof:
 
   # Pre-speech causal window aligned to self speech onset (t+1)
   prespeech_window_s:
-    tmin: -1.0
+    tmin: -2.0
     tmax: 0.0
 
   # ROI definitions
@@ -17,10 +17,14 @@ fooof:
   # Spectrum estimation
   spectrum:
     fmin_hz: 2.0
-    fmax_hz: 40.0
-    method: "welch"
-    welch_nperseg_s: 1.0
+    fmax_hz: 30.0
+    method: "welch"   # "welch" | "multitaper"
+    welch_nperseg_s: 2.0
     welch_overlap: 0.5
+    # Multitaper options (used only when method="multitaper")
+    # multitaper_bandwidth_hz: 2.0
+    multitaper_adaptive: false
+    multitaper_low_bias: true
 
   # FOOOF model settings
   model:

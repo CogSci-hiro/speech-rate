@@ -38,24 +38,10 @@ def fit_fooof_to_window(
     x = np.asarray(window_data, dtype=float).reshape(-1)
     if x.size < 4 or not np.all(np.isfinite(x)):
         return _nan_result()
-
-    nperseg = max(4, int(round(spec.welch_nperseg_s * float(sfreq))))
-    nperseg = min(nperseg, x.size)
-    if nperseg < 4:
+    try:
+        freqs, psd = _compute_psd(x=x, sfreq=sfreq, spec=spec)
+    except Exception:
         return _nan_result()
-    noverlap = int(round(nperseg * spec.welch_overlap))
-    noverlap = min(max(noverlap, 0), nperseg - 1)
-
-    freqs, psd = welch(
-        x,
-        fs=float(sfreq),
-        window="hann",
-        nperseg=nperseg,
-        noverlap=noverlap,
-        detrend="constant",
-        scaling="density",
-        return_onesided=True,
-    )
     psd = np.asarray(psd, dtype=float)
     psd = np.maximum(psd, PSD_EPS)
 
@@ -153,3 +139,46 @@ def _attach_spectra_to_result(
     result["psd_raw"] = raw
     result["psd_aperiodic"] = ap
     result["psd_periodic"] = periodic
+
+
+def _compute_psd(*, x: np.ndarray, sfreq: float, spec: FooofSpec) -> tuple[np.ndarray, np.ndarray]:
+    method = str(spec.spectrum_method).strip().lower()
+    if method == "welch":
+        nperseg = max(4, int(round(spec.welch_nperseg_s * float(sfreq))))
+        nperseg = min(nperseg, x.size)
+        if nperseg < 4:
+            raise ValueError("nperseg < 4")
+        noverlap = int(round(nperseg * spec.welch_overlap))
+        noverlap = min(max(noverlap, 0), nperseg - 1)
+        freqs, psd = welch(
+            x,
+            fs=float(sfreq),
+            window="hann",
+            nperseg=nperseg,
+            noverlap=noverlap,
+            detrend="constant",
+            scaling="density",
+            return_onesided=True,
+        )
+        return np.asarray(freqs, dtype=float), np.asarray(psd, dtype=float)
+
+    if method == "multitaper":
+        import mne
+
+        psd_mt, freqs_mt = mne.time_frequency.psd_array_multitaper(
+            x[np.newaxis, :],
+            sfreq=float(sfreq),
+            fmin=float(spec.freq_range[0]),
+            fmax=float(spec.freq_range[1]),
+            bandwidth=(None if spec.multitaper_bandwidth_hz is None else float(spec.multitaper_bandwidth_hz)),
+            adaptive=bool(spec.multitaper_adaptive),
+            low_bias=bool(spec.multitaper_low_bias),
+            normalization="full",
+            verbose="ERROR",
+        )
+        psd_mt = np.asarray(psd_mt, dtype=float)
+        if psd_mt.ndim == 2 and psd_mt.shape[0] == 1:
+            psd_mt = psd_mt[0]
+        return np.asarray(freqs_mt, dtype=float), np.asarray(psd_mt, dtype=float)
+
+    raise ValueError(f"Unsupported PSD method: {spec.spectrum_method!r}")

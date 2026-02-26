@@ -120,7 +120,7 @@ def plot_psd_quantile_raw_row(
             plotted_mean_series.append((x, mean))
             plotted_y.append(mean)
             if np.isfinite(se).any():
-                ax.fill_between(x, mean - se, mean + se, color=color, alpha=0.12, linewidth=0)
+                ax.fill_between(x, mean - se, mean + se, color=color, alpha=0.25, linewidth=0)
                 plotted_y.append(mean - se)
                 plotted_y.append(mean + se)
 
@@ -248,7 +248,7 @@ def plot_psd_quantile_grid(
                 plotted_mean_series.append((x, mean))
                 plotted_y.append(mean)
                 if np.isfinite(se).any():
-                    ax.fill_between(x, mean - se, mean + se, color=color, alpha=0.3, linewidth=0)
+                    ax.fill_between(x, mean - se, mean + se, color=color, alpha=0.35, linewidth=0)
                     plotted_y.append(mean - se)
                     plotted_y.append(mean + se)
 
