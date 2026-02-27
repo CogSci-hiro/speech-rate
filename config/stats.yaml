@@ -37,7 +37,7 @@ phase1_master_stats_copy:
 
     kernel_cluster:
 
-      method: "threshold"          # tfce | threshold
+      method: "tfce"          # tfce | threshold
 
       n_permutations: 10000
       seed: 42
@@ -48,7 +48,7 @@ phase1_master_stats_copy:
       # Only used if method = tfce
       tfce:
         start: 0.0
-        step: 0.2
+        step: 0.01
 
       tail: 0                 # -1 | 0 | 1
 
