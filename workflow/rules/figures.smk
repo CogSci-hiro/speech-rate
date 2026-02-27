@@ -29,7 +29,25 @@ def _induced_bands():
     return sorted(str(k) for k in bands_hz.keys())
 
 
-INDUCED_FAMILIES = [f"induced_trf_{band}" for band in _induced_bands()]
+def _induced_target_kinds():
+    ind_cfg = viz_induced_trf_config
+    kinds = ind_cfg.get("target_kinds")
+    if kinds:
+        return [str(k).strip().lower() for k in kinds]
+    return ["raw"]
+
+
+def _induced_family_name(band: str, target_kind: str) -> str:
+    if str(target_kind).strip().lower() == "raw":
+        return f"induced_trf_{str(band)}"
+    return f"induced_trf_{str(band)}_{str(target_kind).strip().lower()}"
+
+
+INDUCED_FAMILIES = [
+    _induced_family_name(band, target_kind)
+    for target_kind in _induced_target_kinds()
+    for band in _induced_bands()
+]
 
 
 def _trf_model_for_regressor(regressor: str) -> str:
@@ -399,12 +417,12 @@ rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
         + EVOKED_TOPO_TARGETS
-        + INDUCED_JOINT_TARGETS
-        + INDUCED_TOPO_TARGETS
+        #+ INDUCED_JOINT_TARGETS
+        #+ INDUCED_TOPO_TARGETS
         + [
             f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
             *EVOKED_RECONSTRUCTION_ERP_TARGETS,
         ]
         + EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
-        + INDUCED_TIMECOURSE_TARGETS
+        #+ INDUCED_TIMECOURSE_TARGETS
         + FOOOF_PSD_TARGETS
