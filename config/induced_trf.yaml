@@ -1,12 +1,13 @@
 # Phase 1 modular config duplicate from config/config.yaml
 induced_trf:
   downsample_hz: 64.0
-  bands: ["theta"]#, "alpha", "beta"]
+  bands: ["theta", "alpha", "beta"]
+  target_kinds: ["raw", "residual"]
 
   bands_hz:
     theta: [4.0, 8.0]
-    #alpha: [8.0, 12.0]
-    #beta:  [13.0, 30.0]
+    alpha: [8.0, 12.0]
+    beta:  [13.0, 30.0]
 
   models:
     - name: "baseline"
@@ -42,3 +43,7 @@ induced_trf:
     step_s: 0.1
     fit_range_hz: [2.0, 40.0]
     edge_drop: "half_window"
+    aperiodic_mode: "fixed"
+    max_n_peaks: 6
+    peak_width_limits_hz: [1.0, 12.0]
+    min_peak_height: 0.0
