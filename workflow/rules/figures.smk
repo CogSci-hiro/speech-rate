@@ -417,12 +417,12 @@ rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
         + EVOKED_TOPO_TARGETS
-        + INDUCED_JOINT_TARGETS
-        + INDUCED_TOPO_TARGETS
+        #+ INDUCED_JOINT_TARGETS
+        #+ INDUCED_TOPO_TARGETS
         + [
             f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
             *EVOKED_RECONSTRUCTION_ERP_TARGETS,
         ]
         + EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
-        + INDUCED_TIMECOURSE_TARGETS
+        #+ INDUCED_TIMECOURSE_TARGETS
         + FOOOF_PSD_TARGETS
