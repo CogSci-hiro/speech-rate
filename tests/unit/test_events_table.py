@@ -57,6 +57,7 @@ def _base_config(tmp_path: Path) -> dict:
             },
             "matching": {
                 "absdiff_window_s": 1.0,
+                "time_lock": "onset",
             },
         },
     }
@@ -178,7 +179,7 @@ def test_other_rate_and_abs_diff_present_for_two_subject_streams(tmp_path: Path)
     assert events_df["abs_diff_sq"].notna().all()
 
 
-def test_other_rate_falls_back_to_nearest_partner_when_window_empty(tmp_path: Path) -> None:
+def test_other_rate_is_nan_when_no_partner_target_in_window(tmp_path: Path) -> None:
     config = _base_config(tmp_path)
     config["events"]["matching"]["absdiff_window_s"] = 0.1
 
@@ -230,12 +231,13 @@ def test_other_rate_falls_back_to_nearest_partner_when_window_empty(tmp_path: Pa
     events_df = build_events_table(config, dataset_df)
 
     assert not events_df.empty
-    assert events_df["other_rate"].notna().all()
-    assert events_df["latency"].notna().all()
-    assert events_df["abs_diff"].notna().all()
+    assert events_df["other_rate"].isna().all()
+    assert events_df["latency"].isna().all()
+    assert events_df["listener"].isna().all()
+    assert events_df["abs_diff"].isna().all()
     assert events_df["self_rate_sq"].notna().all()
-    assert events_df["other_rate_sq"].notna().all()
-    assert events_df["abs_diff_sq"].notna().all()
+    assert events_df["other_rate_sq"].isna().all()
+    assert events_df["abs_diff_sq"].isna().all()
 
 
 def test_latency_is_self_onset_minus_matched_other_offset(tmp_path: Path) -> None:
@@ -281,4 +283,55 @@ def test_latency_is_self_onset_minus_matched_other_offset(tmp_path: Path) -> Non
     row_a = events_df.loc[events_df["speaker"] == "sub-001"].iloc[0]
     row_b = events_df.loc[events_df["speaker"] == "sub-002"].iloc[0]
     assert row_a["latency"] == 1.0 - 1.2
-    assert row_b["latency"] == 0.8 - 2.0
+    assert pd.isna(row_b["latency"])
+
+
+def test_matching_uses_other_offset_not_other_onset_for_onset_timelock(tmp_path: Path) -> None:
+    config = _base_config(tmp_path)
+    config["events"]["matching"]["absdiff_window_s"] = 0.2
+    ann_a = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
+    ann_b = tmp_path / "annotations" / "sub-002_task-dialogue_run-1_ipu.csv"
+    ann_a.parent.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame([{"t_onset": 1.0, "t_offset": 1.6, "syllables": 4, "speaker": "A"}]).to_csv(ann_a, index=False)
+    pd.DataFrame(
+        [
+            {"t_onset": 0.9, "t_offset": 2.0, "syllables": 6, "speaker": "B"},
+            {"t_onset": 0.0, "t_offset": 1.05, "syllables": 4, "speaker": "B"},
+        ]
+    ).to_csv(ann_b, index=False)
+
+    dataset_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "role": "odd",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_a.fif",
+                "audio_path": "/tmp/fake_a.wav",
+                "annotations_path": str(ann_a),
+                "status": "ok",
+                "reason": "",
+            },
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-002",
+                "role": "even",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_b.fif",
+                "audio_path": "/tmp/fake_b.wav",
+                "annotations_path": str(ann_b),
+                "status": "ok",
+                "reason": "",
+            },
+        ]
+    )
+
+    events_df = build_events_table(config, dataset_df)
+    row_a = events_df.loc[events_df["speaker"] == "sub-001"].iloc[0]
+
+    assert row_a["listener"] == "sub-002"
+    assert row_a["latency"] == 1.0 - 1.05

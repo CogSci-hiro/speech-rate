@@ -317,6 +317,13 @@
             "absdiff_window_s": {
               "type": "number",
               "minimum": 0
+            },
+            "time_lock": {
+              "type": "string",
+              "enum": [
+                "onset",
+                "offset"
+              ]
             }
           },
           "additionalProperties": true

@@ -26,6 +26,7 @@ from rate.evoked_trf.utils import (
     score_multichannel_mean_r,
     standardize_design_matrix_foldwise,
 )
+from rate.induced_trf.aperiodic import SlidingAperiodicConfig
 from rate.targets.induced import load_induced_band_run_target
 from rate.trf.design import DesignModelSpec, parse_evoked_models_config
 from rate.trf.engine import TRFResult, run_trf
@@ -38,9 +39,11 @@ from rate.trf import scoring as trf_scoring
 class InducedTrfConfig:
     downsample_hz: float
     bands: tuple[str, ...]
+    target_kinds: tuple[str, ...]
     bands_hz: dict[str, tuple[float, float]]
     edge_drop: str
     edge_window_s: float | None
+    fooof_sliding_cfg: SlidingAperiodicConfig | None
     tmin_s: float
     tmax_s: float
     regularization_type: str
@@ -75,6 +78,19 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         if b not in bands_hz:
             raise ValueError(f"Band '{b}' listed in induced_trf.bands but missing in induced_trf.bands_hz")
 
+    target_kinds_cfg = ind.get("target_kinds")
+    if target_kinds_cfg is None:
+        target_kinds = ("raw",)
+    else:
+        if not isinstance(target_kinds_cfg, list) or not target_kinds_cfg:
+            raise ValueError("induced_trf.target_kinds must be a non-empty list when provided")
+        allowed_target_kinds = {"raw", "residual"}
+        parsed = tuple(str(v).strip().lower() for v in target_kinds_cfg)
+        unknown = sorted(set(parsed) - allowed_target_kinds)
+        if unknown:
+            raise ValueError(f"Unsupported induced_trf.target_kinds values: {unknown}")
+        target_kinds = tuple(dict.fromkeys(parsed))
+
     fooof_sliding = ind.get("fooof_sliding") or {}
     if fooof_sliding is None:
         fooof_sliding = {}
@@ -82,6 +98,34 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         raise ValueError("induced_trf.fooof_sliding must be a mapping")
     edge_drop = str(fooof_sliding.get("edge_drop", "none"))
     edge_window_s = float(fooof_sliding["window_s"]) if "window_s" in fooof_sliding else None
+    fooof_sliding_cfg: SlidingAperiodicConfig | None = None
+    if "residual" in set(target_kinds):
+        required = ("window_s", "step_s", "fit_range_hz")
+        missing = [k for k in required if k not in fooof_sliding]
+        if missing:
+            raise ValueError(
+                "induced_trf.fooof_sliding must define window_s, step_s, fit_range_hz when target_kinds includes "
+                f"'residual' (missing: {missing})"
+            )
+        fit_range_hz = fooof_sliding.get("fit_range_hz")
+        if not isinstance(fit_range_hz, (list, tuple)) or len(fit_range_hz) != 2:
+            raise ValueError("induced_trf.fooof_sliding.fit_range_hz must be [fmin, fmax]")
+        peak_width_limits_hz = fooof_sliding.get("peak_width_limits_hz", [1.0, 12.0])
+        if not isinstance(peak_width_limits_hz, (list, tuple)) or len(peak_width_limits_hz) != 2:
+            raise ValueError("induced_trf.fooof_sliding.peak_width_limits_hz must be [fmin, fmax]")
+        fooof_sliding_cfg = SlidingAperiodicConfig(
+            window_s=float(fooof_sliding["window_s"]),
+            step_s=float(fooof_sliding["step_s"]),
+            fit_range_hz=(float(fit_range_hz[0]), float(fit_range_hz[1])),
+            edge_drop=edge_drop,
+            aperiodic_mode=str(fooof_sliding.get("aperiodic_mode", "fixed")).strip().lower(),
+            peak_width_limits_hz=(float(peak_width_limits_hz[0]), float(peak_width_limits_hz[1])),
+            max_n_peaks=int(fooof_sliding.get("max_n_peaks", 6)),
+            min_peak_height=float(fooof_sliding.get("min_peak_height", 0.0)),
+            peak_threshold=(
+                float(fooof_sliding["peak_threshold"]) if ("peak_threshold" in fooof_sliding) else None
+            ),
+        )
 
     lags_cfg = ev.get("lags_s") or {}
     if not isinstance(lags_cfg, dict):
@@ -106,9 +150,11 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
     return InducedTrfConfig(
         downsample_hz=get_project_downsample_hz(cfg, fallback_section="induced_trf"),
         bands=bands,
+        target_kinds=target_kinds,
         bands_hz=bands_hz,
         edge_drop=edge_drop,
         edge_window_s=edge_window_s,
+        fooof_sliding_cfg=fooof_sliding_cfg,
         tmin_s=float(lags_cfg["tmin"]),
         tmax_s=float(lags_cfg["tmax"]),
         regularization_type=regularization_type,
@@ -118,12 +164,16 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
     )
 
 
-def _analysis_name_for_band(band: str) -> str:
-    return f"induced_trf_{str(band)}"
+def _analysis_name_for_band(band: str, *, target_kind: str) -> str:
+    band_name = str(band)
+    kind = str(target_kind).strip().lower()
+    if kind == "raw":
+        return f"induced_trf_{band_name}"
+    return f"induced_trf_{band_name}_{kind}"
 
 
-def _subject_dir(*, out_dir: Path, band: str, dyad_id: str, subject: str) -> Path:
-    return out_dir / _analysis_name_for_band(band) / "subjects" / str(dyad_id) / str(subject)
+def _subject_dir(*, out_dir: Path, band: str, target_kind: str, dyad_id: str, subject: str) -> Path:
+    return out_dir / _analysis_name_for_band(band, target_kind=target_kind) / "subjects" / str(dyad_id) / str(subject)
 
 
 def _prepare_induced_subject_runs(
@@ -133,10 +183,19 @@ def _prepare_induced_subject_runs(
     dyad_id: str,
     subject: str,
     band: str,
+    target_kind: str,
     events: pd.DataFrame,
     ds_index: pd.DataFrame,
     picks: str | list[str],
-) -> tuple[list[int], dict[int, np.ndarray], dict[int, np.ndarray], dict[int, dict[str, np.ndarray]], dict[int, dict[str, list[str]]], float]:
+) -> tuple[
+    list[int],
+    dict[int, np.ndarray],
+    dict[int, np.ndarray],
+    dict[int, dict[str, np.ndarray]],
+    dict[int, dict[str, list[str]]],
+    dict[int, pd.DataFrame],
+    float,
+]:
     ev_subj = events.loc[
         (events["dyad_id"].astype(str).str.strip() == str(dyad_id).strip())
         & (events["subject_id"].astype(str).str.strip() == str(subject).strip())
@@ -151,6 +210,7 @@ def _prepare_induced_subject_runs(
     per_run_y: dict[int, np.ndarray] = {}
     per_run_X: dict[int, dict[str, np.ndarray]] = {}
     per_run_feature_names: dict[int, dict[str, list[str]]] = {}
+    per_run_aperiodic: dict[int, pd.DataFrame] = {}
     sfreqs: set[float] = set()
     emg_subject = load_subject_emg(out_dir=out_dir, dyad_id=dyad_id, subject=subject)
 
@@ -162,6 +222,8 @@ def _prepare_induced_subject_runs(
             band=band,
             bands_hz=cfg.bands_hz,
             downsample_hz=cfg.downsample_hz,
+            target_kind=target_kind,
+            fooof_sliding_cfg=cfg.fooof_sliding_cfg,
             edge_drop=cfg.edge_drop,
             edge_window_s=cfg.edge_window_s,
             picks=picks,
@@ -190,11 +252,13 @@ def _prepare_induced_subject_runs(
         per_run_y[int(run)] = np.asarray(run_target.y, dtype=float)
         per_run_X[int(run)] = X_by_model
         per_run_feature_names[int(run)] = names_by_model
+        if run_target.aperiodic_time_series is not None:
+            per_run_aperiodic[int(run)] = run_target.aperiodic_time_series.copy()
 
     if len(sfreqs) != 1:
         raise ValueError(f"Expected identical induced sfreq across runs; got {sorted(sfreqs)}")
     sfreq_hz = float(next(iter(sfreqs)))
-    return runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, sfreq_hz
+    return runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, sfreq_hz
 
 
 def write_subject_output(
@@ -204,20 +268,26 @@ def write_subject_output(
     dyad_id: str,
     subject: str,
     band: str,
+    target_kind: str = "raw",
     picks: str | list[str] = "eeg",
 ) -> Path:
     trf_cfg = parse_induced_trf_config(cfg)
     if str(band) not in trf_cfg.bands:
         raise ValueError(f"Band '{band}' not enabled in induced_trf.bands={list(trf_cfg.bands)}")
+    if str(target_kind).strip().lower() not in set(trf_cfg.target_kinds):
+        raise ValueError(
+            f"Target kind '{target_kind}' not enabled in induced_trf.target_kinds={list(trf_cfg.target_kinds)}"
+        )
 
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
-    runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_induced_subject_runs(
+    runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, sfreq_hz = _prepare_induced_subject_runs(
         cfg=trf_cfg,
         out_dir=out_dir,
         dyad_id=str(dyad_id),
         subject=str(subject),
         band=str(band),
+        target_kind=str(target_kind),
         events=events,
         ds_index=ds_index,
         picks=picks,
@@ -288,7 +358,13 @@ def write_subject_output(
         outer_scores=outer_scores,
     )
 
-    subject_dir = _subject_dir(out_dir=out_dir, band=str(band), dyad_id=str(dyad_id), subject=str(subject))
+    subject_dir = _subject_dir(
+        out_dir=out_dir,
+        band=str(band),
+        target_kind=str(target_kind),
+        dyad_id=str(dyad_id),
+        subject=str(subject),
+    )
     subject_dir.mkdir(parents=True, exist_ok=True)
     out_path = subject_dir / "scores.parquet"
     subject_tables.summary_fold_sorted.to_parquet(out_path, index=False)
@@ -299,6 +375,18 @@ def write_subject_output(
     subject_tables.alpha_grid.to_parquet(subject_dir / "alpha_grid_scores.parquet", index=False)
     subject_tables.inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
     subject_tables.outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
+
+    if per_run_aperiodic:
+        aperiodic_dir = subject_dir / "targets" / "aperiodic"
+        aperiodic_dir.mkdir(parents=True, exist_ok=True)
+        for run in runs:
+            if run not in per_run_aperiodic:
+                continue
+            run_df = per_run_aperiodic[run].copy()
+            run_df.insert(0, "run", int(run))
+            run_df.insert(0, "subject", str(subject))
+            run_df.insert(0, "dyad_id", str(dyad_id))
+            run_df.to_parquet(aperiodic_dir / f"run-{int(run):02d}.parquet", index=False)
 
     for model in trf_cfg.models:
         model_name = model.model_name
@@ -362,11 +450,17 @@ def aggregate_subject_scores(*, out_dir: Path) -> pd.DataFrame:
         analysis_name = str(path.parents[3].name)
         if analysis_name.startswith("induced_trf_"):
             df = df.copy()
-            df["band"] = analysis_name.removeprefix("induced_trf_")
+            remainder = analysis_name.removeprefix("induced_trf_")
+            if remainder.endswith("_residual"):
+                df["target_kind"] = "residual"
+                df["band"] = remainder[: -len("_residual")]
+            else:
+                df["target_kind"] = "raw"
+                df["band"] = remainder
         frames.append(df)
 
     scores = pd.concat(frames, ignore_index=True)
-    sort_cols = [c for c in ["band", "dyad_id", "subject", "run", "model", "fold_id"] if c in scores.columns]
+    sort_cols = [c for c in ["band", "target_kind", "dyad_id", "subject", "run", "model", "fold_id"] if c in scores.columns]
     if sort_cols:
         scores = scores.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
     return scores

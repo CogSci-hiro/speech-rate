@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from rate.events.features import SUPPORTED_TIME_METHODS, add_event_rate_features
+from rate.events.features import SUPPORTED_MATCHING_TIME_LOCKS, SUPPORTED_TIME_METHODS, add_event_rate_features
 from rate.events.io import EventsTableError, load_ipu_annotations
 
 LOGGER = logging.getLogger(__name__)
@@ -14,6 +14,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_IPU_MIN_DURATION_S = 0.30
 DEFAULT_IPU_MIN_SYLLABLES = 3
 DEFAULT_ABSDIFF_WINDOW_S = 1.0
+DEFAULT_MATCHING_TIME_LOCK = "onset"
 DEFAULT_TIME_WITHIN_RUN_NORMALIZE = True
 DEFAULT_TIME_WITHIN_RUN_METHOD = "run_duration"
 
@@ -69,7 +70,18 @@ def _extract_events_config(config: Mapping[str, Any]) -> dict[str, Any]:
         "normalize_time_within_run": bool(time_cfg.get("normalize", DEFAULT_TIME_WITHIN_RUN_NORMALIZE)),
         "time_within_run_method": method,
         "absdiff_window_s": float(matching_cfg.get("absdiff_window_s", DEFAULT_ABSDIFF_WINDOW_S)),
+        "matching_time_lock": str(matching_cfg.get("time_lock", DEFAULT_MATCHING_TIME_LOCK)),
     }
+
+
+def _validate_matching_config(events_cfg: Mapping[str, Any]) -> None:
+    """Validate matching sub-configuration values."""
+    time_lock = str(events_cfg["matching_time_lock"])
+    if time_lock not in SUPPORTED_MATCHING_TIME_LOCKS:
+        raise EventsTableError(
+            "Unsupported events.matching.time_lock="
+            f"{time_lock!r}; expected one of {sorted(SUPPORTED_MATCHING_TIME_LOCKS)}."
+        )
 
 
 def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[str, Any]) -> pd.DataFrame:
@@ -130,6 +142,7 @@ def _add_features_by_group(events_df: pd.DataFrame, events_cfg: Mapping[str, Any
                 absdiff_window_s=float(events_cfg["absdiff_window_s"]),
                 normalize=bool(events_cfg["normalize_time_within_run"]),
                 method=str(events_cfg["time_within_run_method"]),
+                matching_time_lock=str(events_cfg["matching_time_lock"]),
             )
         except ValueError as exc:
             raise EventsTableError(str(exc)) from exc
@@ -164,6 +177,7 @@ def _assign_deterministic_event_ids(events_df: pd.DataFrame) -> pd.DataFrame:
 def build_events_table(config: Mapping[str, Any], dataset_index_df: pd.DataFrame) -> pd.DataFrame:
     """Build canonical events table from dataset index rows."""
     events_cfg = _extract_events_config(config)
+    _validate_matching_config(events_cfg)
     if dataset_index_df.empty:
         return pd.DataFrame(columns=REQUIRED_EVENTS_COLUMNS)
 

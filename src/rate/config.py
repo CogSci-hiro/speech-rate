@@ -17,6 +17,7 @@ DEFAULT_IPU_MIN_SYLLABLES = 3
 DEFAULT_TIME_WITHIN_RUN_NORMALIZE = True
 DEFAULT_TIME_WITHIN_RUN_METHOD = "run_duration"
 DEFAULT_MATCHING_ABSDIFF_WINDOW_S = 1.0
+DEFAULT_MATCHING_TIME_LOCK = "onset"
 DEFAULT_DEBUG_ENABLED = False
 DEFAULT_DEBUG_MAX_FILES: int | None = None
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config" / "schema.json"
@@ -185,6 +186,7 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(matching_value, dict):
         raise ConfigValidationError("`events.matching` must be a mapping.")
     matching_value.setdefault("absdiff_window_s", DEFAULT_MATCHING_ABSDIFF_WINDOW_S)
+    matching_value.setdefault("time_lock", DEFAULT_MATCHING_TIME_LOCK)
 
     debug_value = resolved.setdefault("debug", {})
     if debug_value is None:

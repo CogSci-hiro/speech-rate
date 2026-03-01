@@ -22,7 +22,25 @@ def _induced_bands():
     return sorted(str(k) for k in bands_hz.keys())
 
 
-INDUCED_ANALYSES = [f"induced_trf_{band}" for band in _induced_bands()]
+def _induced_target_kinds():
+    ind_cfg = stats_induced_trf_config
+    kinds = ind_cfg.get("target_kinds")
+    if kinds:
+        return [str(k).strip().lower() for k in kinds]
+    return ["raw"]
+
+
+def _induced_analysis_name(band: str, target_kind: str) -> str:
+    if str(target_kind).strip().lower() == "raw":
+        return f"induced_trf_{str(band)}"
+    return f"induced_trf_{str(band)}_{str(target_kind).strip().lower()}"
+
+
+INDUCED_ANALYSES = [
+    _induced_analysis_name(band, target_kind)
+    for target_kind in _induced_target_kinds()
+    for band in _induced_bands()
+]
 
 
 def _branch_behavior_model_features(branch_cfg, branch_key):

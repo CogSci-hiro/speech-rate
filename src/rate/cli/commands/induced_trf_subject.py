@@ -20,6 +20,11 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--dyad-id", required=True, help="Dyad ID (e.g., dyad-001).")
     parser.add_argument("--subject", required=True, help="Subject ID (e.g., sub-001).")
     parser.add_argument("--band", required=True, help="Band name (e.g., theta).")
+    parser.add_argument(
+        "--target-kind",
+        default="raw",
+        help="Induced target kind: raw (Hilbert power) or residual (sliding-window FOOOF residual).",
+    )
     parser.add_argument("--config", default="config/config.yaml", help="Path to YAML config file.")
     parser.add_argument("--schema", default="config/schema.json", help="Path to JSON schema file.")
     parser.add_argument("--out-dir", help="Optional override for cfg['paths']['out_dir'].")
@@ -50,13 +55,15 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
             dyad_id=str(args.dyad_id),
             subject=str(args.subject),
             band=str(args.band),
+            target_kind=str(args.target_kind),
         )
     except Exception as exc:
         LOGGER.error(
-            "induced-trf-subject failed for dyad_id=%s subject=%s band=%s: %s",
+            "induced-trf-subject failed for dyad_id=%s subject=%s band=%s target_kind=%s: %s",
             args.dyad_id,
             args.subject,
             args.band,
+            args.target_kind,
             exc,
         )
         raise

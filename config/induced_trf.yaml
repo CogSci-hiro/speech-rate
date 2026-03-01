@@ -1,6 +1,6 @@
 # Phase 1 modular config duplicate from config/config.yaml
 induced_trf:
-  downsample_hz: 64.0
+  downsample_hz: 16.0
   bands: ["theta", "alpha", "beta"]
   target_kinds: ["raw", "residual"]
 

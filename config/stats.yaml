@@ -20,7 +20,7 @@ stats:
   kernel_cluster:
     method: "tfce"   # tfce | threshold
     allow_placeholder_outputs: false  # debug-only; when true writes zero-filled fallback outputs on failure
-    n_permutations: 10000
+    n_permutations: 1000
     seed: 42
     threshold_p: 0.001  # Only used if method = threshold
     tfce:
@@ -39,7 +39,7 @@ phase1_master_stats_copy:
 
       method: "tfce"          # tfce | threshold
 
-      n_permutations: 10000
+      n_permutations: 1000
       seed: 42
 
       # Only used if method = threshold

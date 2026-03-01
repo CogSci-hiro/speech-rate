@@ -108,7 +108,9 @@ def run_two_level_kernel0(
         n_lags=n_lags,
         montage_name=config.montage_name,
     )
-    z_flat = subject_z_maps.reshape(n_subjects, n_channels * n_lags)
+    # `combine_adjacency(n_lags, ch_adj)` expects feature indexing with lag/time as
+    # the first dimension and channel as the second.
+    z_flat = np.transpose(subject_z_maps, (0, 2, 1)).reshape(n_subjects, n_lags * n_channels)
 
     group_cluster = run_cluster_1samp(data=z_flat, adjacency=adjacency, config=config)
 

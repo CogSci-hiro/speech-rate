@@ -157,7 +157,7 @@ def run_trf_figures(
         )
 
         if figure == FIGURE_JOINT:
-            alpha = float(config.get("reporting", {}).get("alpha", 0.05))
+            alpha = _get_viz_significance_p_threshold(config)
             stat_map = _load_topomap_stat_map(
                 out_dir=out_dir,
                 family=family,
@@ -199,7 +199,7 @@ def run_trf_figures(
             )
             return
 
-        alpha = float(config.get("reporting", {}).get("alpha", 0.05))
+        alpha = _get_viz_significance_p_threshold(config)
         stat_map = _load_topomap_stat_map(
             out_dir=out_dir,
             family=family,
@@ -412,7 +412,7 @@ def run_trf_figures(
         mean_delta = np.asarray(np.load(stats_dir / "mean_delta_r2.npy"), dtype=float).reshape(-1)
         ch_names = _load_reconstruction_erp_r2_channel_names(stats_dir=stats_dir)
         info = _make_reconstruction_topomap_info(config=config, mne=mne, ch_names=ch_names)
-        alpha = float(config.get("reporting", {}).get("alpha", 0.05))
+        alpha = _get_viz_significance_p_threshold(config)
         sig_mask = _load_reconstruction_erp_r2_significance_mask(stats_dir=stats_dir, alpha=alpha, n_channels=mean_delta.size)
         plot_spatial_stat_topomap(
             stat=mean_delta,
@@ -518,6 +518,27 @@ def _get_fooof_psd_quantiles(config: Mapping[str, Any]) -> int:
     if q < 2:
         raise ValueError("config.reporting.fooof.psd_quantiles must be >= 2")
     return q
+
+
+def _get_viz_significance_p_threshold(config: Mapping[str, Any]) -> float:
+    """Return p-value cutoff for figure significance masks."""
+    viz_block = config.get("viz", {})
+    if isinstance(viz_block, Mapping):
+        sig_block = viz_block.get("significance", {})
+        if isinstance(sig_block, Mapping) and "p_value_threshold" in sig_block:
+            value = float(sig_block["p_value_threshold"])
+            if not (0.0 < value < 1.0):
+                raise ValueError("config.viz.significance.p_value_threshold must be in (0, 1)")
+            return value
+
+    # Backward-compatible fallback for existing viz configs.
+    reporting = config.get("reporting", {})
+    if isinstance(reporting, Mapping):
+        value = float(reporting.get("alpha", 0.05))
+        if not (0.0 < value < 1.0):
+            raise ValueError("config.reporting.alpha must be in (0, 1)")
+        return value
+    return 0.05
 
 
 def _get_fooof_psd_log_y(config: Mapping[str, Any]) -> bool:

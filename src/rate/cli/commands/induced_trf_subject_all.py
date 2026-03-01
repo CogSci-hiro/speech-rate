@@ -35,6 +35,12 @@ def add_subparser(subparsers) -> ArgumentParser:
         dest="bands",
         help="Optional induced-band filter (e.g., theta). Can be repeated.",
     )
+    parser.add_argument(
+        "--target-kind",
+        action="append",
+        dest="target_kinds",
+        help="Optional target-kind filter (raw or residual). Can be repeated.",
+    )
     parser.add_argument("--done-file", help="Optional marker file path to write on success.")
     parser.set_defaults(command_func=run)
     return parser
@@ -85,6 +91,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
 
     cfg_ind = parse_induced_trf_config(resolved)
     enabled_bands = list(cfg_ind.bands)
+    enabled_target_kinds = list(cfg_ind.target_kinds)
     if args.bands:
         requested = [str(b).strip() for b in args.bands if str(b).strip()]
         bad = sorted(set(requested) - set(enabled_bands))
@@ -94,16 +101,27 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     else:
         bands = enabled_bands
 
-    for band in bands:
-        for dyad_id, subject in pairs:
-            out_path = write_subject_output(
-                cfg=resolved,
-                out_dir=out_dir,
-                dyad_id=dyad_id,
-                subject=subject,
-                band=band,
-            )
-            LOGGER.info("Wrote induced TRF subject scores: %s", out_path)
+    if args.target_kinds:
+        requested_target_kinds = [str(v).strip().lower() for v in args.target_kinds if str(v).strip()]
+        bad_target_kinds = sorted(set(requested_target_kinds) - set(enabled_target_kinds))
+        if bad_target_kinds:
+            raise ValueError(f"Requested target kinds not enabled in config induced_trf.target_kinds: {bad_target_kinds}")
+        target_kinds = [k for k in enabled_target_kinds if k in set(requested_target_kinds)]
+    else:
+        target_kinds = enabled_target_kinds
+
+    for target_kind in target_kinds:
+        for band in bands:
+            for dyad_id, subject in pairs:
+                out_path = write_subject_output(
+                    cfg=resolved,
+                    out_dir=out_dir,
+                    dyad_id=dyad_id,
+                    subject=subject,
+                    band=band,
+                    target_kind=target_kind,
+                )
+                LOGGER.info("Wrote induced TRF subject scores: %s", out_path)
 
     if args.done_file:
         done = Path(args.done_file)

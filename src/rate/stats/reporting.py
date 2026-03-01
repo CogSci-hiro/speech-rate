@@ -63,7 +63,8 @@ def write_two_level_cluster_result(
 
     t_obs_flat = np.asarray(result.group_cluster.t_obs, dtype=float).reshape(-1)
     if t_obs_flat.size == n_tests:
-        t_obs_map = t_obs_flat.reshape(n_channels, n_lags).T
+        # Flattening in stage-2 clustering is lag-major then channel-major.
+        t_obs_map = t_obs_flat.reshape(n_lags, n_channels)
         np.save(out_path / "t_obs_map.npy", t_obs_map)
 
     # Save grand-average z-scored TRF as an Evoked list (single evoked entry).
@@ -117,7 +118,7 @@ def write_two_level_cluster_result(
                 n_bins=int(len(idx)),
             )
         )
-    np.save(out_path / "cluster_labels.npy", cluster_labels_flat.reshape(n_channels, n_lags).T)
+    np.save(out_path / "cluster_labels.npy", cluster_labels_flat.reshape(n_lags, n_channels))
 
     columns = ["cluster_id", "p_value", "n_bins"]
     if rows:

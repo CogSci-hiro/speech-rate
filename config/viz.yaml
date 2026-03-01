@@ -3,8 +3,12 @@
 paths:
   out_dir: "/Volumes/work-4T/speech-rate-testing"
 
+viz:
+  significance:
+    p_value_threshold: 0.05
+
 reporting:
-  alpha: 0.05
+  alpha: 0.01
   tables_format: "csv"  # csv | parquet
   trf:
     regressors: ["self_rate", "other_rate", "abs_diff"]
