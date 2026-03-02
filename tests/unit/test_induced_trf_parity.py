@@ -128,6 +128,67 @@ def test_stats_kernel0_runs_on_induced_output_without_modification(tmp_path: Pat
     assert "write_two_level_cluster_result" in calls
 
 
+def test_stats_kernel0_prefers_subject_channel_names_for_induced_adjacency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MNE_HOME", str(tmp_path / ".mne"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    cmd_stats_kernel0 = importlib.import_module("rate.cli.commands.stats_kernel0")
+
+    model_dir = _model_dir(tmp_path, "induced_trf_theta")
+    model_dir.mkdir(parents=True, exist_ok=True)
+    np.save(model_dir / "kernels_outer.npy", np.zeros((2, 4, 1, 3), dtype=float))
+    np.save(model_dir / "lags.npy", np.array([-0.1, 0.0, 0.1], dtype=float))
+    np.save(model_dir / "channel_names.npy", np.array(["Oz", "Pz", "Cz", "Fz"], dtype=str))
+
+    calls: dict[str, object] = {}
+
+    class _Montage:
+        ch_names = ["Fz", "Cz", "Pz", "Oz"]
+
+    monkeypatch.setattr(cmd_stats_kernel0, "make_standard_montage", lambda _name: _Montage())
+    monkeypatch.setattr(
+        cmd_stats_kernel0,
+        "run_two_level_kernel0",
+        lambda **kwargs: calls.setdefault("run_two_level_kernel0", kwargs) or object(),
+    )
+    monkeypatch.setattr(
+        cmd_stats_kernel0,
+        "write_two_level_cluster_result",
+        lambda **kwargs: calls.setdefault("write_two_level_cluster_result", kwargs) or None,
+    )
+
+    cfg = {
+        "paths": {"out_dir": str(tmp_path)},
+        "project": {"random_seed": 0},
+        "reporting": {"tables_format": "parquet"},
+        "stats": {
+            "kernel_cluster": {
+                "adjacency": {"montage_name": "standard_1020"},
+                "method": "threshold",
+                "tail": 0,
+                "seed": 0,
+                "cluster": {"n_permutations": 8, "threshold_p": 0.05},
+                "tfce": {"start": 0.0, "step": 0.2},
+            }
+        },
+    }
+    args = Namespace(
+        analysis="induced_trf_theta",
+        model="baseline",
+        feature_index=0,
+        feature_name="self_onset_impulse",
+        config="config/config.yaml",
+        schema="config/schema.json",
+    )
+
+    rc = cmd_stats_kernel0.run(args, config=cfg)
+    assert rc == 0
+    assert calls["run_two_level_kernel0"]["ch_names"] == ["Oz", "Pz", "Cz", "Fz"]
+
+
 def _seed_kernel_subjects(
     root: Path,
     *,

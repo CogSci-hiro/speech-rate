@@ -9,7 +9,7 @@ trigger unnecessary recomputation.
 
 - Compute layer (heavy rules): `config/config.yaml` plus compute-related modular configs
   (`config/trf.yaml`, `config/evoked_trf.yaml`, `config/induced_trf.yaml`,
-  `config/fooof.yaml`, `config/ddc.yaml`).
+  `config/fooof.yaml`).
 - Inference layer (stats rules): `config/stats.yaml`
 - Visualization layer (figure rules): `config/viz.yaml`
 

@@ -7,8 +7,7 @@
     "dataset",
     "events",
     "evoked_trf",
-    "induced_trf",
-    "ddc"
+    "induced_trf"
   ],
   "properties": {
     "paths": {
@@ -522,9 +521,6 @@
           "additionalProperties": true
         }
       ]
-    },
-    "ddc": {
-      "type": "object"
     },
     "reporting": {
       "type": "object"

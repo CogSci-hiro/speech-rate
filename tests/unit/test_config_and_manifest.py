@@ -26,7 +26,6 @@ def _minimal_config(out_dir: Path) -> dict:
         "events": {},
         "evoked_trf": {},
         "induced_trf": {},
-        "ddc": {},
         "reporting": {},
     }
 
@@ -59,7 +58,6 @@ def test_schema_rejects_missing_required_key(tmp_path: Path) -> None:
         "events": {},
         "evoked_trf": {},
         "induced_trf": {},
-        "ddc": {},
         "reporting": {},
     }
     _write_yaml(cfg_path, cfg_payload)

@@ -1,3 +1,17 @@
+BASELINE_CONTROL_REGRESSORS = {
+    "emg",
+    "self_onset_impulse",
+    "other_offset_impulse",
+    "self_ipu_onset",
+    "other_ipu_offset",
+}
+DEFAULT_BASELINE_VIZ_REGRESSORS = (
+    "self_onset_impulse",
+    "other_offset_impulse",
+    "emg",
+)
+
+
 def _viz_out_dir() -> str:
     # Read from viz.yaml (loaded manually in Snakefile) so visualization changes do
     # not retrigger compute jobs via the tracked Snakemake `config`.
@@ -63,7 +77,8 @@ INDUCED_FAMILIES = [
 
 
 def _trf_model_for_regressor(regressor: str) -> str:
-    return "baseline" if str(regressor) == "emg" else str(regressor)
+    value = str(regressor).strip()
+    return "baseline" if value in BASELINE_CONTROL_REGRESSORS else value
 
 
 def _active_model_names(branch_cfg, branch_key: str):
@@ -89,12 +104,21 @@ def _configured_regressors_for_family(family: str):
 
 
 def _evoked_kernel_input(wildcards):
-    model = _trf_model_for_regressor(str(wildcards.regressor))
+    regressor = str(wildcards.regressor).strip()
+    model = _trf_model_for_regressor(regressor)
+    if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
+        # Baseline controls may be rendered from subject-level FIFs even when
+        # stats-level grand-average files are not present.
+        return f"{_viz_out_dir()}/evoked_trf/subjects"
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
 
 
 def _evoked_cluster_input(wildcards):
-    model = _trf_model_for_regressor(str(wildcards.regressor))
+    regressor = str(wildcards.regressor).strip()
+    model = _trf_model_for_regressor(regressor)
+    if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
+        # No cluster table is required for baseline-control rendering fallback.
+        return f"{_viz_out_dir()}/evoked_trf/subjects"
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
 
 
@@ -130,6 +154,11 @@ def _has_evoked_models(models):
 
 
 AVAILABLE_EVOKED_REGRESSORS = _configured_regressors_for_family("evoked_trf")
+if "baseline" in ACTIVE_EVOKED_MODELS:
+    AVAILABLE_EVOKED_REGRESSORS = list(dict.fromkeys([
+        *AVAILABLE_EVOKED_REGRESSORS,
+        *DEFAULT_BASELINE_VIZ_REGRESSORS,
+    ]))
 AVAILABLE_EVOKED_RECONSTRUCTION_R2_MODELS = [
     str(model) for model in sorted(ACTIVE_EVOKED_MODELS)
     if str(model) != "baseline"

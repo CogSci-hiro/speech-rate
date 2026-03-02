@@ -10,6 +10,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from rate.config import ConfigValidationError, get_project_downsample_hz, load_and_validate_config
+from rate.dataset.discover import EEG_SUFFIXES, find_unit_path, normalize_subject_id
 from rate.features.emg import compute_emg_envelope
 from rate.features.io import write_subject_emg_parquet
 
@@ -72,6 +73,38 @@ def _subject_rows(ds_index: pd.DataFrame, *, dyad_id: str, subject: str) -> pd.D
     return rows
 
 
+def _resolve_bids_raw_eeg_path(
+    *,
+    cfg: Mapping[str, Any],
+    dyad_id: str,
+    subject: str,
+    task: str,
+    run: int,
+) -> Path:
+    paths_cfg = cfg.get("paths", {})
+    if not isinstance(paths_cfg, Mapping) or "bids_dir" not in paths_cfg:
+        raise ValueError("config.paths.bids_dir is required to resolve raw BIDS EEG for EMG extraction.")
+    bids_dir = Path(str(paths_cfg["bids_dir"])).expanduser()
+    if not bids_dir.exists():
+        raise FileNotFoundError(f"BIDS directory not found: {bids_dir}")
+
+    resolved_subject = normalize_subject_id(subject)
+    found = find_unit_path(
+        root_dir=bids_dir,
+        dyad_id=str(dyad_id),
+        subject_id=resolved_subject,
+        task=str(task),
+        run=str(int(run)),
+        suffixes=EEG_SUFFIXES,
+    )
+    if found is None:
+        raise FileNotFoundError(
+            "No raw BIDS EEG file found for "
+            f"dyad_id={dyad_id}, subject_id={resolved_subject}, task={task}, run={run} under {bids_dir}"
+        )
+    return Path(found)
+
+
 def compute_subject_emg(
     *,
     cfg: Mapping[str, Any],
@@ -104,7 +137,18 @@ def compute_subject_emg(
 
     for row in rows.itertuples(index=False):
         run = int(row.run_num)
-        eeg_path = Path(str(row.eeg_path)).expanduser()
+        task = str(getattr(row, "task", "")).strip()
+        if not task:
+            raise ValueError(
+                "dataset index row is missing task; cannot resolve raw BIDS EEG path for EMG extraction."
+            )
+        eeg_path = _resolve_bids_raw_eeg_path(
+            cfg=cfg,
+            dyad_id=str(dyad_id),
+            subject=str(subject),
+            task=task,
+            run=run,
+        )
         times, emg_env = compute_emg_envelope(
             eeg_path=eeg_path,
             target_sfreq=target_sfreq,

@@ -20,7 +20,6 @@ def _minimal_config(out_dir: Path) -> dict:
         "events": {},
         "evoked_trf": {},
         "induced_trf": {},
-        "ddc": {},
         "reporting": {},
     }
 

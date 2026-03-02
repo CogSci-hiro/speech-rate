@@ -14,6 +14,7 @@ class TRFResult:
     chosen_alpha: np.ndarray
     outer_scores: pd.DataFrame
     lags: np.ndarray
+    channel_names: tuple[str, ...] | None = None
     predictions_by_fold: dict[int, np.ndarray] | None = None
     inner_scores: pd.DataFrame | None = None
     best_alpha_table: pd.DataFrame | None = None

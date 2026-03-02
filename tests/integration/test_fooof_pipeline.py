@@ -54,7 +54,6 @@ def _make_config(out_dir: Path) -> dict:
                 }
             },
         },
-        "ddc": {},
         "reporting": {},
         "random_seed": 123,
     }

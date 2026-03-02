@@ -74,7 +74,6 @@ trf_config = _load_yaml_config("config/trf.yaml")
 evoked_trf_config = _load_yaml_config("config/evoked_trf.yaml")
 induced_trf_config = _load_yaml_config("config/induced_trf.yaml")
 fooof_config = _load_yaml_config("config/fooof.yaml")
-ddc_config = _load_yaml_config("config/ddc.yaml")
 
 # Load viz/stats configs manually so edits there do not become Snakemake `config`
 # changes that retrigger expensive compute jobs.
@@ -86,7 +85,6 @@ for _name, _cfg in (
     ("evoked_trf_config", evoked_trf_config),
     ("induced_trf_config", induced_trf_config),
     ("fooof_config", fooof_config),
-    ("ddc_config", ddc_config),
     ("viz_config", viz_config),
     ("stats_config", stats_config),
 ):

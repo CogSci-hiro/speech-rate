@@ -216,6 +216,7 @@ def _prepare_induced_subject_runs(
     dict[int, dict[str, np.ndarray]],
     dict[int, dict[str, list[str]]],
     dict[int, pd.DataFrame],
+    tuple[str, ...],
     float,
 ]:
     ev_subj = events.loc[
@@ -233,6 +234,7 @@ def _prepare_induced_subject_runs(
     per_run_X: dict[int, dict[str, np.ndarray]] = {}
     per_run_feature_names: dict[int, dict[str, list[str]]] = {}
     per_run_aperiodic: dict[int, pd.DataFrame] = {}
+    channel_names_ref: tuple[str, ...] | None = None
     sfreqs: set[float] = set()
     emg_subject = load_subject_emg(out_dir=out_dir, dyad_id=dyad_id, subject=subject)
 
@@ -250,6 +252,10 @@ def _prepare_induced_subject_runs(
             edge_window_s=cfg.edge_window_s,
             picks=picks,
         )
+        if channel_names_ref is None:
+            channel_names_ref = tuple(str(ch) for ch in run_target.channel_names)
+        elif tuple(str(ch) for ch in run_target.channel_names) != channel_names_ref:
+            raise ValueError("Induced target channel names are inconsistent across runs for one subject.")
         sfreqs.add(float(run_target.sfreq_hz))
         ev_run = ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy()
         emg_run = emg_for_run_aligned(
@@ -279,8 +285,10 @@ def _prepare_induced_subject_runs(
 
     if len(sfreqs) != 1:
         raise ValueError(f"Expected identical induced sfreq across runs; got {sorted(sfreqs)}")
+    if channel_names_ref is None:
+        raise ValueError("No channel names found for induced subject runs.")
     sfreq_hz = float(next(iter(sfreqs)))
-    return runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, sfreq_hz
+    return runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, channel_names_ref, sfreq_hz
 
 
 def write_subject_output(
@@ -314,7 +322,7 @@ def write_subject_output(
 
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
-    runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, sfreq_hz = _prepare_induced_subject_runs(
+    runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, channel_names, sfreq_hz = _prepare_induced_subject_runs(
         cfg=trf_cfg,
         out_dir=out_dir,
         dyad_id=str(dyad_id),
@@ -435,6 +443,7 @@ def write_subject_output(
                 chosen_alpha=np.asarray(trf_result.chosen_alpha, dtype=float),
                 outer_scores=model_outer,
                 lags=np.asarray(trf_result.lags, dtype=float),
+                channel_names=tuple(channel_names),
                 predictions_by_fold=None,
                 reconstruction_r2=trf_result.reconstruction_r2,
             ),

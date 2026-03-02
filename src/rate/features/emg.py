@@ -100,7 +100,7 @@ def compute_emg_envelope(
             info = mne.create_info(
                 ch_names=["EMG_RMS"],
                 sfreq=raw.info["sfreq"],
-                ch_types=["misc"],
+                ch_types=["emg"],
             )
             emg_raw = mne.io.RawArray(np.zeros((1, raw.n_times), dtype=float), info)
             emg_raw.resample(target_sfreq, npad="auto")
@@ -116,16 +116,16 @@ def compute_emg_envelope(
     info = mne.create_info(
         ch_names=["EMG_RMS"],
         sfreq=raw.info["sfreq"],
-        ch_types=["misc"],
+        ch_types=["emg"],
     )
 
     emg_raw = mne.io.RawArray(emg_rms[np.newaxis, :], info)
 
     # Bandpass in native sampling space
-    emg_raw.filter(l_freq=l_freq, h_freq=h_freq, verbose=False)
+    emg_raw.filter(l_freq=l_freq, h_freq=h_freq, picks=[0], verbose=False)
 
     # Hilbert envelope
-    emg_raw.apply_hilbert(envelope=True)
+    emg_raw.apply_hilbert(envelope=True, picks=[0])
 
     emg_env = emg_raw.get_data()[0]
 
@@ -135,7 +135,7 @@ def compute_emg_envelope(
     # Now resample to TRF feature rate
     emg_raw_resampled = mne.io.RawArray(
         emg_env[np.newaxis, :],
-        mne.create_info(ch_names=["EMG_RMS"], sfreq=raw.info["sfreq"], ch_types=["misc"]),
+        mne.create_info(ch_names=["EMG_RMS"], sfreq=raw.info["sfreq"], ch_types=["emg"]),
     )
     emg_raw_resampled.resample(target_sfreq, npad="auto")
 

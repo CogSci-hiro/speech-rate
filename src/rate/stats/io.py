@@ -121,6 +121,25 @@ def load_subject_lags(
     return np.asarray(lags, dtype=float)
 
 
+def load_subject_channel_names(
+    out_dir: Path,
+    analysis: str,
+    dyad_id: str,
+    subject_id: str,
+    model: str,
+) -> list[str] | None:
+    """Load optional subject channel names from ``channel_names.npy``."""
+    model_dir = _subject_model_dir(out_dir, analysis, dyad_id, subject_id, model)
+    ch_names_path = model_dir / "channel_names.npy"
+    if not ch_names_path.exists():
+        return None
+    ch_names = np.load(ch_names_path, allow_pickle=False)
+    if ch_names.ndim != 1:
+        raise ValueError(f"Expected channel_names.npy to be 1D, got shape={ch_names.shape} at {ch_names_path}")
+    out = [str(ch) for ch in ch_names.tolist() if str(ch)]
+    return out or None
+
+
 def stack_subject_feature_kernels(
     out_dir: Path,
     analysis: str,

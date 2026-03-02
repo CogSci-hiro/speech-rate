@@ -12,7 +12,7 @@ SUBJECT_PATTERN = re.compile(r"sub[-_]?(\d+)", re.IGNORECASE)
 RUN_PATTERN = re.compile(r"run[-_]?(\d+)", re.IGNORECASE)
 
 AUDIO_SUFFIXES = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
-EEG_SUFFIXES = {".fif", ".edf", ".bdf", ".set"}
+EEG_SUFFIXES = {".fif", ".edf", ".bdf", ".set", ".vhdr"}
 ANNOTATION_SUFFIXES = {".csv", ".tsv", ".json", ".txt", ".yaml", ".yml", ".textgrid"}
 ANNOTATION_PREFER_TOKENS = ("ipu",)
 ANNOTATION_EXCLUDE_TOKENS = ("channels",)

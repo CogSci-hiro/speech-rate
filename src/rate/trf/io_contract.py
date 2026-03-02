@@ -14,6 +14,8 @@ def write_trf_artifacts(result: TRFResult, output_dir: Path) -> None:
     result.outer_scores.to_parquet(output_dir / "outer_scores.parquet", index=False)
     np.save(output_dir / "kernels_outer.npy", np.asarray(result.kernels_outer))
     np.save(output_dir / "lags.npy", np.asarray(result.lags, dtype=float))
+    if result.channel_names is not None:
+        np.save(output_dir / "channel_names.npy", np.asarray(result.channel_names, dtype=str))
     if result.reconstruction_r2 is not None:
         # Phase 5 canonical name (ERP reconstruction metrics)
         result.reconstruction_r2.to_parquet(output_dir / "reconstruction_metrics.parquet", index=False)

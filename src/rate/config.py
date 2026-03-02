@@ -25,7 +25,6 @@ MODULAR_COMPUTE_FILES = {
     "evoked_trf": "evoked_trf.yaml",
     "induced_trf": "induced_trf.yaml",
     "fooof": "fooof.yaml",
-    "ddc": "ddc.yaml",
 }
 
 

@@ -788,6 +788,7 @@ def write_subject_output(
                 chosen_alpha=np.asarray(model_trf.chosen_alpha, dtype=float),
                 outer_scores=model_outer,
                 lags=np.asarray(model_trf.lags, dtype=float),
+                channel_names=tuple(str(ch) for ch in info["ch_names"]),
                 predictions_by_fold=None,
                 reconstruction_r2=(
                     model_trf.reconstruction_r2.sort_values(

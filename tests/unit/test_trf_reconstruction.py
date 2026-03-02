@@ -101,17 +101,20 @@ def test_write_trf_artifacts_preserves_legacy_files_when_no_reconstruction(tmp_p
         chosen_alpha=np.array([1.0], dtype=float),
         outer_scores=pd.DataFrame({"alpha": [1.0], "r": [0.0]}),
         lags=np.array([0.0], dtype=float),
+        channel_names=("Fz",),
         reconstruction_r2=pd.DataFrame({"channel": [0], "r2": [0.1]}),
     )
     tmp_path2 = tmp_path / "with_recon"
     write_trf_artifacts(result_with_recon, tmp_path2)
     assert sorted(p.name for p in tmp_path2.iterdir()) == [
+        "channel_names.npy",
         "kernels_outer.npy",
         "lags.npy",
         "outer_scores.parquet",
         "reconstruction_metrics.parquet",
         "reconstruction_r2.parquet",
     ]
+    np.testing.assert_array_equal(np.load(tmp_path2 / "channel_names.npy"), np.array(["Fz"], dtype=str))
 
 
 def test_compute_reconstruction_r2_returns_per_channel_rows() -> None:

@@ -51,6 +51,13 @@ SEMANTIC_COLOR_MAP = {
 
 KERNEL_FILE_TEMPLATE = "group_kernel_{regressor}.fif"
 CLUSTER_FILE_TEMPLATE = "clusters_{regressor}.parquet"
+BASELINE_CONTROL_REGRESSORS = {
+    "emg",
+    "self_onset_impulse",
+    "other_offset_impulse",
+    "self_ipu_onset",
+    "other_ipu_offset",
+}
 
 
 def add_subparser(subparsers) -> ArgumentParser:
@@ -631,7 +638,7 @@ def _load_trial_psd_spectra_table(*, out_dir: Path) -> pd.DataFrame:
 def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:
     """Build path to group-level kernel file for a regressor."""
     legacy = out_dir / family / KERNEL_FILE_TEMPLATE.format(regressor=regressor)
-    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    model = _trf_model_for_regressor(regressor)
     stats_path = out_dir / "stats" / family / model / str(regressor) / "grand_average_trfs-ave.fif"
     if stats_path.exists():
         return stats_path
@@ -641,7 +648,7 @@ def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:
 def _cluster_path(*, out_dir: Path, family: str, regressor: str) -> Path:
     """Build path to optional cluster table for a regressor."""
     legacy = out_dir / family / CLUSTER_FILE_TEMPLATE.format(regressor=regressor)
-    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    model = _trf_model_for_regressor(regressor)
     stats_csv = out_dir / "stats" / family / model / str(regressor) / "clusters.csv"
     stats_parquet = out_dir / "stats" / family / model / str(regressor) / "clusters.parquet"
     if stats_csv.exists():
@@ -652,7 +659,7 @@ def _cluster_path(*, out_dir: Path, family: str, regressor: str) -> Path:
 
 
 def _stats_feature_dir(*, out_dir: Path, family: str, regressor: str) -> Path:
-    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    model = _trf_model_for_regressor(regressor)
     return out_dir / "stats" / family / model / str(regressor)
 
 
@@ -664,6 +671,16 @@ def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
     """Load first evoked entry for a frozen group kernel file."""
     kernel_path = _kernel_path(out_dir=out_dir, family=family, regressor=regressor)
     if not kernel_path.exists():
+        # Fallback for runs where stats-level aggregates are absent for a regressor
+        # (e.g., baseline controls): build a grand average from subject FIFs.
+        subject_evokeds = _load_subject_evokeds(
+            mne=mne,
+            out_dir=out_dir,
+            family=family,
+            regressor=regressor,
+        )
+        if subject_evokeds:
+            return mne.grand_average(subject_evokeds, interpolate_bads=False)
         raise FileNotFoundError(f"Kernel file not found: {kernel_path}")
 
     evokeds = mne.read_evokeds(kernel_path)
@@ -840,7 +857,7 @@ def _load_subject_evokeds(*, mne, out_dir: Path, family: str, regressor: str) ->
     if not subjects_root.exists():
         return []
 
-    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    model = _trf_model_for_regressor(regressor)
     fname = "self_onset-ave.fif" if regressor == "self_onset_impulse" else (
         "other_offset-ave.fif" if regressor == "other_offset_impulse" else f"{regressor}-ave.fif"
     )
@@ -873,7 +890,7 @@ def _load_subject_kernel_arrays_from_trf_artifacts(
     if not subjects_root.exists():
         return []
 
-    model = "baseline" if str(regressor) == "emg" else str(regressor)
+    model = _trf_model_for_regressor(regressor)
     lags_ref = np.asarray(template_evoked.times, dtype=float)
     shape_ref = tuple(np.asarray(template_evoked.data).shape)
     LOGGER.info(
@@ -945,6 +962,12 @@ def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
         colors[name] = palette[fallback_idx % len(palette)]
         fallback_idx += 1
     return colors
+
+
+def _trf_model_for_regressor(regressor: str) -> str:
+    """Map regressor to model directory used in stats outputs."""
+    value = str(regressor).strip()
+    return "baseline" if value in BASELINE_CONTROL_REGRESSORS else value
 
 
 def _build_reconstruction_erp_panel_data(

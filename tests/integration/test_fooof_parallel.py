@@ -45,7 +45,6 @@ def _fooof_config(out_dir: Path, n_jobs: int) -> dict:
                 }
             },
         },
-        "ddc": {},
         "reporting": {},
         "random_seed": 123,
     }

@@ -12,6 +12,7 @@ from rate.config import ConfigValidationError
 from rate.cli.commands._stats_config import load_stats_command_config
 from rate.stats.io import (
     discover_subject_keys_with_model,
+    load_subject_channel_names,
     load_subject_lags,
     stack_subject_feature_kernels,
 )
@@ -34,6 +35,41 @@ _MODEL_TEMPLATE_CANDIDATES = [
     "other_rate_sq",
     "abs_diff_sq",
 ]
+
+
+def _resolve_channel_names(
+    *,
+    out_dir: Path,
+    analysis: str,
+    model: str,
+    subject_keys: list[tuple[str, str]],
+    montage_name: str,
+) -> list[str]:
+    if subject_keys:
+        dyad_id, subject_id = subject_keys[0]
+        try:
+            subject_names = load_subject_channel_names(
+                out_dir=out_dir,
+                analysis=analysis,
+                dyad_id=str(dyad_id),
+                subject_id=str(subject_id),
+                model=model,
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "Failed loading channel_names.npy for %s/%s/%s/%s: %s",
+                analysis,
+                dyad_id,
+                subject_id,
+                model,
+                exc,
+            )
+            subject_names = None
+        if subject_names:
+            return [str(ch) for ch in subject_names]
+
+    montage = make_standard_montage(montage_name)
+    return [str(ch) for ch in montage.ch_names]
 
 
 # ==================================================================================================
@@ -196,9 +232,14 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
 
     allow_placeholders = bool(stats_cfg.get("allow_placeholder_outputs", False))
 
-    montage_name = stats_cfg["adjacency"]["montage_name"]
-    montage = make_standard_montage(montage_name)
-    ch_names = montage.ch_names
+    montage_name = str(stats_cfg["adjacency"]["montage_name"])
+    ch_names = _resolve_channel_names(
+        out_dir=out_dir,
+        analysis=str(args.analysis),
+        model=str(args.model),
+        subject_keys=list(subject_keys),
+        montage_name=montage_name,
+    )
 
     if not subject_keys:
         if allow_placeholders:
