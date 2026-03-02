@@ -40,6 +40,7 @@ class InducedTrfConfig:
     downsample_hz: float
     bands: tuple[str, ...]
     target_kinds: tuple[str, ...]
+    residual_bands: tuple[str, ...]
     bands_hz: dict[str, tuple[float, float]]
     edge_drop: str
     edge_window_s: float | None
@@ -50,6 +51,12 @@ class InducedTrfConfig:
     ridge_alpha_grid: list[float]
     ridge_alpha_default: float
     models: tuple[DesignModelSpec, ...]
+
+    def bands_for_target_kind(self, target_kind: str) -> tuple[str, ...]:
+        kind = str(target_kind).strip().lower()
+        if kind == "residual":
+            return self.residual_bands
+        return self.bands
 
 
 def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
@@ -91,6 +98,20 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
             raise ValueError(f"Unsupported induced_trf.target_kinds values: {unknown}")
         target_kinds = tuple(dict.fromkeys(parsed))
 
+    residual_bands_cfg = ind.get("residual_bands")
+    if residual_bands_cfg is None:
+        residual_bands = bands
+    else:
+        if not isinstance(residual_bands_cfg, list):
+            raise ValueError("induced_trf.residual_bands must be a list when provided")
+        residual_bands = tuple(dict.fromkeys(str(b).strip() for b in residual_bands_cfg if str(b).strip()))
+        unknown_residual = sorted(set(residual_bands) - set(bands))
+        if unknown_residual:
+            raise ValueError(
+                "induced_trf.residual_bands must be a subset of induced_trf.bands "
+                f"(unknown: {unknown_residual})"
+            )
+
     fooof_sliding = ind.get("fooof_sliding") or {}
     if fooof_sliding is None:
         fooof_sliding = {}
@@ -99,7 +120,7 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
     edge_drop = str(fooof_sliding.get("edge_drop", "none"))
     edge_window_s = float(fooof_sliding["window_s"]) if "window_s" in fooof_sliding else None
     fooof_sliding_cfg: SlidingAperiodicConfig | None = None
-    if "residual" in set(target_kinds):
+    if ("residual" in set(target_kinds)) and residual_bands:
         required = ("window_s", "step_s", "fit_range_hz")
         missing = [k for k in required if k not in fooof_sliding]
         if missing:
@@ -151,6 +172,7 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         downsample_hz=get_project_downsample_hz(cfg, fallback_section="induced_trf"),
         bands=bands,
         target_kinds=target_kinds,
+        residual_bands=residual_bands,
         bands_hz=bands_hz,
         edge_drop=edge_drop,
         edge_window_s=edge_window_s,
@@ -272,12 +294,23 @@ def write_subject_output(
     picks: str | list[str] = "eeg",
 ) -> Path:
     trf_cfg = parse_induced_trf_config(cfg)
-    if str(band) not in trf_cfg.bands:
+    band_name = str(band)
+    target_mode = str(target_kind).strip().lower()
+    if band_name not in trf_cfg.bands:
         raise ValueError(f"Band '{band}' not enabled in induced_trf.bands={list(trf_cfg.bands)}")
-    if str(target_kind).strip().lower() not in set(trf_cfg.target_kinds):
+    if target_mode not in set(trf_cfg.target_kinds):
         raise ValueError(
             f"Target kind '{target_kind}' not enabled in induced_trf.target_kinds={list(trf_cfg.target_kinds)}"
         )
+    allowed_bands_for_kind = set(trf_cfg.bands_for_target_kind(target_mode))
+    if band_name not in allowed_bands_for_kind:
+        if target_mode == "residual":
+            raise ValueError(
+                "Band "
+                f"'{band}' not enabled for induced_trf.target_kind='residual'; "
+                f"set induced_trf.residual_bands to include it (current={list(trf_cfg.residual_bands)})"
+            )
+        raise ValueError(f"Band '{band}' is not enabled for induced_trf.target_kind='{target_mode}'")
 
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
@@ -286,8 +319,8 @@ def write_subject_output(
         out_dir=out_dir,
         dyad_id=str(dyad_id),
         subject=str(subject),
-        band=str(band),
-        target_kind=str(target_kind),
+        band=band_name,
+        target_kind=target_mode,
         events=events,
         ds_index=ds_index,
         picks=picks,

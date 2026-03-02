@@ -92,14 +92,13 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     cfg_ind = parse_induced_trf_config(resolved)
     enabled_bands = list(cfg_ind.bands)
     enabled_target_kinds = list(cfg_ind.target_kinds)
+    requested_bands: set[str] | None = None
     if args.bands:
         requested = [str(b).strip() for b in args.bands if str(b).strip()]
         bad = sorted(set(requested) - set(enabled_bands))
         if bad:
             raise ValueError(f"Requested bands not enabled in config induced_trf.bands: {bad}")
-        bands = [b for b in enabled_bands if b in set(requested)]
-    else:
-        bands = enabled_bands
+        requested_bands = set(requested)
 
     if args.target_kinds:
         requested_target_kinds = [str(v).strip().lower() for v in args.target_kinds if str(v).strip()]
@@ -111,7 +110,10 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         target_kinds = enabled_target_kinds
 
     for target_kind in target_kinds:
-        for band in bands:
+        bands_for_kind = list(cfg_ind.bands_for_target_kind(target_kind))
+        if requested_bands is not None:
+            bands_for_kind = [b for b in bands_for_kind if b in requested_bands]
+        for band in bands_for_kind:
             for dyad_id, subject in pairs:
                 out_path = write_subject_output(
                     cfg=resolved,

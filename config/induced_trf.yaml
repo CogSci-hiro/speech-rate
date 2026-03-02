@@ -3,6 +3,9 @@ induced_trf:
   downsample_hz: 32.0
   bands: ["theta", "alpha"]#, "beta"]
   target_kinds: ["raw", "residual"]
+  # Optional: restrict residual (sliding-window FOOOF) targets to this subset.
+  # Omit to run residual for all `bands`; set to [] to disable residual jobs entirely.
+  residual_bands: ["theta"]
 
   bands_hz:
     theta: [4.0, 8.0]

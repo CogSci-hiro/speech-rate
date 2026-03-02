@@ -26,6 +26,18 @@ def _induced_target_kinds():
     return ["raw"]
 
 
+def _induced_bands_for_target_kind(target_kind: str):
+    base = _induced_bands()
+    mode = str(target_kind).strip().lower()
+    if mode != "residual":
+        return base
+    ind_cfg = compute_induced_trf_config
+    residual = ind_cfg.get("residual_bands")
+    if residual is None:
+        return base
+    return [str(b).strip() for b in residual if str(b).strip() and str(b).strip() in set(base)]
+
+
 def _analysis_name(band: str, target_kind: str) -> str:
     band_name = str(band)
     mode = str(target_kind).strip().lower()
@@ -45,7 +57,11 @@ def _analysis_parts(analysis: str):
 
 
 def _induced_analyses():
-    return [_analysis_name(band, target_kind) for target_kind in _induced_target_kinds() for band in _induced_bands()]
+    return [
+        _analysis_name(band, target_kind)
+        for target_kind in _induced_target_kinds()
+        for band in _induced_bands_for_target_kind(target_kind)
+    ]
 
 
 def _induced_subject_outputs(_wildcards):

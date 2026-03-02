@@ -9,8 +9,10 @@ reporting:
 # Keep induced band metadata local to stats config so stats rule expansion does not
 # depend on the tracked compute config.
 induced_trf:
-  bands: ["theta", "alpha", "beta"]
+  bands: ["theta", "alpha"]#, "beta"]
   target_kinds: ["raw", "residual"]
+  # Optional: restrict residual induced analyses to this subset; [] disables residual analyses.
+  residual_bands: ["theta"]
   bands_hz:
     theta: [4.0, 8.0]
     alpha: [8.0, 12.0]

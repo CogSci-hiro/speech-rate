@@ -2,7 +2,30 @@ import numpy as np
 import pandas as pd
 import pytest
 from rate.induced_trf.aperiodic import compute_sliding_aperiodic, SlidingAperiodicConfig
-from rate.induced_trf.score import aggregate_subject_scores
+from rate.induced_trf.score import aggregate_subject_scores, parse_induced_trf_config
+
+
+def _base_cfg() -> dict:
+    return {
+        "sampling": {"downsample_hz": 32.0},
+        "evoked_trf": {
+            "lags_s": {"tmin": -0.5, "tmax": 0.5},
+            "regularization": {"type": "ridge"},
+        },
+        "induced_trf": {
+            "bands_hz": {
+                "theta": [4.0, 8.0],
+                "alpha": [8.0, 12.0],
+            },
+            "bands": ["theta", "alpha"],
+            "target_kinds": ["raw", "residual"],
+            "fooof_sliding": {
+                "window_s": 1.0,
+                "step_s": 0.1,
+                "fit_range_hz": [2.0, 40.0],
+            },
+        },
+    }
 
 
 def test_half_window_edge_drop():
@@ -77,3 +100,23 @@ def test_induced_aggregate_extracts_target_kind(tmp_path):
     out = aggregate_subject_scores(out_dir=tmp_path)
     assert set(out["target_kind"].unique().tolist()) == {"raw", "residual"}
     assert set(out["band"].unique().tolist()) == {"theta"}
+
+
+def test_parse_induced_trf_residual_bands_defaults_to_all():
+    parsed = parse_induced_trf_config(_base_cfg())
+    assert parsed.residual_bands == parsed.bands
+
+
+def test_parse_induced_trf_residual_bands_can_disable_residual():
+    cfg = _base_cfg()
+    cfg["induced_trf"]["residual_bands"] = []
+    cfg["induced_trf"]["fooof_sliding"] = {}
+    parsed = parse_induced_trf_config(cfg)
+    assert parsed.residual_bands == ()
+
+
+def test_parse_induced_trf_residual_bands_must_be_subset():
+    cfg = _base_cfg()
+    cfg["induced_trf"]["residual_bands"] = ["beta"]
+    with pytest.raises(ValueError, match="subset"):
+        parse_induced_trf_config(cfg)
