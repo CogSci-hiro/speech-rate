@@ -103,29 +103,51 @@ def _configured_regressors_for_family(family: str):
     return [reg for reg in RAW_REGRESSORS if _trf_model_for_regressor(reg) in active_models]
 
 
+def _baseline_control_dependency(regressor: str) -> str:
+    """Return an existing dependency path for baseline controls to avoid DAG-time missing-input errors."""
+    model = _trf_model_for_regressor(regressor)
+    stats_kernel = (
+        f"{_viz_out_dir()}/stats/evoked_trf/{model}/{regressor}/grand_average_trfs-ave.fif"
+    )
+    subjects_root = f"{_viz_out_dir()}/evoked_trf/subjects"
+    if Path(stats_kernel).exists():
+        return stats_kernel
+    if Path(subjects_root).exists():
+        return subjects_root
+    # Stable fallback that should exist for any figure run context.
+    return f"{_viz_out_dir()}/dataset/index.parquet"
+
+
 def _evoked_kernel_input(wildcards):
     regressor = str(wildcards.regressor).strip()
     model = _trf_model_for_regressor(regressor)
+    if regressor == "emg":
+        del model
+        return f"{_viz_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
     if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
         # Baseline controls may be rendered from subject-level FIFs even when
         # stats-level grand-average files are not present.
-        return f"{_viz_out_dir()}/evoked_trf/subjects"
+        return _baseline_control_dependency(regressor)
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
 
 
 def _evoked_cluster_input(wildcards):
     regressor = str(wildcards.regressor).strip()
     model = _trf_model_for_regressor(regressor)
+    if regressor == "emg":
+        # EMG onset-locked grand average currently has no cluster-table companion.
+        del model
+        return f"{_viz_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
     if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
         # No cluster table is required for baseline-control rendering fallback.
-        return f"{_viz_out_dir()}/evoked_trf/subjects"
+        return _baseline_control_dependency(regressor)
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
 
 
 def _evoked_timecourse_kernel_inputs(_wildcards):
     return [
         f"{_viz_out_dir()}/stats/evoked_trf/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
-        for reg in AVAILABLE_EVOKED_REGRESSORS
+        for reg in _configured_regressors_for_family("evoked_trf")
     ]
 
 
@@ -458,12 +480,12 @@ rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
         + EVOKED_TOPO_TARGETS
-        + INDUCED_JOINT_TARGETS
-        + INDUCED_TOPO_TARGETS
+        #+ INDUCED_JOINT_TARGETS
+        #+ INDUCED_TOPO_TARGETS
         + [
             f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
             *EVOKED_RECONSTRUCTION_ERP_TARGETS,
         ]
         + EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
-        + INDUCED_TIMECOURSE_TARGETS
+        #+ INDUCED_TIMECOURSE_TARGETS
         + FOOOF_PSD_TARGETS

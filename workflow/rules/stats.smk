@@ -252,6 +252,9 @@ RECONSTRUCTION_ERP_R2_CHNAME_TARGETS = [
     f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/channel_names.npy"
     for model in EVOKED_RECONSTRUCTION_R2_MODELS
 ]
+EMG_ONSET_EVOKED_TARGET = (
+    f"{_stats_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
+)
 
 rule stats_kernel0:
     input:
@@ -344,3 +347,25 @@ rule stats_reconstruction_erp_r2_evoked:
             --config config/stats.yaml \
             --schema config/schema.json
         """
+
+
+rule stats_evoked_emg_onset_by_subject_emg:
+    input:
+        dataset_index=f"{_stats_out_dir()}/dataset/index.parquet",
+        events=f"{_stats_out_dir()}/events/events.parquet",
+        emg_done=f"{_stats_out_dir()}/_meta/features_emg_done.txt",
+    output:
+        EMG_ONSET_EVOKED_TARGET
+    shell:
+        """
+        python -m rate.cli.main stats-emg-onset-evoked \
+            --analysis evoked_trf \
+            --model baseline \
+            --config config/stats.yaml \
+            --schema config/schema.json
+        """
+
+
+rule stats_evoked_emg_onset:
+    input:
+        EMG_ONSET_EVOKED_TARGET

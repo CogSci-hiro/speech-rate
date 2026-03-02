@@ -639,6 +639,10 @@ def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:
     """Build path to group-level kernel file for a regressor."""
     legacy = out_dir / family / KERNEL_FILE_TEMPLATE.format(regressor=regressor)
     model = _trf_model_for_regressor(regressor)
+    if str(regressor) == "emg":
+        emg_onset_path = out_dir / "features" / "emg" / "grand_average_emg_self_onset-ave.fif"
+        if emg_onset_path.exists():
+            return emg_onset_path
     stats_path = out_dir / "stats" / family / model / str(regressor) / "grand_average_trfs-ave.fif"
     if stats_path.exists():
         return stats_path

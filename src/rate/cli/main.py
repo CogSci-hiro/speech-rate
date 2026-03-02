@@ -42,6 +42,7 @@ import rate.cli.commands.induced_trf_subject as cmd_induced_trf_subject
 import rate.cli.commands.induced_trf_subject_all as cmd_induced_trf_subject_all
 import rate.cli.commands.induced_trf_aggregate as cmd_induced_trf_aggregate
 import rate.cli.commands.stats_kernel0 as cmd_stats_kernel0
+import rate.cli.commands.stats_emg_onset_evoked as cmd_stats_emg_onset_evoked
 import rate.cli.commands.stats_reconstruction_erp_r2 as cmd_stats_reconstruction_erp_r2
 import rate.cli.commands.stats_export_subject_zmaps as cmd_stats_export_subject_zmaps
 
@@ -68,6 +69,7 @@ _COMMANDS = {
     "induced-trf-subject-all": cmd_induced_trf_subject_all,
     "induced-trf-aggregate": cmd_induced_trf_aggregate,
     "stats-kernel0": cmd_stats_kernel0,
+    "stats-emg-onset-evoked": cmd_stats_emg_onset_evoked,
     "stats-reconstruction-erp-r2": cmd_stats_reconstruction_erp_r2,
     "stats-export-subject-zmaps": cmd_stats_export_subject_zmaps,
     "clean": cmd_clean,
