@@ -938,9 +938,10 @@ def write_similarity_aggregate(*, out_dir: Path) -> Path:
     subjects_root = out_dir / "evoked_trf" / "subjects"
     sim_paths = sorted(subjects_root.rglob("models/self_rate/cross_kernel_similarity.npy"))
     if not sim_paths:
-        raise ValueError(f"No subject similarity files found under {subjects_root}")
-    arrays = [np.asarray(np.load(p), dtype=float) for p in sim_paths]
-    stacked = np.stack(arrays, axis=0)  # (subject, 2, lag)
+        stacked = np.empty((0, 2, 0), dtype=float)
+    else:
+        arrays = [np.asarray(np.load(p), dtype=float) for p in sim_paths]
+        stacked = np.stack(arrays, axis=0)  # (subject, 2, lag)
     out_path = out_dir / "evoked_trf" / "aggregate" / "similarity" / "self_vs_other.npy"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(out_path, stacked)
@@ -1076,8 +1077,7 @@ def _validate_scores_table(*, scores: pd.DataFrame) -> None:
     if missing_scores:
         raise ValueError(f"scores table missing columns: {sorted(missing_scores)}")
 
-    if "delta_r" in scores.columns:
-        nonbaseline = scores["model"] != "baseline"
-        bad = scores.loc[nonbaseline & scores["r"].notna() & scores["delta_r"].isna()]
+    if "delta_r" in scores.columns and "baseline_r" in scores.columns:
+        bad = scores.loc[scores["r"].notna() & scores["baseline_r"].notna() & scores["delta_r"].isna()]
         if not bad.empty:
-            raise ValueError("delta_r has missing values where r exists (non-baseline rows).")
+            raise ValueError("delta_r has missing values where both r and baseline_r exist.")

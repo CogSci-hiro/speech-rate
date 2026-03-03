@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -50,7 +50,7 @@ def load_induced_band_run_target(
     picks: str | list[str] = "eeg",
 ) -> InducedBandRunTarget:
     """
-    Build induced target per run and downsample to the TRF rate.
+    Build induced target per run and align to the TRF target rate.
 
     Returns y with shape (n_samples, n_channels) to match the shared TRF engine.
     """
@@ -85,14 +85,25 @@ def load_induced_band_run_target(
         data = np.asarray(envelopes[str(band)], dtype=float)  # (ch, time)
         if data.ndim != 2:
             raise ValueError(f"Expected band envelope to be 2D, got {data.shape}")
+        info = raw.info.copy()
+        induced_raw = mne.io.RawArray(np.asarray(data, dtype=float), info, first_samp=raw.first_samp, verbose="ERROR")
+        if not np.isclose(float(induced_raw.info["sfreq"]), float(downsample_hz), atol=1e-9):
+            induced_raw.resample(float(downsample_hz), npad="auto", verbose="ERROR")
+
+        y = np.asarray(induced_raw.get_data(), dtype=float).T
+        times_s = np.asarray(induced_raw.times, dtype=float)
+        sfreq_hz = float(induced_raw.info["sfreq"])
     else:
         if fooof_sliding_cfg is None:
             raise ValueError("fooof_sliding_cfg is required when target_kind='residual'")
+        # Residual targets are sampled directly on the sliding-window hop grid
+        # at the desired TRF rate (no anti-alias resample step).
+        residual_cfg = replace(fooof_sliding_cfg, step_s=(1.0 / float(downsample_hz)))
         aperiodic_df = compute_sliding_aperiodic(
             np.asarray(raw.get_data(), dtype=float),
             float(raw.info["sfreq"]),
             np.asarray(raw.times, dtype=float),
-            fooof_sliding_cfg,
+            residual_cfg,
             band_hz=tuple(float(v) for v in bands_hz[band]),
             channel_names=channel_names,
         )
@@ -100,9 +111,11 @@ def load_induced_band_run_target(
             raise ValueError("Sliding FOOOF decomposition produced no windows.")
 
         n_channels = len(channel_names)
-        n_times = int(raw.n_times)
+        src_times = np.sort(aperiodic_df["time"].replace([np.inf, -np.inf], np.nan).dropna().astype(float).unique())
+        if src_times.size == 0:
+            raise ValueError("Sliding FOOOF decomposition produced no finite residual times.")
+        n_times = int(src_times.shape[0])
         data = np.full((n_channels, n_times), np.nan, dtype=float)
-        src_times = np.asarray(raw.times, dtype=float)
 
         for ch_idx, ch_name in enumerate(channel_names):
             ch_df = aperiodic_df.loc[aperiodic_df["channel"].astype(str) == ch_name, ["time", "band_residual_power"]].copy()
@@ -138,14 +151,15 @@ def load_induced_band_run_target(
                 right=float(ch[valid][-1]),
             )
 
-    info = raw.info.copy()
-    induced_raw = mne.io.RawArray(np.asarray(data, dtype=float), info, first_samp=raw.first_samp, verbose="ERROR")
-    if not np.isclose(float(induced_raw.info["sfreq"]), float(downsample_hz), atol=1e-9):
-        induced_raw.resample(float(downsample_hz), npad="auto", verbose="ERROR")
-
-    y = np.asarray(induced_raw.get_data(), dtype=float).T
-    times_s = np.asarray(induced_raw.times, dtype=float)
-    sfreq_hz = float(induced_raw.info["sfreq"])
+        y = np.asarray(data, dtype=float).T
+        times_s = np.asarray(src_times, dtype=float)
+        if times_s.size >= 2:
+            hop_s = float(np.nanmedian(np.diff(times_s)))
+            if not np.isfinite(hop_s) or hop_s <= 0.0:
+                raise ValueError("Invalid residual hop size inferred from sliding-window times.")
+            sfreq_hz = float(1.0 / hop_s)
+        else:
+            sfreq_hz = float(downsample_hz)
 
     mode = str(edge_drop).strip().lower()
     if mode == "half_window":

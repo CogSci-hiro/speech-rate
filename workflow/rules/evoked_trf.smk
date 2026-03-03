@@ -16,7 +16,20 @@ def _evoked_subject_outputs(_wildcards):
     ]
 
 
-PHASE5_PRIMARY_MODELS = ["baseline", "self_rate", "other_rate", "abs_diff"]
+def _active_evoked_models():
+    block = compute_evoked_trf_config or {}
+    specs = block.get("models", []) or []
+    out = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        name = str(spec.get("name", "")).strip()
+        if name:
+            out.append(name)
+    return out
+
+
+PHASE5_PRIMARY_MODELS = _active_evoked_models()
 
 
 def _evoked_reconstruction_subject_sidecars(wildcards):
@@ -99,7 +112,7 @@ rule evoked_trf_reconstruction_subject:
 rule evoked_trf_similarity_subject:
     input:
         scores=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/scores.parquet",
-        sim=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/models/self_rate/cross_kernel_similarity.npy",
+        sim=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/models/unified/self_rate-ave.fif",
     output:
         done=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_similarity.done"
     shell:

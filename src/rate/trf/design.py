@@ -47,14 +47,18 @@ _EVENT_SCALAR_FEATURES = {"self_rate", "other_rate", "abs_diff"}
 _CONTINUOUS_FEATURES = {"emg", "run", "time_within_run"}
 
 
+UNIFIED_TRF_MODEL_NAME = "unified"
+UNIFIED_TRF_REGRESSOR_EXPRESSIONS: tuple[str, ...] = (
+    "self_ipu_onset",
+    "other_ipu_offset",
+    "emg",
+    "self_rate",
+    "other_rate",
+    "abs_diff",
+)
+
 DEFAULT_EVOKED_TRF_MODELS: tuple[dict[str, Any], ...] = (
-    {"name": "baseline", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg"]},
-    {"name": "self_rate", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "self_rate"]},
-    {"name": "other_rate", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "other_rate"]},
-    {"name": "abs_diff", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "abs_diff"]},
-    {"name": "self_rate_sq", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "self_rate", "self_rate^2"]},
-    {"name": "other_rate_sq", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "other_rate", "other_rate^2"]},
-    {"name": "abs_diff_sq", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "abs_diff", "abs_diff^2"]},
+    {"name": UNIFIED_TRF_MODEL_NAME, "regressors": list(UNIFIED_TRF_REGRESSOR_EXPRESSIONS)},
 )
 
 
@@ -174,6 +178,8 @@ def parse_evoked_models_config(models_cfg: Any) -> tuple[DesignModelSpec, ...]:
         models_cfg = list(DEFAULT_EVOKED_TRF_MODELS)
     if not isinstance(models_cfg, list):
         raise ValueError("evoked_trf.models must be a list of model mappings")
+    if len(models_cfg) != 1:
+        raise ValueError("Confirmatory TRF requires exactly one model in evoked_trf.models")
 
     out: list[DesignModelSpec] = []
     seen_names: set[str] = set()
@@ -196,6 +202,12 @@ def parse_evoked_models_config(models_cfg: Any) -> tuple[DesignModelSpec, ...]:
             if not isinstance(reg_item, str):
                 raise ValueError(f"evoked_trf.models[{idx}].regressors[{j}] must be a string")
             parsed_regs.append(_parse_regressor_expression(reg_item))
+        canonical_expr = tuple(str(r.expression).strip() for r in parsed_regs)
+        if canonical_expr != UNIFIED_TRF_REGRESSOR_EXPRESSIONS:
+            raise ValueError(
+                "Confirmatory TRF requires regressors exactly "
+                f"{list(UNIFIED_TRF_REGRESSOR_EXPRESSIONS)} in that order"
+            )
         seen_names.add(name)
         out.append(DesignModelSpec(model_name=name, regressors=tuple(parsed_regs)))
     return tuple(out)

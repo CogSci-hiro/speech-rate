@@ -14,11 +14,11 @@ def _base_cfg() -> dict:
         },
         "induced_trf": {
             "bands_hz": {
-                "theta": [4.0, 8.0],
-                "alpha": [8.0, 12.0],
+                "theta": [4.0, 7.0],
             },
-            "bands": ["theta", "alpha"],
+            "bands": ["theta"],
             "target_kinds": ["raw", "residual"],
+            "residual_bands": ["theta"],
             "fooof_sliding": {
                 "window_s": 1.0,
                 "step_s": 0.1,
@@ -102,21 +102,29 @@ def test_induced_aggregate_extracts_target_kind(tmp_path):
     assert set(out["band"].unique().tolist()) == {"theta"}
 
 
-def test_parse_induced_trf_residual_bands_defaults_to_all():
+def test_parse_induced_trf_confirmatory_defaults():
     parsed = parse_induced_trf_config(_base_cfg())
-    assert parsed.residual_bands == parsed.bands
+    assert parsed.bands == ("theta",)
+    assert parsed.target_kinds == ("raw", "residual")
+    assert parsed.residual_bands == ("theta",)
 
 
-def test_parse_induced_trf_residual_bands_can_disable_residual():
+def test_parse_induced_trf_rejects_nonconfirmatory_residual_bands():
     cfg = _base_cfg()
     cfg["induced_trf"]["residual_bands"] = []
-    cfg["induced_trf"]["fooof_sliding"] = {}
-    parsed = parse_induced_trf_config(cfg)
-    assert parsed.residual_bands == ()
+    with pytest.raises(ValueError, match="residual_bands"):
+        parse_induced_trf_config(cfg)
 
 
-def test_parse_induced_trf_residual_bands_must_be_subset():
+def test_parse_induced_trf_rejects_nonconfirmatory_bands():
     cfg = _base_cfg()
-    cfg["induced_trf"]["residual_bands"] = ["beta"]
-    with pytest.raises(ValueError, match="subset"):
+    cfg["induced_trf"]["bands_hz"]["alpha"] = [8.0, 12.0]
+    with pytest.raises(ValueError, match="forbids additional bands"):
+        parse_induced_trf_config(cfg)
+
+
+def test_parse_induced_trf_rejects_nonconfirmatory_theta_limits():
+    cfg = _base_cfg()
+    cfg["induced_trf"]["bands_hz"]["theta"] = [4.0, 8.0]
+    with pytest.raises(ValueError, match="theta == \\[4.0, 7.0\\]"):
         parse_induced_trf_config(cfg)

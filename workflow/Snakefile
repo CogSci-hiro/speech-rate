@@ -105,6 +105,7 @@ cfg_viz = _ForbiddenConfigProxy("cfg_viz")
 compute_config = config
 compute_paths_config = compute_config.get("paths", {}) or {}
 COMPUTE_OUT_DIR = str(compute_paths_config["out_dir"])
+compute_evoked_trf_config = evoked_trf_config.get("evoked_trf", {}) or {}
 compute_induced_trf_config = induced_trf_config.get("induced_trf", {}) or {}
 stats_induced_trf_config = stats_config.get("induced_trf", {}) or {}
 viz_induced_trf_config = viz_config.get("induced_trf", {}) or {}

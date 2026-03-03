@@ -16,7 +16,6 @@ from rate.evoked_trf.score import (
     _fit_full_data_kernel,
     _validate_scores_table,
     build_run_matrices,
-    load_input_tables,
     select_eeg_path,
     validate_events_table,
 )
@@ -74,43 +73,33 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
             raise ValueError(f"induced_trf.bands_hz.{name} must be [fmin, fmax]")
         bands_hz[str(name)] = (float(rng[0]), float(rng[1]))
 
+    theta_hz = bands_hz.get("theta")
+    if theta_hz is None:
+        raise ValueError("Confirmatory induced TRF requires induced_trf.bands_hz.theta")
+    if not np.allclose(np.asarray(theta_hz, dtype=float), np.asarray((4.0, 7.0), dtype=float), atol=1e-9):
+        raise ValueError("Confirmatory induced TRF requires induced_trf.bands_hz.theta == [4.0, 7.0]")
+    extra_bands = sorted(set(bands_hz.keys()) - {"theta"})
+    if extra_bands:
+        raise ValueError(f"Confirmatory induced TRF forbids additional bands: {extra_bands}")
+
     bands_cfg = ind.get("bands")
-    if bands_cfg is None:
-        bands = tuple(sorted([b for b in ("theta", "alpha", "beta") if b in bands_hz]))
-    else:
-        if not isinstance(bands_cfg, list) or not bands_cfg:
-            raise ValueError("induced_trf.bands must be a non-empty list")
-        bands = tuple(str(b) for b in bands_cfg)
-    for b in bands:
-        if b not in bands_hz:
-            raise ValueError(f"Band '{b}' listed in induced_trf.bands but missing in induced_trf.bands_hz")
+    if bands_cfg is not None and list(bands_cfg) != ["theta"]:
+        raise ValueError("Confirmatory induced TRF requires induced_trf.bands == ['theta']")
+    bands = ("theta",)
 
     target_kinds_cfg = ind.get("target_kinds")
-    if target_kinds_cfg is None:
-        target_kinds = ("raw",)
-    else:
-        if not isinstance(target_kinds_cfg, list) or not target_kinds_cfg:
-            raise ValueError("induced_trf.target_kinds must be a non-empty list when provided")
-        allowed_target_kinds = {"raw", "residual"}
-        parsed = tuple(str(v).strip().lower() for v in target_kinds_cfg)
-        unknown = sorted(set(parsed) - allowed_target_kinds)
-        if unknown:
-            raise ValueError(f"Unsupported induced_trf.target_kinds values: {unknown}")
-        target_kinds = tuple(dict.fromkeys(parsed))
+    if target_kinds_cfg is not None:
+        target_list = [str(v).strip().lower() for v in target_kinds_cfg]
+        if target_list != ["raw", "residual"]:
+            raise ValueError("Confirmatory induced TRF requires induced_trf.target_kinds == ['raw', 'residual']")
+    target_kinds = ("raw", "residual")
 
     residual_bands_cfg = ind.get("residual_bands")
-    if residual_bands_cfg is None:
-        residual_bands = bands
-    else:
-        if not isinstance(residual_bands_cfg, list):
-            raise ValueError("induced_trf.residual_bands must be a list when provided")
-        residual_bands = tuple(dict.fromkeys(str(b).strip() for b in residual_bands_cfg if str(b).strip()))
-        unknown_residual = sorted(set(residual_bands) - set(bands))
-        if unknown_residual:
-            raise ValueError(
-                "induced_trf.residual_bands must be a subset of induced_trf.bands "
-                f"(unknown: {unknown_residual})"
-            )
+    if residual_bands_cfg is not None:
+        residual_list = [str(v).strip() for v in residual_bands_cfg if str(v).strip()]
+        if residual_list != ["theta"]:
+            raise ValueError("Confirmatory induced TRF requires induced_trf.residual_bands == ['theta']")
+    residual_bands = ("theta",)
 
     fooof_sliding = ind.get("fooof_sliding") or {}
     if fooof_sliding is None:
@@ -196,6 +185,12 @@ def _analysis_name_for_band(band: str, *, target_kind: str) -> str:
 
 def _subject_dir(*, out_dir: Path, band: str, target_kind: str, dyad_id: str, subject: str) -> Path:
     return out_dir / _analysis_name_for_band(band, target_kind=target_kind) / "subjects" / str(dyad_id) / str(subject)
+
+
+def load_induced_input_tables(out_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    events_path = out_dir / "events" / "events.parquet"
+    ds_index_path = out_dir / "dataset" / "index.parquet"
+    return pd.read_parquet(events_path), pd.read_parquet(ds_index_path)
 
 
 def _prepare_induced_subject_runs(
@@ -320,7 +315,7 @@ def write_subject_output(
             )
         raise ValueError(f"Band '{band}' is not enabled for induced_trf.target_kind='{target_mode}'")
 
-    events, ds_index = load_input_tables(out_dir)
+    events, ds_index = load_induced_input_tables(out_dir)
     events = validate_events_table(events)
     runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, channel_names, sfreq_hz = _prepare_induced_subject_runs(
         cfg=trf_cfg,

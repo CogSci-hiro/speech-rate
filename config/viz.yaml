@@ -11,7 +11,7 @@ reporting:
   alpha: 0.01
   tables_format: "csv"  # csv | parquet
   trf:
-    regressors: ["self_rate", "other_rate", "abs_diff"]
+    regressors: ["self_onset_impulse", "other_offset_impulse", "emg", "self_rate", "other_rate", "abs_diff"]
     electrodes: ["Fz", "Pz"]
     # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
     # Global for all regressors:
@@ -29,14 +29,11 @@ reporting:
 # Keep induced band metadata local to viz config so figure rule expansion does not
 # depend on the tracked compute config.
 induced_trf:
-  bands: ["theta", "alpha"]#, "beta"]
+  bands: ["theta"]
   target_kinds: ["raw", "residual"]
-  # Optional: restrict residual induced figure families to this subset; [] disables residual families.
-  residual_bands: ["theta"]#, "alpha", "beta"]
+  residual_bands: ["theta"]
   bands_hz:
-    theta: [4.0, 8.0]
-    alpha: [8.0, 12.0]
-    beta: [13.0, 30.0]
+    theta: [4.0, 7.0]
 
 # Phase 1 modular duplicate from config/config.yaml.
 # Kept under a non-active key to avoid changing current pipeline behavior.

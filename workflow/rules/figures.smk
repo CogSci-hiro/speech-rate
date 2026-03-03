@@ -5,6 +5,7 @@ BASELINE_CONTROL_REGRESSORS = {
     "self_ipu_onset",
     "other_ipu_offset",
 }
+TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "abs_diff"}
 DEFAULT_BASELINE_VIZ_REGRESSORS = (
     "self_onset_impulse",
     "other_offset_impulse",
@@ -78,7 +79,11 @@ INDUCED_FAMILIES = [
 
 def _trf_model_for_regressor(regressor: str) -> str:
     value = str(regressor).strip()
-    return "baseline" if value in BASELINE_CONTROL_REGRESSORS else value
+    if value in TARGET_BEHAVIOR_REGRESSORS:
+        return "unified"
+    if value in BASELINE_CONTROL_REGRESSORS:
+        return "unified"
+    return value
 
 
 def _active_model_names(branch_cfg, branch_key: str):
@@ -103,72 +108,80 @@ def _configured_regressors_for_family(family: str):
     return [reg for reg in RAW_REGRESSORS if _trf_model_for_regressor(reg) in active_models]
 
 
-def _baseline_control_dependency(regressor: str) -> str:
-    """Return an existing dependency path for baseline controls to avoid DAG-time missing-input errors."""
+def _control_regressor_dependency(*, family: str, regressor: str) -> str:
+    """Return an existing dependency path for control regressors to avoid DAG-time missing-input errors."""
     model = _trf_model_for_regressor(regressor)
     stats_kernel = (
-        f"{_viz_out_dir()}/stats/evoked_trf/{model}/{regressor}/grand_average_trfs-ave.fif"
+        f"{_viz_out_dir()}/stats/{family}/{model}/{regressor}/grand_average_trfs-ave.fif"
     )
-    subjects_root = f"{_viz_out_dir()}/evoked_trf/subjects"
+    if str(family) == "evoked_trf":
+        aggregate_scores = f"{_viz_out_dir()}/evoked_trf/scores/scores.parquet"
+    elif str(family).startswith("induced_trf_"):
+        aggregate_scores = f"{_viz_out_dir()}/induced_trf/scores/scores.parquet"
+    else:
+        aggregate_scores = f"{_viz_out_dir()}/{family}/scores/scores.parquet"
     if Path(stats_kernel).exists():
         return stats_kernel
-    if Path(subjects_root).exists():
-        return subjects_root
-    # Stable fallback that should exist for any figure run context.
-    return f"{_viz_out_dir()}/dataset/index.parquet"
+    # Force compute/aggregate to complete before control-regressor figures render.
+    return aggregate_scores
 
 
 def _evoked_kernel_input(wildcards):
     regressor = str(wildcards.regressor).strip()
     model = _trf_model_for_regressor(regressor)
-    if regressor == "emg":
-        del model
-        return f"{_viz_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
-    if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
-        # Baseline controls may be rendered from subject-level FIFs even when
-        # stats-level grand-average files are not present.
-        return _baseline_control_dependency(regressor)
+    if regressor in BASELINE_CONTROL_REGRESSORS:
+        # Controls may be rendered from subject-level FIFs when stats aggregates are absent.
+        return _control_regressor_dependency(family="evoked_trf", regressor=regressor)
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
 
 
 def _evoked_cluster_input(wildcards):
     regressor = str(wildcards.regressor).strip()
+    if regressor not in TARGET_BEHAVIOR_REGRESSORS:
+        # Controls have no kernel-cluster stats; reuse kernel dependency to keep DAG stable.
+        return _evoked_kernel_input(wildcards)
     model = _trf_model_for_regressor(regressor)
-    if regressor == "emg":
-        # EMG onset-locked grand average currently has no cluster-table companion.
-        del model
-        return f"{_viz_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
-    if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
-        # No cluster table is required for baseline-control rendering fallback.
-        return _baseline_control_dependency(regressor)
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
 
 
 def _evoked_timecourse_kernel_inputs(_wildcards):
-    return [
-        f"{_viz_out_dir()}/stats/evoked_trf/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
-        for reg in _configured_regressors_for_family("evoked_trf")
-    ]
+    out = []
+    for reg in _configured_regressors_for_family("evoked_trf"):
+        if reg in BASELINE_CONTROL_REGRESSORS:
+            out.append(_control_regressor_dependency(family="evoked_trf", regressor=reg))
+        else:
+            out.append(f"{_viz_out_dir()}/stats/evoked_trf/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif")
+    return out
 
 
 def _family_kernel_input(wildcards):
-    model = _trf_model_for_regressor(str(wildcards.regressor))
+    reg = str(wildcards.regressor).strip()
+    if reg in BASELINE_CONTROL_REGRESSORS:
+        return _control_regressor_dependency(family=str(wildcards.family), regressor=reg)
+    model = _trf_model_for_regressor(reg)
     family = str(wildcards.family)
-    return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
+    return f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/grand_average_trfs-ave.fif"
 
 
 def _family_cluster_input(wildcards):
-    model = _trf_model_for_regressor(str(wildcards.regressor))
+    reg = str(wildcards.regressor).strip()
+    if reg not in TARGET_BEHAVIOR_REGRESSORS:
+        # Controls have no kernel-cluster stats; reuse kernel dependency to keep DAG stable.
+        return _family_kernel_input(wildcards)
+    model = _trf_model_for_regressor(reg)
     family = str(wildcards.family)
-    return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
+    return f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/clusters.{_viz_table_ext()}"
 
 
 def _family_timecourse_kernel_inputs(wildcards):
     family = str(wildcards.family)
-    return [
-        f"{_viz_out_dir()}/stats/{family}/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
-        for reg in AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY.get(family, [])
-    ]
+    out = []
+    for reg in AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY.get(family, []):
+        if reg in BASELINE_CONTROL_REGRESSORS:
+            out.append(_control_regressor_dependency(family=family, regressor=reg))
+        else:
+            out.append(f"{_viz_out_dir()}/stats/{family}/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif")
+    return out
 
 
 def _has_evoked_models(models):
@@ -176,14 +189,9 @@ def _has_evoked_models(models):
 
 
 AVAILABLE_EVOKED_REGRESSORS = _configured_regressors_for_family("evoked_trf")
-if "baseline" in ACTIVE_EVOKED_MODELS:
-    AVAILABLE_EVOKED_REGRESSORS = list(dict.fromkeys([
-        *AVAILABLE_EVOKED_REGRESSORS,
-        *DEFAULT_BASELINE_VIZ_REGRESSORS,
-    ]))
 AVAILABLE_EVOKED_RECONSTRUCTION_R2_MODELS = [
     str(model) for model in sorted(ACTIVE_EVOKED_MODELS)
-    if str(model) != "baseline"
+    if ("baseline" in ACTIVE_EVOKED_MODELS) and (str(model) != "baseline")
 ]
 AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY = {
     family: _configured_regressors_for_family(family)
@@ -207,9 +215,11 @@ INDUCED_TIMECOURSE_TARGETS = [
     f"{_viz_out_dir()}/final/figures/{family}/timecourse_panel.pdf"
     for family in INDUCED_FAMILIES
 ]
-EVOKED_RECONSTRUCTION_ERP_TARGETS = [
-    f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf",
-]
+EVOKED_RECONSTRUCTION_ERP_TARGETS = []
+if _has_evoked_models(["self_rate", "other_rate", "abs_diff"]):
+    EVOKED_RECONSTRUCTION_ERP_TARGETS.append(
+        f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf"
+    )
 if _has_evoked_models(["self_rate_sq", "other_rate_sq", "abs_diff_sq"]):
     EVOKED_RECONSTRUCTION_ERP_TARGETS.append(
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"
@@ -480,12 +490,12 @@ rule figures_all:
     input:
         EVOKED_JOINT_TARGETS
         + EVOKED_TOPO_TARGETS
-        #+ INDUCED_JOINT_TARGETS
-        #+ INDUCED_TOPO_TARGETS
+        + INDUCED_JOINT_TARGETS
+        + INDUCED_TOPO_TARGETS
         + [
             f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
             *EVOKED_RECONSTRUCTION_ERP_TARGETS,
         ]
         + EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
-        #+ INDUCED_TIMECOURSE_TARGETS
-        + FOOOF_PSD_TARGETS
+        + INDUCED_TIMECOURSE_TARGETS
+        #+ FOOOF_PSD_TARGETS

@@ -14,25 +14,36 @@ def summarize_scores(*, dyad_id: str, subject: str, outer_scores: pd.DataFrame) 
     chosen = chosen.rename(columns={"test_run": "run"})
     chosen = chosen[["dyad_id", "subject", "run", "model", "fold_id", "r"]]
 
-    base = chosen.loc[chosen["model"] == "baseline", ["dyad_id", "subject", "run", "fold_id", "r"]].rename(
-        columns={"r": "r_baseline"}
-    )
-
+    base = chosen.loc[chosen["model"] == "baseline", ["dyad_id", "subject", "run", "fold_id", "r"]].rename(columns={"r": "r_baseline"})
     merged = chosen.merge(base, on=["dyad_id", "subject", "run", "fold_id"], how="left")
-    merged["delta_r"] = merged["r"] - merged["r_baseline"]
+    merged["delta_r"] = np.where(merged["r_baseline"].notna(), merged["r"] - merged["r_baseline"], np.nan)
     return merged
 
 
 def best_model_table(*, dyad_id: str, subject: str, summary: pd.DataFrame) -> pd.DataFrame:
     nonbase = summary.loc[summary["model"] != "baseline"].copy()
     if nonbase.empty:
+        means = summary.groupby("model", as_index=False)["r"].mean(numeric_only=True)
+        if means.empty:
+            return pd.DataFrame(
+                [
+                    {
+                        "dyad_id": dyad_id,
+                        "subject": subject,
+                        "best_model": "baseline",
+                        "mean_delta_r": 0.0,
+                    }
+                ]
+            )
+        means = means.sort_values(["r", "model"], ascending=[False, True], kind="mergesort")
+        best = means.iloc[0].to_dict()
         return pd.DataFrame(
             [
                 {
                     "dyad_id": dyad_id,
                     "subject": subject,
-                    "best_model": "baseline",
-                    "mean_delta_r": 0.0,
+                    "best_model": str(best["model"]),
+                    "mean_delta_r": float("nan"),
                 }
             ]
         )
@@ -106,7 +117,11 @@ def build_subject_score_tables(
     selected = selected[["dyad_id", "subject", "model", "fold_id", "test_run", "alpha", "r"]]
     base = selected.loc[selected["model"] == "baseline", ["fold_id", "test_run", "r"]].rename(columns={"r": "baseline_r"})
     outer_fold_scores = selected.merge(base, on=["fold_id", "test_run"], how="left")
-    outer_fold_scores["delta_r"] = outer_fold_scores["r"] - outer_fold_scores["baseline_r"]
+    outer_fold_scores["delta_r"] = np.where(
+        outer_fold_scores["baseline_r"].notna(),
+        outer_fold_scores["r"] - outer_fold_scores["baseline_r"],
+        np.nan,
+    )
     outer_fold_scores = outer_fold_scores.sort_values(["model", "test_run"], kind="mergesort").reset_index(drop=True)
 
     best_alpha_by_model = selected.groupby("model", as_index=False).agg(
@@ -120,7 +135,7 @@ def build_subject_score_tables(
             mean_delta_r=("delta_r", "mean"),
         )
         .merge(best_alpha_by_model, on="model", how="left")
-        .sort_values(["mean_delta_r", "model"], ascending=[False, True], kind="mergesort")
+        .sort_values(["mean_r", "model"], ascending=[False, True], kind="mergesort")
         .reset_index(drop=True)
     )
     summary = model_comparison.assign(dyad_id=str(dyad_id), subject=str(subject))[

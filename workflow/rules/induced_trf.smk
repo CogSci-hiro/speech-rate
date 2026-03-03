@@ -77,7 +77,7 @@ rule induced_trf_subject:
         analysis="induced_trf_.+"
     input:
         events=OUT_DIR + "/events/events.parquet",
-        dataset_index=OUT_DIR + "/dataset/index_resampled.parquet",
+        dataset_index=OUT_DIR + "/dataset/index.parquet",
         emg=OUT_DIR + "/features/emg/{dyad_id}/{subject}/emg_env.parquet",
         validate_config=OUT_DIR + "/_meta/config_validated.json",
         write_manifest=OUT_DIR + "/_meta/run_manifest.json",
@@ -107,7 +107,7 @@ rule induced_trf_subject:
 rule induced_trf_aggregate:
     input:
         OUT_DIR + "/events/events.parquet",
-        OUT_DIR + "/dataset/index_resampled.parquet",
+        OUT_DIR + "/dataset/index.parquet",
         OUT_DIR + "/_meta/features_emg_done.txt",
         OUT_DIR + "/_meta/config_validated.json",
         OUT_DIR + "/_meta/run_manifest.json",

@@ -3,13 +3,17 @@ import pandas as pd
 import pytest
 
 from rate.evoked_trf.fit import build_design_matrix as build_design_matrix_legacy
-from rate.evoked_trf.spec import add_timelock_columns, get_models
-from rate.trf.design import build_design_matrix, parse_evoked_models_config
+from rate.evoked_trf.spec import ModelSpec, RegressorSpec, add_timelock_columns
+from rate.trf.design import (
+    UNIFIED_TRF_MODEL_NAME,
+    UNIFIED_TRF_REGRESSOR_EXPRESSIONS,
+    build_design_matrix,
+    parse_evoked_models_config,
+)
 
 
 LEGACY_MODELS_CFG = [
-    {"name": "baseline", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg"]},
-    {"name": "self_rate", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "self_rate"]},
+    {"name": UNIFIED_TRF_MODEL_NAME, "regressors": list(UNIFIED_TRF_REGRESSOR_EXPRESSIONS)},
 ]
 
 
@@ -27,10 +31,20 @@ def _demo_events_df():
     )
 
 
-@pytest.mark.parametrize("model_name", ["baseline", "self_rate"])
-def test_config_design_matrix_matches_legacy_builder_for_existing_models(model_name: str) -> None:
+def test_config_design_matrix_matches_legacy_builder_for_existing_models() -> None:
     models_new = {m.model_name: m for m in parse_evoked_models_config(list(LEGACY_MODELS_CFG))}
-    models_old = {m.model_name: m for m in get_models()}
+    model_name = UNIFIED_TRF_MODEL_NAME
+    legacy_unified = ModelSpec(
+        model_name=model_name,
+        regressors=(
+            RegressorSpec(name="self_onset_impulse", column=None, time_lock="self_IPU_onset", kind="impulse"),
+            RegressorSpec(name="other_offset_impulse", column=None, time_lock="other_IPU_offset", kind="impulse"),
+            RegressorSpec(name="emg", column="emg_env", time_lock=None, kind="emg"),
+            RegressorSpec(name="self_rate", column="self_rate", time_lock="self_IPU_onset", kind="self_rate"),
+            RegressorSpec(name="other_rate", column="other_rate", time_lock="other_IPU_offset", kind="other_rate"),
+            RegressorSpec(name="abs_diff", column="abs_diff", time_lock="self_IPU_onset", kind="abs_diff"),
+        ),
+    )
 
     ev = _demo_events_df()
     emg = np.linspace(0.1, 1.0, 8, dtype=float)
@@ -41,7 +55,7 @@ def test_config_design_matrix_matches_legacy_builder_for_existing_models(model_n
 
     X_old, names_old = build_design_matrix_legacy(
         events=ev,
-        model=models_old[model_name],
+        model=legacy_unified,
         sfreq_hz=sfreq,
         n_samples=n_samples,
         sample_t0_s=sample_t0_s,
@@ -67,11 +81,11 @@ def test_config_design_matrix_matches_legacy_builder_for_existing_models(model_n
 
 
 def test_parse_evoked_models_config_rejects_unsupported_grammar() -> None:
+    with pytest.raises(ValueError, match="exactly one model"):
+        parse_evoked_models_config([])
+
+    with pytest.raises(ValueError, match="regressors exactly"):
+        parse_evoked_models_config([{"name": "bad", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg"]}])
+
     with pytest.raises(ValueError, match="Unsupported feature"):
         parse_evoked_models_config([{"name": "bad", "regressors": ["not_a_feature"]}])
-
-    with pytest.raises(ValueError, match="Impulse × impulse"):
-        parse_evoked_models_config([{"name": "bad2", "regressors": ["self_ipu_onset * other_ipu_offset"]}])
-
-    with pytest.raises(ValueError, match="Nested interactions"):
-        parse_evoked_models_config([{"name": "bad3", "regressors": ["self_rate * other_rate * emg"]}])

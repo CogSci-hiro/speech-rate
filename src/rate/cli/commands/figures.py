@@ -58,6 +58,7 @@ BASELINE_CONTROL_REGRESSORS = {
     "self_ipu_onset",
     "other_ipu_offset",
 }
+TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "abs_diff"}
 
 
 def add_subparser(subparsers) -> ArgumentParser:
@@ -158,9 +159,14 @@ def run_trf_figures(
 
     if figure in (FIGURE_JOINT, FIGURE_TOPO):
         reg_name = _require_regressor(regressor=regressor, figure=figure)
+        is_target_regressor = reg_name in TARGET_BEHAVIOR_REGRESSORS
         evoked = _load_group_evoked(mne=mne, out_dir=out_dir, family=family, regressor=reg_name)
-        cluster_intervals = _load_cluster_intervals(
-            cluster_path=_cluster_path(out_dir=out_dir, family=family, regressor=reg_name)
+        cluster_intervals = (
+            _load_cluster_intervals(
+                cluster_path=_cluster_path(out_dir=out_dir, family=family, regressor=reg_name)
+            )
+            if is_target_regressor
+            else None
         )
 
         if figure == FIGURE_JOINT:
@@ -171,12 +177,16 @@ def run_trf_figures(
                 regressor=reg_name,
                 fallback=evoked.data.T,
             )
-            sig_mask = _load_topomap_significance_mask(
-                out_dir=out_dir,
-                family=family,
-                regressor=reg_name,
-                alpha=alpha,
-                expected_shape=stat_map.shape,
+            sig_mask = (
+                _load_topomap_significance_mask(
+                    out_dir=out_dir,
+                    family=family,
+                    regressor=reg_name,
+                    alpha=alpha,
+                    expected_shape=stat_map.shape,
+                )
+                if is_target_regressor
+                else None
             )
             joint_time_clusters = cluster_intervals
             if sig_mask is not None:
@@ -213,12 +223,16 @@ def run_trf_figures(
             regressor=reg_name,
             fallback=evoked.data.T,
         )
-        sig_mask = _load_topomap_significance_mask(
-            out_dir=out_dir,
-            family=family,
-            regressor=reg_name,
-            alpha=alpha,
-            expected_shape=stat_map.shape,
+        sig_mask = (
+            _load_topomap_significance_mask(
+                out_dir=out_dir,
+                family=family,
+                regressor=reg_name,
+                alpha=alpha,
+                expected_shape=stat_map.shape,
+            )
+            if is_target_regressor
+            else None
         )
         plot_stat_topomap_sequence(
             stat=stat_map,
@@ -639,10 +653,6 @@ def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:
     """Build path to group-level kernel file for a regressor."""
     legacy = out_dir / family / KERNEL_FILE_TEMPLATE.format(regressor=regressor)
     model = _trf_model_for_regressor(regressor)
-    if str(regressor) == "emg":
-        emg_onset_path = out_dir / "features" / "emg" / "grand_average_emg_self_onset-ave.fif"
-        if emg_onset_path.exists():
-            return emg_onset_path
     stats_path = out_dir / "stats" / family / model / str(regressor) / "grand_average_trfs-ave.fif"
     if stats_path.exists():
         return stats_path
@@ -685,6 +695,14 @@ def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
         )
         if subject_evokeds:
             return mne.grand_average(subject_evokeds, interpolate_bads=False)
+        artifact_evoked = _build_group_evoked_from_trf_artifacts(
+            mne=mne,
+            out_dir=out_dir,
+            family=family,
+            regressor=regressor,
+        )
+        if artifact_evoked is not None:
+            return artifact_evoked
         raise FileNotFoundError(f"Kernel file not found: {kernel_path}")
 
     evokeds = mne.read_evokeds(kernel_path)
@@ -897,11 +915,7 @@ def _load_subject_kernel_arrays_from_trf_artifacts(
     model = _trf_model_for_regressor(regressor)
     lags_ref = np.asarray(template_evoked.times, dtype=float)
     shape_ref = tuple(np.asarray(template_evoked.data).shape)
-    LOGGER.info(
-        "SEM fallback for %s/%s: using per-subject kernels_outer with last feature slice after fold averaging",
-        family,
-        regressor,
-    )
+    LOGGER.info("SEM fallback for %s/%s: using per-subject kernels_outer after fold averaging", family, regressor)
 
     arrays: list[np.ndarray] = []
     for kernels_path in sorted(subjects_root.rglob(f"models/{model}/kernels_outer.npy")):
@@ -922,10 +936,14 @@ def _load_subject_kernel_arrays_from_trf_artifacts(
         if not np.allclose(lags, lags_ref, atol=atol, rtol=1e-6):
             continue
 
+        feature_index = _feature_index_for_regressor(regressor=regressor, n_features=int(kernels.shape[2]))
+        if feature_index is None:
+            continue
         subj_kernel = _subject_kernel_mean_from_outer_folds(
             kernels=kernels,
             n_channels=int(shape_ref[0]),
             n_lags=int(shape_ref[1]),
+            feature_index=int(feature_index),
         )
         if subj_kernel is None:
             continue
@@ -940,6 +958,7 @@ def _subject_kernel_mean_from_outer_folds(
     kernels: np.ndarray,
     n_channels: int,
     n_lags: int,
+    feature_index: int,
 ) -> np.ndarray | None:
     """Collapse outer-fold TRF kernels to one subject-level (channels x lags) array."""
     arr = np.asarray(kernels, dtype=float)
@@ -948,10 +967,126 @@ def _subject_kernel_mean_from_outer_folds(
     _, arr_n_channels, n_features, arr_n_lags = arr.shape
     if int(arr_n_channels) != int(n_channels) or int(arr_n_lags) != int(n_lags):
         return None
-    # Per user request: subject estimate = mean across outer folds, then take the
-    # target kernel as the last feature in the model design.
+    if int(feature_index) < 0 or int(feature_index) >= int(n_features):
+        return None
+    # Subject estimate = mean across outer folds, then select the requested feature.
     subj_mean = np.nanmean(arr, axis=0)          # (n_channels, n_features, n_lags)
-    return np.asarray(subj_mean[:, -1, :], dtype=float)
+    return np.asarray(subj_mean[:, int(feature_index), :], dtype=float)
+
+
+def _feature_index_for_regressor(*, regressor: str, n_features: int) -> int | None:
+    token = str(regressor).strip()
+    unified = {
+        "self_onset_impulse": 0,
+        "other_offset_impulse": 1,
+        "emg": 2,
+        "self_rate": 3,
+        "other_rate": 4,
+        "abs_diff": 5,
+    }
+    idx = unified.get(token)
+    if idx is not None and idx < int(n_features):
+        return int(idx)
+    # Backward-compatible fallback for legacy single-target model artifacts.
+    if token in {"self_rate", "other_rate", "abs_diff"} and int(n_features) > 0:
+        return int(n_features - 1)
+    return None
+
+
+def _build_group_evoked_from_trf_artifacts(
+    *,
+    mne,
+    out_dir: Path,
+    family: str,
+    regressor: str,
+):
+    subjects_root = out_dir / str(family) / "subjects"
+    if not subjects_root.exists():
+        return None
+
+    model = _trf_model_for_regressor(regressor)
+    subject_arrays: list[np.ndarray] = []
+    lags_ref: np.ndarray | None = None
+    ch_names_ref: list[str] | None = None
+
+    for kernels_path in sorted(subjects_root.rglob(f"models/{model}/kernels_outer.npy")):
+        lags_path = kernels_path.with_name("lags.npy")
+        if not lags_path.exists():
+            continue
+        try:
+            kernels = np.asarray(np.load(kernels_path), dtype=float)
+            lags = np.asarray(np.load(lags_path), dtype=float).reshape(-1)
+        except Exception:
+            continue
+        if kernels.ndim != 4 or lags.ndim != 1 or lags.size == 0:
+            continue
+        feature_index = _feature_index_for_regressor(regressor=regressor, n_features=int(kernels.shape[2]))
+        if feature_index is None:
+            continue
+        subj_kernel = _subject_kernel_mean_from_outer_folds(
+            kernels=kernels,
+            n_channels=int(kernels.shape[1]),
+            n_lags=int(kernels.shape[3]),
+            feature_index=int(feature_index),
+        )
+        if subj_kernel is None:
+            continue
+
+        if lags_ref is None:
+            lags_ref = lags
+        else:
+            if lags.shape != lags_ref.shape or not np.allclose(lags, lags_ref, atol=1e-8, rtol=1e-6):
+                continue
+
+        ch_names_path = kernels_path.with_name("channel_names.npy")
+        if ch_names_path.exists():
+            try:
+                ch_names = [str(v) for v in np.asarray(np.load(ch_names_path), dtype=str).reshape(-1)]
+            except Exception:
+                ch_names = []
+        else:
+            ch_names = []
+        if not ch_names:
+            ch_names = [f"EEG{idx+1:03d}" for idx in range(int(subj_kernel.shape[0]))]
+
+        if ch_names_ref is None:
+            ch_names_ref = ch_names
+        elif ch_names != ch_names_ref:
+            continue
+
+        subject_arrays.append(np.asarray(subj_kernel, dtype=float))
+
+    if not subject_arrays or lags_ref is None:
+        return None
+
+    mean_data = np.nanmean(np.stack(subject_arrays, axis=0), axis=0)  # (ch, lag)
+    sfreq = 1.0
+    if lags_ref.size > 1:
+        dt = float(np.nanmedian(np.diff(lags_ref)))
+        if np.isfinite(dt) and dt > 0:
+            sfreq = 1.0 / dt
+    ch_names_final = ch_names_ref if ch_names_ref is not None else [f"EEG{idx+1:03d}" for idx in range(mean_data.shape[0])]
+    info = mne.create_info(ch_names=ch_names_final, sfreq=float(sfreq), ch_types="eeg")
+    _attach_default_eeg_montage(info=info, mne=mne)
+    return mne.EvokedArray(
+        data=np.asarray(mean_data, dtype=float),
+        info=info,
+        tmin=float(lags_ref[0]),
+        comment=f"{family}:{regressor}:from_subject_kernels_outer",
+        nave=int(len(subject_arrays)),
+        verbose=False,
+    )
+
+
+def _attach_default_eeg_montage(*, info, mne) -> None:
+    """Attach a standard EEG montage when channel names look mappable."""
+    for montage_name in ("biosemi64", "standard_1020"):
+        try:
+            montage = mne.channels.make_standard_montage(montage_name)
+            info.set_montage(montage, on_missing="ignore")
+            return
+        except Exception:
+            continue
 
 
 def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
@@ -971,7 +1106,11 @@ def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
 def _trf_model_for_regressor(regressor: str) -> str:
     """Map regressor to model directory used in stats outputs."""
     value = str(regressor).strip()
-    return "baseline" if value in BASELINE_CONTROL_REGRESSORS else value
+    if value in TARGET_BEHAVIOR_REGRESSORS:
+        return "unified"
+    if value in BASELINE_CONTROL_REGRESSORS:
+        return "unified"
+    return value
 
 
 def _build_reconstruction_erp_panel_data(
@@ -1099,6 +1238,8 @@ def _load_cluster_intervals(cluster_path: Path) -> list[tuple[float, float]] | N
     """Load optional time-cluster intervals from cluster table if present."""
     if not cluster_path.exists():
         return None
+    if cluster_path.suffix.lower() not in {".csv", ".parquet"}:
+        return None
 
     if cluster_path.suffix.lower() == ".csv":
         table = pd.read_csv(cluster_path)
@@ -1145,6 +1286,8 @@ def _load_topomap_significance_mask(
     stats_dir = _stats_feature_dir(out_dir=out_dir, family=family, regressor=regressor)
     labels_path = stats_dir / "cluster_labels.npy"
     cluster_path = _cluster_path(out_dir=out_dir, family=family, regressor=regressor)
+    if cluster_path.suffix.lower() not in {".csv", ".parquet"}:
+        return None
     if not labels_path.exists() or not cluster_path.exists():
         return None
 

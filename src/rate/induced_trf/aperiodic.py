@@ -8,6 +8,11 @@ import pandas as pd
 from fooof import FOOOF
 from scipy.signal import welch
 
+try:
+    from tqdm.auto import tqdm
+except Exception:  # pragma: no cover - optional dependency fallback
+    tqdm = None
+
 
 @dataclass(frozen=True)
 class SlidingAperiodicConfig:
@@ -115,7 +120,18 @@ def compute_sliding_aperiodic(
         raise ValueError(f"Invalid band_hz: {band_hz}")
 
     records: list[dict[str, float | str]] = []
-    for center in range(half_win, x.shape[1] - half_win, step_samples):
+    centers = range(half_win, x.shape[1] - half_win, step_samples)
+    center_iter = centers
+    if tqdm is not None:
+        center_iter = tqdm(
+            centers,
+            total=len(centers),
+            desc="Sliding FOOOF",
+            unit="win",
+            leave=False,
+        )
+
+    for center in center_iter:
         start = center - half_win
         stop = center + half_win
         segment = x[:, start:stop]

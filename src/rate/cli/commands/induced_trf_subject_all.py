@@ -27,7 +27,7 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--out-dir", help="Optional override for cfg['paths']['out_dir'].")
     parser.add_argument(
         "--dataset-index",
-        help="Optional explicit dataset index parquet path. Defaults to <out_dir>/dataset/index_resampled.parquet.",
+        help="Optional explicit dataset index parquet path. Defaults to <out_dir>/dataset/index.parquet.",
     )
     parser.add_argument(
         "--band",
@@ -64,8 +64,8 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     if args.dataset_index:
         dataset_index_path = Path(args.dataset_index)
     else:
-        preferred = out_dir / "dataset" / "index_resampled.parquet"
-        fallback = out_dir / "dataset" / "index.parquet"
+        preferred = out_dir / "dataset" / "index.parquet"
+        fallback = out_dir / "dataset" / "index_resampled.parquet"
         dataset_index_path = preferred if preferred.exists() else fallback
     if not dataset_index_path.exists():
         raise FileNotFoundError(f"dataset index not found: {dataset_index_path}")

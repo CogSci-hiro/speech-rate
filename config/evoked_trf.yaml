@@ -27,28 +27,13 @@ evoked_trf:
     max: 7
     n_alpha: 5
   models:
-    - name: "baseline"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
-    - name: "self_rate"
+    - name: "unified"
       regressors:
         - "self_ipu_onset"
         - "other_ipu_offset"
         - "emg"
         - "self_rate"
-    - name: "other_rate"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
         - "other_rate"
-    - name: "abs_diff"
-      regressors:
-        - "self_ipu_onset"
-        - "other_ipu_offset"
-        - "emg"
         - "abs_diff"
     #- name: "self_rate_sq"
     #  regressors:
