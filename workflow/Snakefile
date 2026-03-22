@@ -71,7 +71,6 @@ class _ForbiddenConfigProxy:
 
 # Load modular YAMLs explicitly.
 emg_config = _load_yaml_config("config/emg.yaml")
-trf_config = _load_yaml_config("config/trf.yaml")
 evoked_trf_config = _load_yaml_config("config/evoked_trf.yaml")
 induced_trf_config = _load_yaml_config("config/induced_trf.yaml")
 fooof_config = _load_yaml_config("config/fooof.yaml")
@@ -83,7 +82,6 @@ stats_config = _load_yaml_config("config/stats.yaml")
 
 for _name, _cfg in (
     ("emg_config", emg_config),
-    ("trf_config", trf_config),
     ("evoked_trf_config", evoked_trf_config),
     ("induced_trf_config", induced_trf_config),
     ("fooof_config", fooof_config),

@@ -78,12 +78,7 @@ INDUCED_FAMILIES = [
 
 
 def _trf_model_for_regressor(regressor: str) -> str:
-    value = str(regressor).strip()
-    if value in TARGET_BEHAVIOR_REGRESSORS:
-        return "unified"
-    if value in BASELINE_CONTROL_REGRESSORS:
-        return "unified"
-    return value
+    return str(regressor).strip()
 
 
 def _active_model_names(branch_cfg, branch_key: str):
@@ -103,14 +98,48 @@ ACTIVE_EVOKED_MODELS = set(_active_model_names(evoked_trf_config, "evoked_trf"))
 ACTIVE_INDUCED_MODELS = set(_active_model_names(induced_trf_config, "induced_trf"))
 
 
+def _canonical_feature_name(value: str) -> str:
+    token = str(value).strip()
+    aliases = {
+        "self_ipu_onset": "self_onset_impulse",
+        "other_ipu_offset": "other_offset_impulse",
+        "self_rate^2": "self_rate_sq",
+        "other_rate^2": "other_rate_sq",
+        "alignment^2": "alignment_sq",
+        "convergence^2": "convergence_sq",
+    }
+    return aliases.get(token, token)
+
+
+def _feature_model_map(branch_cfg, branch_key: str):
+    block = branch_cfg.get(branch_key, {}) or {}
+    specs = block.get("models", []) or []
+    out = {}
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        model_name = str(spec.get("name", "")).strip()
+        regressors = [_canonical_feature_name(r) for r in (spec.get("regressors", []) or [])]
+        if not model_name:
+            continue
+        for reg in regressors:
+            out.setdefault(str(reg), model_name)
+    return out
+
+
+EVOKED_FEATURE_MODEL_MAP = _feature_model_map(evoked_trf_config, "evoked_trf")
+INDUCED_FEATURE_MODEL_MAP = _feature_model_map(induced_trf_config, "induced_trf")
+
+
 def _configured_regressors_for_family(family: str):
-    active_models = ACTIVE_EVOKED_MODELS if family == "evoked_trf" else ACTIVE_INDUCED_MODELS
-    return [reg for reg in RAW_REGRESSORS if _trf_model_for_regressor(reg) in active_models]
+    feature_map = EVOKED_FEATURE_MODEL_MAP if family == "evoked_trf" else INDUCED_FEATURE_MODEL_MAP
+    return [reg for reg in RAW_REGRESSORS if str(reg).strip() in feature_map]
 
 
 def _control_regressor_dependency(*, family: str, regressor: str) -> str:
     """Return an existing dependency path for control regressors to avoid DAG-time missing-input errors."""
-    model = _trf_model_for_regressor(regressor)
+    feature_map = EVOKED_FEATURE_MODEL_MAP if str(family) == "evoked_trf" else INDUCED_FEATURE_MODEL_MAP
+    model = feature_map.get(str(regressor).strip(), _trf_model_for_regressor(regressor))
     stats_kernel = (
         f"{_viz_out_dir()}/stats/{family}/{model}/{regressor}/grand_average_trfs-ave.fif"
     )
@@ -128,7 +157,7 @@ def _control_regressor_dependency(*, family: str, regressor: str) -> str:
 
 def _evoked_kernel_input(wildcards):
     regressor = str(wildcards.regressor).strip()
-    model = _trf_model_for_regressor(regressor)
+    model = EVOKED_FEATURE_MODEL_MAP.get(regressor, _trf_model_for_regressor(regressor))
     if regressor in BASELINE_CONTROL_REGRESSORS:
         # Controls may be rendered from subject-level FIFs when stats aggregates are absent.
         return _control_regressor_dependency(family="evoked_trf", regressor=regressor)
@@ -140,7 +169,7 @@ def _evoked_cluster_input(wildcards):
     if regressor not in TARGET_BEHAVIOR_REGRESSORS:
         # Controls have no kernel-cluster stats; reuse kernel dependency to keep DAG stable.
         return _evoked_kernel_input(wildcards)
-    model = _trf_model_for_regressor(regressor)
+    model = EVOKED_FEATURE_MODEL_MAP.get(regressor, _trf_model_for_regressor(regressor))
     return f"{_viz_out_dir()}/stats/evoked_trf/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
 
 
@@ -150,7 +179,7 @@ def _evoked_timecourse_kernel_inputs(_wildcards):
         if reg in BASELINE_CONTROL_REGRESSORS:
             out.append(_control_regressor_dependency(family="evoked_trf", regressor=reg))
         else:
-            out.append(f"{_viz_out_dir()}/stats/evoked_trf/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif")
+            out.append(f"{_viz_out_dir()}/stats/evoked_trf/{EVOKED_FEATURE_MODEL_MAP[reg]}/{reg}/grand_average_trfs-ave.fif")
     return out
 
 
@@ -158,7 +187,7 @@ def _family_kernel_input(wildcards):
     reg = str(wildcards.regressor).strip()
     if reg in BASELINE_CONTROL_REGRESSORS:
         return _control_regressor_dependency(family=str(wildcards.family), regressor=reg)
-    model = _trf_model_for_regressor(reg)
+    model = INDUCED_FEATURE_MODEL_MAP.get(reg, _trf_model_for_regressor(reg))
     family = str(wildcards.family)
     return f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/grand_average_trfs-ave.fif"
 
@@ -168,7 +197,7 @@ def _family_cluster_input(wildcards):
     if reg not in TARGET_BEHAVIOR_REGRESSORS:
         # Controls have no kernel-cluster stats; reuse kernel dependency to keep DAG stable.
         return _family_kernel_input(wildcards)
-    model = _trf_model_for_regressor(reg)
+    model = INDUCED_FEATURE_MODEL_MAP.get(reg, _trf_model_for_regressor(reg))
     family = str(wildcards.family)
     return f"{_viz_out_dir()}/stats/{family}/{model}/{reg}/clusters.{_viz_table_ext()}"
 
@@ -180,7 +209,7 @@ def _family_timecourse_kernel_inputs(wildcards):
         if reg in BASELINE_CONTROL_REGRESSORS:
             out.append(_control_regressor_dependency(family=family, regressor=reg))
         else:
-            out.append(f"{_viz_out_dir()}/stats/{family}/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif")
+            out.append(f"{_viz_out_dir()}/stats/{family}/{INDUCED_FEATURE_MODEL_MAP[reg]}/{reg}/grand_average_trfs-ave.fif")
     return out
 
 

@@ -9,10 +9,10 @@ reporting:
 # Keep induced band metadata local to stats config so stats rule expansion does not
 # depend on the tracked compute config.
 induced_trf:
-  bands: ["theta", "alpha"]#, "beta"]
-  target_kinds: ["raw", "residual"]
+  bands: ["theta", "alpha"]
+  target_kinds: ["residual"]
   # Optional: restrict residual induced analyses to this subset; [] disables residual analyses.
-  residual_bands: ["theta"]
+  residual_bands: ["theta", "alpha"]
   bands_hz:
     theta: [4.0, 8.0]
     alpha: [8.0, 12.0]
@@ -22,37 +22,12 @@ stats:
   kernel_cluster:
     method: "tfce"   # tfce | threshold
     allow_placeholder_outputs: false  # debug-only; when true writes zero-filled fallback outputs on failure
-    n_permutations: 1000
+    n_permutations: 100
     seed: 42
-    threshold_p: 0.001  # Only used if method = threshold
+    threshold_p: 0.05  # Only used if method = threshold
     tfce:
       start: 0.0
       step: 0.01
     tail: 0
     adjacency:
       montage_name: "biosemi64"
-
-# Phase 1 modular duplicate from config/config.yaml.
-# Kept under a non-active key to avoid changing current pipeline behavior.
-phase1_master_stats_copy:
-  stats:
-
-    kernel_cluster:
-
-      method: "threshold"          # tfce | threshold
-
-      n_permutations: 1000
-      seed: 42
-
-      # Only used if method = threshold
-      threshold_p: 0.001
-
-      # Only used if method = tfce
-      tfce:
-        start: 0.0
-        step: 0.01
-
-      tail: 0                 # -1 | 0 | 1
-
-      adjacency:
-        montage_name: "biosemi64"

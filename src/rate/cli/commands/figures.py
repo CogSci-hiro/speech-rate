@@ -259,6 +259,13 @@ def run_trf_figures(
 
     if figure == FIGURE_TIMECOURSE:
         panel_electrodes = electrodes if electrodes is not None else _get_trf_electrodes(config)
+        regressors = _filter_available_regressors(
+            out_dir=out_dir,
+            family=family,
+            regressors=regressors,
+        )
+        if not regressors:
+            raise FileNotFoundError(f"No available regressors found for {family} timecourse panel under {out_dir}")
         condition_evokeds = {
             reg: _load_group_evoked(mne=mne, out_dir=out_dir, family=family, regressor=reg)
             for reg in regressors
@@ -660,7 +667,7 @@ def _load_trial_psd_spectra_table(*, out_dir: Path) -> pd.DataFrame:
 def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:
     """Build path to group-level kernel file for a regressor."""
     legacy = out_dir / family / KERNEL_FILE_TEMPLATE.format(regressor=regressor)
-    model = _trf_model_for_regressor(regressor)
+    model = _trf_model_for_regressor(out_dir=out_dir, family=family, regressor=regressor)
     stats_path = out_dir / "stats" / family / model / str(regressor) / "grand_average_trfs-ave.fif"
     if stats_path.exists():
         return stats_path
@@ -670,7 +677,7 @@ def _kernel_path(*, out_dir: Path, family: str, regressor: str) -> Path:
 def _cluster_path(*, out_dir: Path, family: str, regressor: str) -> Path:
     """Build path to optional cluster table for a regressor."""
     legacy = out_dir / family / CLUSTER_FILE_TEMPLATE.format(regressor=regressor)
-    model = _trf_model_for_regressor(regressor)
+    model = _trf_model_for_regressor(out_dir=out_dir, family=family, regressor=regressor)
     stats_csv = out_dir / "stats" / family / model / str(regressor) / "clusters.csv"
     stats_parquet = out_dir / "stats" / family / model / str(regressor) / "clusters.parquet"
     if stats_csv.exists():
@@ -681,7 +688,7 @@ def _cluster_path(*, out_dir: Path, family: str, regressor: str) -> Path:
 
 
 def _stats_feature_dir(*, out_dir: Path, family: str, regressor: str) -> Path:
-    model = _trf_model_for_regressor(regressor)
+    model = _trf_model_for_regressor(out_dir=out_dir, family=family, regressor=regressor)
     return out_dir / "stats" / family / model / str(regressor)
 
 
@@ -887,7 +894,7 @@ def _load_subject_evokeds(*, mne, out_dir: Path, family: str, regressor: str) ->
     if not subjects_root.exists():
         return []
 
-    model = _trf_model_for_regressor(regressor)
+    model = _trf_model_for_regressor(out_dir=out_dir, family=family, regressor=regressor)
     fname = "self_onset-ave.fif" if regressor == "self_onset_impulse" else (
         "other_offset-ave.fif" if regressor == "other_offset_impulse" else f"{regressor}-ave.fif"
     )
@@ -920,7 +927,7 @@ def _load_subject_kernel_arrays_from_trf_artifacts(
     if not subjects_root.exists():
         return []
 
-    model = _trf_model_for_regressor(regressor)
+    model = _trf_model_for_regressor(out_dir=out_dir, family=family, regressor=regressor)
     lags_ref = np.asarray(template_evoked.times, dtype=float)
     shape_ref = tuple(np.asarray(template_evoked.data).shape)
     LOGGER.info("SEM fallback for %s/%s: using per-subject kernels_outer after fold averaging", family, regressor)
@@ -1013,7 +1020,7 @@ def _build_group_evoked_from_trf_artifacts(
     if not subjects_root.exists():
         return None
 
-    model = _trf_model_for_regressor(regressor)
+    model = _trf_model_for_regressor(out_dir=out_dir, family=family, regressor=regressor)
     subject_arrays: list[np.ndarray] = []
     lags_ref: np.ndarray | None = None
     ch_names_ref: list[str] | None = None
@@ -1112,14 +1119,57 @@ def _make_condition_colors(regressors: Sequence[str]) -> dict[str, str]:
     return colors
 
 
-def _trf_model_for_regressor(regressor: str) -> str:
-    """Map regressor to model directory used in stats outputs."""
-    value = str(regressor).strip()
-    if value in TARGET_BEHAVIOR_REGRESSORS:
+def _regressor_fname(regressor: str) -> str:
+    token = str(regressor).strip()
+    if token == "self_onset_impulse":
+        return "self_onset-ave.fif"
+    if token == "other_offset_impulse":
+        return "other_offset-ave.fif"
+    return f"{token}-ave.fif"
+
+
+def _trf_model_for_regressor(*, out_dir: Path, family: str, regressor: str) -> str:
+    """Infer the model directory used for a regressor from available outputs."""
+    token = str(regressor).strip()
+    stats_root = out_dir / "stats" / str(family)
+    if stats_root.exists():
+        matches = sorted(stats_root.glob(f"*/{token}/grand_average_trfs-ave.fif"))
+        if matches:
+            return str(matches[0].parent.parent.name)
+
+    subjects_root = out_dir / str(family) / "subjects"
+    if subjects_root.exists():
+        fname = _regressor_fname(token)
+        matches = sorted(subjects_root.rglob(f"models/*/{fname}"))
+        if matches:
+            return str(matches[0].parent.name)
+
+    if token in TARGET_BEHAVIOR_REGRESSORS or token in BASELINE_CONTROL_REGRESSORS:
         return "unified"
-    if value in BASELINE_CONTROL_REGRESSORS:
-        return "unified"
-    return value
+    return token
+
+
+def _filter_available_regressors(*, out_dir: Path, family: str, regressors: Sequence[str]) -> list[str]:
+    available: list[str] = []
+    for reg in regressors:
+        token = str(reg).strip()
+        try:
+            kernel_path = _kernel_path(out_dir=out_dir, family=family, regressor=token)
+            if kernel_path.exists():
+                available.append(token)
+                continue
+            if (out_dir / str(family) / "subjects").exists():
+                fname = _regressor_fname(token)
+                subject_matches = sorted((out_dir / str(family) / "subjects").rglob(f"models/*/{fname}"))
+                if subject_matches:
+                    available.append(token)
+                    continue
+        except Exception:
+            continue
+    missing = [str(r).strip() for r in regressors if str(r).strip() not in set(available)]
+    for reg in missing:
+        LOGGER.warning("Skipping unavailable regressor '%s' for %s figures", reg, family)
+    return available
 
 
 def _build_reconstruction_erp_panel_data(

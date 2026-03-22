@@ -61,39 +61,25 @@ KERNEL0_BEHAVIOR_FEATURES = ["self_rate", "other_rate", "alignment", "convergenc
 def _branch_behavior_feature_indexes(branch_cfg, branch_key):
     block = branch_cfg.get(branch_key, {}) or {}
     specs = block.get("models", []) or []
-    if len(specs) != 1:
-        raise ValueError(f"{branch_key} must define exactly one confirmatory model.")
-    spec = specs[0]
-    if not isinstance(spec, dict):
-        raise ValueError(f"{branch_key}.models[0] must be a mapping.")
-    model_name = str(spec.get("name", "")).strip()
-    regressors = [str(r).strip() for r in (spec.get("regressors", []) or [])]
-    if not model_name:
-        raise ValueError(f"{branch_key}.models[0].name must be non-empty.")
-    out = {"model_name": model_name}
-    for feature in KERNEL0_BEHAVIOR_FEATURES:
-        if feature not in regressors:
-            raise ValueError(f"{branch_key} model '{model_name}' is missing required regressor '{feature}'.")
-        out[feature] = int(regressors.index(feature))
+    out = {}
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        model_name = str(spec.get("name", "")).strip()
+        regressors = [str(r).strip() for r in (spec.get("regressors", []) or [])]
+        if not model_name:
+            continue
+        for feature in KERNEL0_BEHAVIOR_FEATURES:
+            if feature in regressors and feature not in out:
+                out[feature] = {
+                    "model_name": model_name,
+                    "feature_index": int(regressors.index(feature)),
+                }
     return out
 
 
-def _shared_confirmatory_kernel_spec():
-    evoked = _branch_behavior_feature_indexes(evoked_trf_config, "evoked_trf")
-    induced = _branch_behavior_feature_indexes(induced_trf_config, "induced_trf")
-    if evoked["model_name"] != induced["model_name"]:
-        raise ValueError("Evoked and induced confirmatory model names must match.")
-    for feature in KERNEL0_BEHAVIOR_FEATURES:
-        if evoked[feature] != induced[feature]:
-            raise ValueError(f"Evoked/induced feature index mismatch for '{feature}'.")
-    return {
-        "model_name": str(evoked["model_name"]),
-        "feature_index_by_name": {f: int(evoked[f]) for f in KERNEL0_BEHAVIOR_FEATURES},
-    }
-
-
-KERNEL0_SHARED = _shared_confirmatory_kernel_spec()
-KERNEL0_SHARED_MODEL = str(KERNEL0_SHARED["model_name"])
+EVOKED_KERNEL0_FEATURE_MAP = _branch_behavior_feature_indexes(evoked_trf_config, "evoked_trf")
+INDUCED_KERNEL0_FEATURE_MAP = _branch_behavior_feature_indexes(induced_trf_config, "induced_trf")
 
 
 def _canonical_feature_name(value: str) -> str:
@@ -128,12 +114,14 @@ def _model_feature_index_from_cfg(branch_cfg, branch_key: str, model_name: str, 
 
 def _kernel0_feature_index(wildcards):
     feature_name = str(wildcards.feature_name)
-    idx = KERNEL0_SHARED["feature_index_by_name"].get(feature_name)
-    if idx is None:
+    analysis = str(wildcards.analysis)
+    feature_map = EVOKED_KERNEL0_FEATURE_MAP if analysis == "evoked_trf" else INDUCED_KERNEL0_FEATURE_MAP
+    meta = feature_map.get(feature_name)
+    if meta is None:
         raise ValueError(
-            f"Cannot resolve feature_index for confirmatory feature_name={feature_name}."
+            f"Cannot resolve feature_index for analysis={analysis} feature_name={feature_name}."
         )
-    return int(idx)
+    return int(meta["feature_index"])
 
 
 def _kernel0_feature_name(wildcards):
@@ -152,38 +140,38 @@ def _kernel0_scores_input(wildcards):
 KERNEL0_BEHAVIOR_TARGETS = [
     (
         f"{_stats_out_dir()}/stats/"
-        f"evoked_trf/{KERNEL0_SHARED_MODEL}/{feature_name}/clusters.{_stats_table_ext()}"
+        f"evoked_trf/{EVOKED_KERNEL0_FEATURE_MAP[feature_name]['model_name']}/{feature_name}/clusters.{_stats_table_ext()}"
     )
-    for feature_name in KERNEL0_BEHAVIOR_FEATURES
+    for feature_name in EVOKED_KERNEL0_FEATURE_MAP
 ]
 KERNEL0_BEHAVIOR_TARGETS += [
     (
         f"{_stats_out_dir()}/stats/"
-        f"{analysis}/{KERNEL0_SHARED_MODEL}/{feature_name}/clusters.{_stats_table_ext()}"
+        f"{analysis}/{INDUCED_KERNEL0_FEATURE_MAP[feature_name]['model_name']}/{feature_name}/clusters.{_stats_table_ext()}"
     )
     for analysis in INDUCED_ANALYSES
-    for feature_name in KERNEL0_BEHAVIOR_FEATURES
+    for feature_name in INDUCED_KERNEL0_FEATURE_MAP
 ]
 KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS = [
     (
         f"{_stats_out_dir()}/stats/"
         "evoked_trf/"
-        f"{KERNEL0_SHARED_MODEL}/"
+        f"{EVOKED_KERNEL0_FEATURE_MAP[feature_name]['model_name']}/"
         f"{feature_name}/"
         f"subject_level/subject_z_map_index.{_stats_table_ext()}"
     )
-    for feature_name in KERNEL0_BEHAVIOR_FEATURES
+    for feature_name in EVOKED_KERNEL0_FEATURE_MAP
 ]
 KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS += [
     (
         f"{_stats_out_dir()}/stats/"
         f"{analysis}/"
-        f"{KERNEL0_SHARED_MODEL}/"
+        f"{INDUCED_KERNEL0_FEATURE_MAP[feature_name]['model_name']}/"
         f"{feature_name}/"
         f"subject_level/subject_z_map_index.{_stats_table_ext()}"
     )
     for analysis in INDUCED_ANALYSES
-    for feature_name in KERNEL0_BEHAVIOR_FEATURES
+    for feature_name in INDUCED_KERNEL0_FEATURE_MAP
 ]
 
 

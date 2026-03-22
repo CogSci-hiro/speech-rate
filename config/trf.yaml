@@ -1,4 +1,0 @@
-# Phase 1 modular config duplicate from config/config.yaml -> reporting.trf
-trf:
-  regressors: ["self_rate", "other_rate", "alignment", "convergence"]#, "self_rate_sq", "other_rate_sq", "alignment_sq", "convergence_sq"]
-  electrodes: ["Fz", "Pz"]
