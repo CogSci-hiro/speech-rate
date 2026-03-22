@@ -25,20 +25,24 @@ def test_get_models_order_and_regressor_membership_contract() -> None:
         "baseline",
         "self_rate",
         "other_rate",
-        "abs_diff",
+        "alignment",
+        "convergence",
         "self_rate_sq",
         "other_rate_sq",
-        "abs_diff_sq",
+        "alignment_sq",
+        "convergence_sq",
     ]
 
     by_name = {m.model_name: [r.name for r in m.regressors] for m in models}
     assert by_name["baseline"] == ["self_onset_impulse", "other_offset_impulse", "emg"]
     assert by_name["self_rate"] == by_name["baseline"] + ["self_rate"]
     assert by_name["other_rate"] == by_name["baseline"] + ["other_rate"]
-    assert by_name["abs_diff"] == by_name["baseline"] + ["abs_diff"]
+    assert by_name["alignment"] == by_name["baseline"] + ["alignment"]
+    assert by_name["convergence"] == by_name["baseline"] + ["convergence"]
     assert by_name["self_rate_sq"] == by_name["baseline"] + ["self_rate", "self_rate_sq"]
     assert by_name["other_rate_sq"] == by_name["baseline"] + ["other_rate", "other_rate_sq"]
-    assert by_name["abs_diff_sq"] == by_name["baseline"] + ["abs_diff", "abs_diff_sq"]
+    assert by_name["alignment_sq"] == by_name["baseline"] + ["alignment", "alignment_sq"]
+    assert by_name["convergence_sq"] == by_name["baseline"] + ["convergence", "convergence_sq"]
 
 
 def test_add_timelock_columns_copies_and_casts_from_onset_offset() -> None:
@@ -197,4 +201,3 @@ def test_utils_scoring_and_concatenation_contracts() -> None:
     )
     assert np.allclose(out[:, 0], [1.0, 2.0, -1.0, -1.0, 3.0])
     assert max_lag_samples(sfreq_hz=100.0, tmin_s=-0.2, tmax_s=0.81) == 81
-

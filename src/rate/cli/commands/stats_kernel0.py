@@ -30,10 +30,12 @@ _MODEL_TEMPLATE_CANDIDATES = [
     "baseline",
     "self_rate",
     "other_rate",
-    "abs_diff",
+    "alignment",
+    "convergence",
     "self_rate_sq",
     "other_rate_sq",
-    "abs_diff_sq",
+    "alignment_sq",
+    "convergence_sq",
 ]
 
 

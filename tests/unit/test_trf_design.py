@@ -25,7 +25,8 @@ def _demo_events_df():
                 "t_offset": [0.8, 1.8, 2.8],
                 "self_rate": [2.0, 3.0, 4.0],
                 "other_rate": [1.5, 2.5, 3.5],
-                "abs_diff": [0.5, 0.5, 0.5],
+                "alignment": [-0.5, -0.5, -0.5],
+                "convergence": [0.0, 1.0, 2.0],
             }
         )
     )
@@ -42,7 +43,8 @@ def test_config_design_matrix_matches_legacy_builder_for_existing_models() -> No
             RegressorSpec(name="emg", column="emg_env", time_lock=None, kind="emg"),
             RegressorSpec(name="self_rate", column="self_rate", time_lock="self_IPU_onset", kind="self_rate"),
             RegressorSpec(name="other_rate", column="other_rate", time_lock="other_IPU_offset", kind="other_rate"),
-            RegressorSpec(name="abs_diff", column="abs_diff", time_lock="self_IPU_onset", kind="abs_diff"),
+            RegressorSpec(name="alignment", column="alignment", time_lock="self_IPU_onset", kind="alignment"),
+            RegressorSpec(name="convergence", column="convergence", time_lock="self_IPU_onset", kind="convergence"),
         ),
     )
 
@@ -93,11 +95,11 @@ def test_parse_evoked_models_config_accepts_multiple_models_in_order() -> None:
         [
             {"name": "baseline", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg"]},
             {"name": "self_rate", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "self_rate"]},
-            {"name": "interaction", "regressors": ["self_ipu_onset", "emg", "self_rate*emg"]},
+            {"name": "interaction", "regressors": ["self_ipu_onset", "emg", "alignment*emg"]},
         ]
     )
 
     assert [m.model_name for m in models] == ["baseline", "self_rate", "interaction"]
     assert [r.name for r in models[0].regressors] == ["self_onset_impulse", "other_offset_impulse", "emg"]
     assert [r.name for r in models[1].regressors] == ["self_onset_impulse", "other_offset_impulse", "emg", "self_rate"]
-    assert [r.name for r in models[2].regressors] == ["self_onset_impulse", "emg", "self_rate__x__emg"]
+    assert [r.name for r in models[2].regressors] == ["self_onset_impulse", "emg", "alignment__x__emg"]

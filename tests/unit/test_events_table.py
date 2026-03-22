@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from rate.events import build_events_table
 
@@ -18,10 +20,12 @@ REQUIRED_EVENT_COLUMNS = {
     "self_rate",
     "other_rate",
     "latency",
-    "abs_diff",
+    "alignment",
+    "convergence",
     "self_rate_sq",
     "other_rate_sq",
-    "abs_diff_sq",
+    "alignment_sq",
+    "convergence_sq",
     "time_within_run",
 }
 
@@ -132,7 +136,7 @@ def test_event_ids_are_deterministic(tmp_path: Path) -> None:
     assert first["event_id"].tolist() == second["event_id"].tolist()
 
 
-def test_other_rate_and_abs_diff_present_for_two_subject_streams(tmp_path: Path) -> None:
+def test_other_rate_alignment_and_convergence_present_for_two_subject_streams(tmp_path: Path) -> None:
     config = _base_config(tmp_path)
     ann_a = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
     ann_b = tmp_path / "annotations" / "sub-002_task-dialogue_run-1_ipu.csv"
@@ -173,10 +177,12 @@ def test_other_rate_and_abs_diff_present_for_two_subject_streams(tmp_path: Path)
     assert not events_df.empty
     assert events_df["other_rate"].notna().all()
     assert events_df["latency"].notna().all()
-    assert events_df["abs_diff"].notna().all()
+    assert events_df["alignment"].notna().all()
+    assert events_df["convergence"].notna().all()
     assert events_df["self_rate_sq"].notna().all()
     assert events_df["other_rate_sq"].notna().all()
-    assert events_df["abs_diff_sq"].notna().all()
+    assert events_df["alignment_sq"].notna().all()
+    assert events_df["convergence_sq"].notna().all()
 
 
 def test_other_rate_is_nan_when_no_partner_target_in_window(tmp_path: Path) -> None:
@@ -234,10 +240,75 @@ def test_other_rate_is_nan_when_no_partner_target_in_window(tmp_path: Path) -> N
     assert events_df["other_rate"].isna().all()
     assert events_df["latency"].isna().all()
     assert events_df["listener"].isna().all()
-    assert events_df["abs_diff"].isna().all()
+    assert events_df["alignment"].isna().all()
+    assert events_df["convergence"].isna().all()
     assert events_df["self_rate_sq"].notna().all()
     assert events_df["other_rate_sq"].isna().all()
-    assert events_df["abs_diff_sq"].isna().all()
+    assert events_df["alignment_sq"].isna().all()
+    assert events_df["convergence_sq"].isna().all()
+
+
+def test_alignment_and_convergence_follow_defined_formulas(tmp_path: Path) -> None:
+    config = _base_config(tmp_path)
+    ann_a = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
+    ann_b = tmp_path / "annotations" / "sub-002_task-dialogue_run-1_ipu.csv"
+    ann_a.parent.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {"t_onset": 0.0, "t_offset": 1.0, "syllables": 4.0, "speaker": "A"},
+            {"t_onset": 3.0, "t_offset": 4.0, "syllables": 4.0, "speaker": "A"},
+        ]
+    ).to_csv(ann_a, index=False)
+    pd.DataFrame(
+        [
+            {"t_onset": 0.2, "t_offset": 0.8, "syllables": 3.0, "speaker": "B"},
+            {"t_onset": 3.1, "t_offset": 4.1, "syllables": 6.0, "speaker": "B"},
+        ]
+    ).to_csv(ann_b, index=False)
+
+    dataset_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "role": "odd",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_a.fif",
+                "audio_path": "/tmp/fake_a.wav",
+                "annotations_path": str(ann_a),
+                "status": "ok",
+                "reason": "",
+            },
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-002",
+                "role": "even",
+                "task": "dialogue",
+                "run": "1",
+                "eeg_path": "/tmp/fake_b.fif",
+                "audio_path": "/tmp/fake_b.wav",
+                "annotations_path": str(ann_b),
+                "status": "ok",
+                "reason": "",
+            },
+        ]
+    )
+
+    events_df = build_events_table(config, dataset_df).sort_values(["speaker", "t_onset"], kind="mergesort").reset_index(drop=True)
+
+    other_rate_median = events_df["other_rate"].median()
+    self_rate_median = events_df["self_rate"].median()
+    expected_alignment = -(events_df["self_rate"] - events_df["other_rate"]).abs()
+    expected_convergence = 1.0 - ((other_rate_median - events_df["self_rate"]) / (other_rate_median - self_rate_median)).abs()
+
+    assert np.allclose(events_df["alignment"].to_numpy(dtype=float), expected_alignment.to_numpy(dtype=float), equal_nan=True)
+    assert np.allclose(
+        events_df["convergence"].to_numpy(dtype=float),
+        expected_convergence.to_numpy(dtype=float),
+        equal_nan=True,
+    )
 
 
 def test_latency_is_self_onset_minus_matched_other_offset(tmp_path: Path) -> None:
