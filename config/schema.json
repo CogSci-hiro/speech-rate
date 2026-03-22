@@ -330,6 +330,48 @@
       },
       "additionalProperties": true
     },
+    "emg": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "channel_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "missing_policy": {
+          "type": "string",
+          "enum": [
+            "error",
+            "zeros"
+          ]
+        },
+        "l_freq": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "h_freq": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "log_transform": {
+          "type": "boolean"
+        },
+        "zscore_within_run": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
     "evoked_trf": {
       "type": "object",
       "properties": {
@@ -345,52 +387,6 @@
             },
             "tmax": {
               "type": "number"
-            }
-          },
-          "additionalProperties": true
-        },
-        "emg": {
-          "type": "object",
-          "properties": {
-            "channels": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "channel_patterns": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "missing_policy": {
-              "type": "string",
-              "enum": [
-                "error",
-                "zeros"
-              ]
-            },
-            "l_freq": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "h_freq": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "log_transform": {
-              "type": "boolean"
-            },
-            "target_sfreq": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "zscore_within_run": {
-              "type": "boolean"
             }
           },
           "additionalProperties": true

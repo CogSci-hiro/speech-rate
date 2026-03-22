@@ -22,6 +22,7 @@ DEFAULT_DEBUG_ENABLED = False
 DEFAULT_DEBUG_MAX_FILES: int | None = None
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config" / "schema.json"
 MODULAR_COMPUTE_FILES = {
+    "emg": "emg.yaml",
     "evoked_trf": "evoked_trf.yaml",
     "induced_trf": "induced_trf.yaml",
     "fooof": "fooof.yaml",

@@ -1,0 +1,9 @@
+# Modular EMG extraction config
+emg:
+  channels: ["EMG1", "EMG2"]
+  channel_patterns: ["\\bEMG\\b", "\\bEXG\\b", "masseter", "jaw"]
+  missing_policy: "zeros"   # options: error | zeros
+  l_freq: 30.0
+  h_freq: 150.0
+  log_transform: true
+  zscore_within_run: true

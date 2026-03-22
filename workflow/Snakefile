@@ -70,6 +70,7 @@ class _ForbiddenConfigProxy:
 
 
 # Load modular YAMLs explicitly.
+emg_config = _load_yaml_config("config/emg.yaml")
 trf_config = _load_yaml_config("config/trf.yaml")
 evoked_trf_config = _load_yaml_config("config/evoked_trf.yaml")
 induced_trf_config = _load_yaml_config("config/induced_trf.yaml")
@@ -81,6 +82,7 @@ viz_config = _load_yaml_config("config/viz.yaml")
 stats_config = _load_yaml_config("config/stats.yaml")
 
 for _name, _cfg in (
+    ("emg_config", emg_config),
     ("trf_config", trf_config),
     ("evoked_trf_config", evoked_trf_config),
     ("induced_trf_config", induced_trf_config),
@@ -114,7 +116,7 @@ include: "rules/common.smk"
 include: "rules/dataset.smk"
 include: "rules/events.smk"
 include: "rules/eeg_resample.smk"
-include: "rules/features.smk"
+include: "rules/emg.smk"
 include: "rules/evoked_trf.smk"
 include: "rules/induced_trf.smk"
 include: "rules/fooof.smk"
@@ -142,7 +144,7 @@ def _validate_config_isolation(*, emit_summary: bool = False):
         "workflow/rules/dataset.smk",
         "workflow/rules/events.smk",
         "workflow/rules/eeg_resample.smk",
-        "workflow/rules/features.smk",
+        "workflow/rules/emg.smk",
         "workflow/rules/evoked_trf.smk",
         "workflow/rules/induced_trf.smk",
         "workflow/rules/fooof.smk",

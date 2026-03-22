@@ -43,7 +43,6 @@ class EvokedTrfConfig:
     downsample_hz: float
     tmin_s: float
     tmax_s: float
-    scheme: str
     regularization_type: str
     ridge_alpha_grid: list[float]
     ridge_alpha_default: float
@@ -53,8 +52,6 @@ class EvokedTrfConfig:
 
 def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
     ev = cfg["evoked_trf"]
-    cv_cfg = ev["cv"]
-    scheme = str(cv_cfg.get("scheme", "leave_one_run_out"))
     reg_cfg = ev.get("regularization", {})
     if reg_cfg is None:
         reg_cfg = {}
@@ -80,15 +77,14 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
     else:
         grid = [float(a) for a in grid_cfg]
 
-    emg_cfg = ev.get("emg", {}) or {}
+    emg_cfg = cfg.get("emg", {}) or {}
     if not isinstance(emg_cfg, dict):
-        raise ValueError("evoked_trf.emg must be a mapping when provided")
+        raise ValueError("emg must be a mapping when provided")
 
     return EvokedTrfConfig(
         downsample_hz=get_project_downsample_hz(cfg, fallback_section="evoked_trf"),
         tmin_s=float(ev["lags_s"]["tmin"]),
         tmax_s=float(ev["lags_s"]["tmax"]),
-        scheme=scheme,
         regularization_type=regularization_type,
         ridge_alpha_grid=grid,
         ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
@@ -529,8 +525,6 @@ def compute_scores_and_splits(
     dyad_id, subject, fold_id, run, split
     """
     trf_cfg = parse_evoked_trf_config(cfg)
-    if trf_cfg.scheme != "leave_one_run_out":
-        raise ValueError(f"Unsupported evoked_trf.cv.scheme: {trf_cfg.scheme}")
 
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
@@ -596,8 +590,6 @@ def _compute_subject_artifacts(
     picks: str | list[str] = "eeg",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, TRFResult]]:
     trf_cfg = parse_evoked_trf_config(cfg)
-    if trf_cfg.scheme != "leave_one_run_out":
-        raise ValueError(f"Unsupported evoked_trf.cv.scheme: {trf_cfg.scheme}")
 
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)

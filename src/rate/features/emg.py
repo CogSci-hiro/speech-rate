@@ -45,7 +45,6 @@ def _resolve_emg_channels(
 
 def compute_emg_envelope(
     eeg_path: Path,
-    target_sfreq: float,
     emg_channels: Sequence[str] = ("EMG1", "EMG2"),
     emg_channel_patterns: Sequence[str] = (r"\bEMG\b", r"\bEXG\b", r"masseter", r"jaw"),
     missing_policy: str = "error",
@@ -60,8 +59,6 @@ def compute_emg_envelope(
     ----------
     eeg_path : Path
         Path to EEG file (EDF/FIF/BDF/VHDR supported by MNE).
-    target_sfreq : float
-        Sampling rate to match TRF feature space.
     emg_channels : Sequence[str]
         EMG channel names to combine with RMS.
     emg_channel_patterns : Sequence[str]
@@ -78,15 +75,14 @@ def compute_emg_envelope(
     Returns
     -------
     times : ndarray
-        Time vector (seconds) at target_sfreq.
+        Time vector (seconds) at the native sampling rate.
     emg_env : ndarray
-        EMG envelope at target_sfreq.
+        EMG envelope at the native sampling rate.
 
     Usage example
     -------------
         times, emg = compute_emg_envelope(
             Path("sub-014_task-conversation_run-2_eeg.edf"),
-            target_sfreq=32.0,
         )
     """
     raw = mne.io.read_raw(eeg_path, preload=True, verbose="ERROR")
@@ -103,7 +99,6 @@ def compute_emg_envelope(
                 ch_types=["emg"],
             )
             emg_raw = mne.io.RawArray(np.zeros((1, raw.n_times), dtype=float), info)
-            emg_raw.resample(target_sfreq, npad="auto")
             return emg_raw.times, emg_raw.get_data()[0]
         raise ValueError(f"EMG channels not found. Requested={wanted}, patterns={list(emg_channel_patterns)}")
 
@@ -132,14 +127,4 @@ def compute_emg_envelope(
     if log_transform:
         emg_env = np.log1p(emg_env)
 
-    # Now resample to TRF feature rate
-    emg_raw_resampled = mne.io.RawArray(
-        emg_env[np.newaxis, :],
-        mne.create_info(ch_names=["EMG_RMS"], sfreq=raw.info["sfreq"], ch_types=["emg"]),
-    )
-    emg_raw_resampled.resample(target_sfreq, npad="auto")
-
-    emg_env_resampled = emg_raw_resampled.get_data()[0]
-    times_resampled = emg_raw_resampled.times
-
-    return times_resampled, emg_env_resampled
+    return emg_raw.times, emg_env

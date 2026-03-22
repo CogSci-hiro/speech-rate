@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from rate.config import ConfigValidationError, get_project_downsample_hz, load_and_validate_config
+from rate.config import ConfigValidationError, load_and_validate_config
 from rate.dataset.discover import EEG_SUFFIXES, find_unit_path, normalize_subject_id
 from rate.features.emg import compute_emg_envelope
 from rate.features.io import write_subject_emg_parquet
@@ -118,20 +118,13 @@ def compute_subject_emg(
         raise FileNotFoundError(f"dataset index not found: {dataset_index_path}")
     ds_index = pd.read_parquet(dataset_index_path)
 
-    emg_cfg = dict(cfg.get("evoked_trf", {}).get("emg", {}) or {})
+    emg_cfg = dict(cfg.get("emg", {}) or {})
     channels = emg_cfg.get("channels", ["EMG1", "EMG2"])
     channel_patterns = emg_cfg.get("channel_patterns", [r"\bEMG\b", r"\bEXG\b", "masseter", "jaw"])
     missing_policy = str(emg_cfg.get("missing_policy", "zeros")).strip().lower()
     l_freq = float(emg_cfg.get("l_freq", 30.0))
     h_freq = float(emg_cfg.get("h_freq", 150.0))
     log_transform = bool(emg_cfg.get("log_transform", True))
-    target_sfreq = float(
-        emg_cfg.get(
-            "target_sfreq",
-            get_project_downsample_hz(cfg, fallback_section="evoked_trf"),
-        )
-    )
-
     rows = _subject_rows(ds_index, dyad_id=str(dyad_id), subject=str(subject))
     out_rows: list[pd.DataFrame] = []
 
@@ -151,7 +144,6 @@ def compute_subject_emg(
         )
         times, emg_env = compute_emg_envelope(
             eeg_path=eeg_path,
-            target_sfreq=target_sfreq,
             emg_channels=channels,
             emg_channel_patterns=channel_patterns,
             missing_policy=missing_policy,

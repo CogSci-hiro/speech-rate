@@ -48,7 +48,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     model = str(args.model)
     tmin_s, tmax_s, sfreq_hz = emg_onset_window_from_config(cfg)
     zscore_within_run = bool(
-        ((cfg.get("evoked_trf", {}) or {}).get("emg", {}) or {}).get("zscore_within_run", True)
+        (cfg.get("emg", {}) or {}).get("zscore_within_run", True)
     )
 
     try:
@@ -73,4 +73,3 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         res.n_epochs,
     )
     return 0
-
