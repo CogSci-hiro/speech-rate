@@ -73,6 +73,23 @@ def compute_time_within_run(group_df: pd.DataFrame, normalize: bool, method: str
     return (group_df["t_onset"].astype(float) / t_run).clip(lower=0.0, upper=1.0)
 
 
+def compute_alignment(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
+    """Compute alignment = -abs(self_rate - other_rate)."""
+    return -(self_rate.astype(float) - other_rate.astype(float)).abs()
+
+
+def compute_convergence(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
+    """Compute convergence relative to group medians of self_rate and other_rate."""
+    self_vals = self_rate.astype(float)
+    other_vals = other_rate.astype(float)
+    other_median = float(other_vals.median())
+    self_median = float(self_vals.median())
+    denom = other_median - self_median
+    if not np.isfinite(denom) or np.isclose(denom, 0.0):
+        return pd.Series(np.full(len(self_vals), np.nan, dtype=float), index=self_vals.index)
+    return 1.0 - ((other_median - self_vals) / denom).abs()
+
+
 def add_event_rate_features(
     unit_df: pd.DataFrame,
     absdiff_window_s: float,
@@ -80,7 +97,7 @@ def add_event_rate_features(
     method: str,
     matching_time_lock: str = "onset",
 ) -> pd.DataFrame:
-    """Add rate, squared-rate, latency, abs-diff, and time-within-run features."""
+    """Add rate, derived behavioral, squared-rate, and time-within-run features."""
     enriched = unit_df.copy()
     enriched["self_rate"] = enriched["syllables"] / enriched["duration_s"]
     enriched["other_rate"], enriched["listener"], enriched["latency"] = compute_other_rate(
@@ -88,10 +105,12 @@ def add_event_rate_features(
         window_s=absdiff_window_s,
         time_lock=matching_time_lock,
     )
-    enriched["abs_diff"] = (enriched["self_rate"] - enriched["other_rate"]).abs()
+    enriched["alignment"] = compute_alignment(enriched["self_rate"], enriched["other_rate"])
+    enriched["convergence"] = compute_convergence(enriched["self_rate"], enriched["other_rate"])
     enriched["self_rate_sq"] = enriched["self_rate"] ** 2
     enriched["other_rate_sq"] = enriched["other_rate"] ** 2
-    enriched["abs_diff_sq"] = enriched["abs_diff"] ** 2
+    enriched["alignment_sq"] = enriched["alignment"] ** 2
+    enriched["convergence_sq"] = enriched["convergence"] ** 2
     enriched["time_within_run"] = compute_time_within_run(
         enriched,
         normalize=normalize,

@@ -14,7 +14,8 @@ AllowedFeature = Literal[
     "other_ipu_offset",
     "self_rate",
     "other_rate",
-    "abs_diff",
+    "alignment",
+    "convergence",
     "emg",
     "run",
     "time_within_run",
@@ -26,7 +27,8 @@ _FEATURES: set[str] = {
     "other_ipu_offset",
     "self_rate",
     "other_rate",
-    "abs_diff",
+    "alignment",
+    "convergence",
     "emg",
     "run",
     "time_within_run",
@@ -40,10 +42,11 @@ _DEFAULT_LOCK_BY_FEATURE = {
     "other_ipu_offset": "other_ipu_offset",
     "self_rate": "self_ipu_onset",
     "other_rate": "other_ipu_offset",
-    "abs_diff": "self_ipu_onset",
+    "alignment": "self_ipu_onset",
+    "convergence": "self_ipu_onset",
 }
 _IMPULSE_FEATURES = {"self_ipu_onset", "other_ipu_offset"}
-_EVENT_SCALAR_FEATURES = {"self_rate", "other_rate", "abs_diff"}
+_EVENT_SCALAR_FEATURES = {"self_rate", "other_rate", "alignment", "convergence"}
 _CONTINUOUS_FEATURES = {"emg", "run", "time_within_run"}
 
 
@@ -54,7 +57,8 @@ UNIFIED_TRF_REGRESSOR_EXPRESSIONS: tuple[str, ...] = (
     "emg",
     "self_rate",
     "other_rate",
-    "abs_diff",
+    "alignment",
+    "convergence",
 )
 
 DEFAULT_EVOKED_TRF_MODELS: tuple[dict[str, Any], ...] = (
@@ -134,7 +138,7 @@ def _canonical_term_name(*, left: DesignFactor, right: DesignFactor | None) -> s
             return "self_onset_impulse"
         if left.feature == "other_ipu_offset":
             return "other_offset_impulse"
-        if left.squared and left.feature in {"self_rate", "other_rate", "abs_diff"}:
+        if left.squared and left.feature in {"self_rate", "other_rate", "alignment", "convergence"}:
             return f"{left.feature}_sq"
         return left.feature
     left_name = _canonical_term_name(left=left, right=None)
@@ -258,12 +262,19 @@ def _factor_to_series(
                 time_lock=_LOCK_ALIASES[factor.lock_event],
                 kind="other_rate",
             )
-        elif feature == "abs_diff":
+        elif feature == "alignment":
             reg = RegressorSpec(
-                name="abs_diff",
-                column="abs_diff",
+                name="alignment",
+                column="alignment",
                 time_lock=_LOCK_ALIASES[factor.lock_event],
-                kind="abs_diff",
+                kind="alignment",
+            )
+        elif feature == "convergence":
+            reg = RegressorSpec(
+                name="convergence",
+                column="convergence",
+                time_lock=_LOCK_ALIASES[factor.lock_event],
+                kind="convergence",
             )
         else:
             raise ValueError(f"Unsupported feature '{feature}'")
