@@ -109,6 +109,32 @@ def test_parse_induced_trf_confirmatory_defaults():
     assert parsed.residual_bands == ("theta",)
 
 
+def test_parse_induced_trf_allows_residual_only_target_kind():
+    cfg = _base_cfg()
+    cfg["induced_trf"]["target_kinds"] = ["residual"]
+
+    parsed = parse_induced_trf_config(cfg)
+
+    assert parsed.target_kinds == ("residual",)
+    assert parsed.residual_bands == ("theta",)
+
+
+def test_parse_induced_trf_prefers_induced_ridge_settings():
+    cfg = _base_cfg()
+    cfg["evoked_trf"]["regularization"] = {"type": "laplacian"}
+    cfg["evoked_trf"]["ridge_alpha_grid"] = [1.0, 2.0]
+    cfg["evoked_trf"]["ridge_alpha"] = 2.0
+    cfg["induced_trf"]["regularization"] = {"type": "ridge"}
+    cfg["induced_trf"]["ridge_alpha_grid"] = [10.0, 100.0]
+    cfg["induced_trf"]["ridge_alpha"] = 100.0
+
+    parsed = parse_induced_trf_config(cfg)
+
+    assert parsed.regularization_type == "ridge"
+    assert parsed.ridge_alpha_grid == [10.0, 100.0]
+    assert parsed.ridge_alpha_default == 100.0
+
+
 def test_parse_induced_trf_rejects_nonconfirmatory_residual_bands():
     cfg = _base_cfg()
     cfg["induced_trf"]["residual_bands"] = []

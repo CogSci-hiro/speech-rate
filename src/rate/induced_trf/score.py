@@ -92,16 +92,29 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
     target_kinds_cfg = ind.get("target_kinds")
     if target_kinds_cfg is not None:
         target_list = [str(v).strip().lower() for v in target_kinds_cfg]
-        if target_list != ["raw", "residual"]:
-            raise ValueError("Confirmatory induced TRF requires induced_trf.target_kinds == ['raw', 'residual']")
-    target_kinds = ("raw", "residual")
+        allowed_target_kinds = {"raw", "residual"}
+        if (not target_list) or any(kind not in allowed_target_kinds for kind in target_list):
+            raise ValueError(
+                "Confirmatory induced TRF requires induced_trf.target_kinds to be a non-empty subset "
+                "of ['raw', 'residual']"
+            )
+        target_kinds = tuple(dict.fromkeys(target_list))
+    else:
+        target_kinds = ("raw", "residual")
 
     residual_bands_cfg = ind.get("residual_bands")
-    if residual_bands_cfg is not None:
-        residual_list = [str(v).strip() for v in residual_bands_cfg if str(v).strip()]
-        if residual_list != ["theta"]:
-            raise ValueError("Confirmatory induced TRF requires induced_trf.residual_bands == ['theta']")
-    residual_bands = ("theta",)
+    if "residual" in set(target_kinds):
+        if residual_bands_cfg is not None:
+            residual_list = [str(v).strip() for v in residual_bands_cfg if str(v).strip()]
+            if residual_list != ["theta"]:
+                raise ValueError(
+                    "Confirmatory induced TRF requires induced_trf.residual_bands == ['theta'] when residual is enabled"
+                )
+            residual_bands = ("theta",)
+        else:
+            residual_bands = ("theta",)
+    else:
+        residual_bands = tuple()
 
     fooof_sliding_cfg: SlidingAperiodicConfig | None = None
     if ("residual" in set(target_kinds)) and residual_bands:
@@ -112,12 +125,16 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
     lags_cfg = ev.get("lags_s") or {}
     if not isinstance(lags_cfg, dict):
         raise ValueError("evoked_trf.lags_s must be a mapping (reused for induced TRF)")
-    reg_cfg = ev.get("regularization") or {}
+    reg_cfg = ind.get("regularization")
+    if reg_cfg is None:
+        reg_cfg = ev.get("regularization") or {}
     if not isinstance(reg_cfg, dict):
-        raise ValueError("evoked_trf.regularization must be a mapping (reused for induced TRF)")
+        raise ValueError("induced_trf.regularization must be a mapping")
     regularization_type = str(reg_cfg.get("type", "ridge")).strip().lower()
 
-    grid_cfg = ev.get("ridge_alpha_grid", None)
+    grid_cfg = ind.get("ridge_alpha_grid", None)
+    if grid_cfg is None:
+        grid_cfg = ev.get("ridge_alpha_grid", None)
     if grid_cfg is None:
         ridge_alpha_grid = [0.1, 1.0, 10.0, 100.0, 1000.0]
     elif isinstance(grid_cfg, dict):
@@ -142,7 +159,7 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         tmax_s=float(lags_cfg["tmax"]),
         regularization_type=regularization_type,
         ridge_alpha_grid=ridge_alpha_grid,
-        ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
+        ridge_alpha_default=float(ind.get("ridge_alpha", ev.get("ridge_alpha", 1.0))),
         models=parse_evoked_models_config(ind.get("models")),
     )
 

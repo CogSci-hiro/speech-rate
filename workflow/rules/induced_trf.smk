@@ -2,6 +2,11 @@ import pandas as pd
 
 OUT_DIR = COMPUTE_OUT_DIR
 
+# Residual analysis paths end with `_residual`, which the raw rule's `{band}`
+# wildcard can also parse as a literal band name. Prefer the dedicated residual
+# producer whenever both rules appear to match the same target path.
+ruleorder: induced_trf_subject_residual > induced_trf_subject_raw
+
 
 def _subject_pairs():
     ckpt = checkpoints.subject_targets.get()
@@ -110,6 +115,11 @@ rule induced_trf_sliding_fooof_subject:
 
 
 rule induced_trf_subject_raw:
+    wildcard_constraints:
+        # Prevent the raw rule from capturing residual analysis names like
+        # `induced_trf_theta_residual/...`, which should be produced only by
+        # the dedicated residual rule below.
+        band=r"(?!.*_residual$)[^/]+"
     input:
         events=OUT_DIR + "/events/events.parquet",
         dataset_index=OUT_DIR + "/dataset/index.parquet",

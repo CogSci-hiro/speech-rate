@@ -1,23 +1,28 @@
 # Phase 1 modular config duplicate from config/config.yaml
 induced_trf:
-  downsample_hz: 16.0
+  downsample_hz: 4.0
   bands: ["theta"]
-  target_kinds: ["raw", "residual"]
+  target_kinds: ["residual"]
   residual_bands: ["theta"]
 
   bands_hz:
     theta: [4.0, 7.0]
 
+  regularization:
+    type: "ridge"  # options: ridge | laplacian
+  ridge_alpha_grid:
+    min: 2
+    max: 7
+    n_alpha: 5
+
   models:
-    - name: "unified"
+    - name: "rate_effect"
       regressors:
         - "self_ipu_onset"
         - "other_ipu_offset"
         - "emg"
         - "self_rate"
         - "other_rate"
-        - "alignment"
-        - "convergence"
 
   power:
     method: "hilbert"
