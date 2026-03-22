@@ -13,13 +13,11 @@ evoked_trf:
     max: 7
     n_alpha: 5
   models:
-    - name: "unified"
+    - name: "rate_effect"
       regressors:
         - "self_ipu_onset"
         - "other_ipu_offset"
         - "emg"
         - "self_rate"
         - "other_rate"
-        - "alignment"
-        - "convergence"
   n_jobs: 1

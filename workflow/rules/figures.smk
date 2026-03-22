@@ -5,7 +5,7 @@ BASELINE_CONTROL_REGRESSORS = {
     "self_ipu_onset",
     "other_ipu_offset",
 }
-TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "abs_diff"}
+TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "alignment", "convergence"}
 DEFAULT_BASELINE_VIZ_REGRESSORS = (
     "self_onset_impulse",
     "other_offset_impulse",
@@ -216,11 +216,11 @@ INDUCED_TIMECOURSE_TARGETS = [
     for family in INDUCED_FAMILIES
 ]
 EVOKED_RECONSTRUCTION_ERP_TARGETS = []
-if _has_evoked_models(["self_rate", "other_rate", "abs_diff"]):
+if _has_evoked_models(["self_rate", "other_rate", "alignment", "convergence"]):
     EVOKED_RECONSTRUCTION_ERP_TARGETS.append(
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf"
     )
-if _has_evoked_models(["self_rate_sq", "other_rate_sq", "abs_diff_sq"]):
+if _has_evoked_models(["self_rate_sq", "other_rate_sq", "alignment_sq", "convergence_sq"]):
     EVOKED_RECONSTRUCTION_ERP_TARGETS.append(
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"
     )
@@ -375,7 +375,7 @@ rule figure_evoked_trf_reconstruction_erp_linear:
         # Stats outputs ensure upstream compute/stats are available before rendering.
         expand(
             f"{_viz_out_dir()}/stats/evoked_trf/{{model}}/{{model}}/grand_average_trfs-ave.fif",
-            model=["self_rate", "other_rate", "abs_diff"],
+            model=["self_rate", "other_rate", "alignment", "convergence"],
         )
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf"
@@ -395,7 +395,7 @@ rule figure_evoked_trf_reconstruction_erp_quadratic:
     input:
         expand(
             f"{_viz_out_dir()}/stats/evoked_trf/{{model}}/{{model}}/grand_average_trfs-ave.fif",
-            model=["self_rate_sq", "other_rate_sq", "abs_diff_sq"],
+            model=["self_rate_sq", "other_rate_sq", "alignment_sq", "convergence_sq"],
         )
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"

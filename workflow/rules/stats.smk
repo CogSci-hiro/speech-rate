@@ -55,7 +55,7 @@ INDUCED_ANALYSES = [
 ]
 
 
-KERNEL0_BEHAVIOR_FEATURES = ["self_rate", "other_rate", "abs_diff"]
+KERNEL0_BEHAVIOR_FEATURES = ["self_rate", "other_rate", "alignment", "convergence"]
 
 
 def _branch_behavior_feature_indexes(branch_cfg, branch_key):
@@ -103,7 +103,8 @@ def _canonical_feature_name(value: str) -> str:
         "other_ipu_offset": "other_offset_impulse",
         "self_rate^2": "self_rate_sq",
         "other_rate^2": "other_rate_sq",
-        "abs_diff^2": "abs_diff_sq",
+        "alignment^2": "alignment_sq",
+        "convergence^2": "convergence_sq",
     }
     return aliases.get(token, token)
 

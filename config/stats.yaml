@@ -1,7 +1,7 @@
 # Stats-only config (loaded manually in workflow/Snakefile)
 # Keeping this separate prevents inference/reporting tweaks from retriggering compute rules.
 paths:
-  out_dir: "/Volumes/work-4T/speech-rate-testing"
+  out_dir: "/Volumes/work-4T/speech-rate-refactoring"
 
 reporting:
   tables_format: "csv"  # csv | parquet

@@ -14,70 +14,52 @@
 # =============================================================================
 
 import argparse
+import importlib
 import logging
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from rate.config import ConfigValidationError, load_and_validate_config
 
-import rate.cli.commands.clean as cmd_clean
-import rate.cli.commands.dataset_index as cmd_dataset_index
-import rate.cli.commands.dataset_subject_targets as cmd_dataset_subject_targets
-import rate.cli.commands.events_table as cmd_events_table
-import rate.cli.commands.run_tests as cmd_run_tests
-import rate.cli.commands.figures as cmd_figures
-import rate.cli.commands.validate_config as cmd_validate_config
-import rate.cli.commands.write_manifest as cmd_write_manifest
-import rate.cli.commands.resample_eeg as cmd_resample_eeg
-import rate.cli.commands.compute_emg as cmd_compute_emg
-import rate.cli.commands.compute_emg_all as cmd_compute_emg_all
-from .commands import fooof as cmd_fooof
-import rate.cli.commands.evoked_trf_scores as cmd_evoked_trf_scores
-import rate.cli.commands.evoked_trf_subject as cmd_evoked_trf_subject
-import rate.cli.commands.evoked_trf_subject_all as cmd_evoked_trf_subject_all
-import rate.cli.commands.evoked_trf_aggregate as cmd_evoked_trf_aggregate
-import rate.cli.commands.evoked_trf_reconstruction_aggregate as cmd_evoked_trf_reconstruction_aggregate
-import rate.cli.commands.evoked_trf_similarity_aggregate as cmd_evoked_trf_similarity_aggregate
-import rate.cli.commands.induced_trf_subject as cmd_induced_trf_subject
-import rate.cli.commands.induced_trf_sliding_fooof_subject as cmd_induced_trf_sliding_fooof_subject
-import rate.cli.commands.induced_trf_subject_all as cmd_induced_trf_subject_all
-import rate.cli.commands.induced_trf_aggregate as cmd_induced_trf_aggregate
-import rate.cli.commands.stats_kernel0 as cmd_stats_kernel0
-import rate.cli.commands.stats_emg_onset_evoked as cmd_stats_emg_onset_evoked
-import rate.cli.commands.stats_reconstruction_erp_r2 as cmd_stats_reconstruction_erp_r2
-import rate.cli.commands.stats_export_subject_zmaps as cmd_stats_export_subject_zmaps
-
 LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
 LOGGER = logging.getLogger(__name__)
 
 _COMMANDS = {
-    "validate-config": cmd_validate_config,
-    "write-manifest": cmd_write_manifest,
-    "dataset-index": cmd_dataset_index,
-    "dataset-subject-targets": cmd_dataset_subject_targets,
-    "events-table": cmd_events_table,
-    "resample-eeg": cmd_resample_eeg,
-    "compute-emg": cmd_compute_emg,
-    "compute-emg-all": cmd_compute_emg_all,
-    "fooof": cmd_fooof,
-    "evoked-trf-scores": cmd_evoked_trf_scores,
-    "evoked-trf-subject": cmd_evoked_trf_subject,
-    "evoked-trf-subject-all": cmd_evoked_trf_subject_all,
-    "evoked-trf-aggregate": cmd_evoked_trf_aggregate,
-    "evoked-trf-reconstruction-aggregate": cmd_evoked_trf_reconstruction_aggregate,
-    "evoked-trf-similarity-aggregate": cmd_evoked_trf_similarity_aggregate,
-    "induced-trf-subject": cmd_induced_trf_subject,
-    "induced-trf-sliding-fooof-subject": cmd_induced_trf_sliding_fooof_subject,
-    "induced-trf-subject-all": cmd_induced_trf_subject_all,
-    "induced-trf-aggregate": cmd_induced_trf_aggregate,
-    "stats-kernel0": cmd_stats_kernel0,
-    "stats-emg-onset-evoked": cmd_stats_emg_onset_evoked,
-    "stats-reconstruction-erp-r2": cmd_stats_reconstruction_erp_r2,
-    "stats-export-subject-zmaps": cmd_stats_export_subject_zmaps,
-    "clean": cmd_clean,
-    "run-tests": cmd_run_tests,
-    "figures": cmd_figures,
+    "validate-config": "rate.cli.commands.validate_config",
+    "write-manifest": "rate.cli.commands.write_manifest",
+    "dataset-index": "rate.cli.commands.dataset_index",
+    "dataset-subject-targets": "rate.cli.commands.dataset_subject_targets",
+    "events-table": "rate.cli.commands.events_table",
+    "resample-eeg": "rate.cli.commands.resample_eeg",
+    "compute-emg": "rate.cli.commands.compute_emg",
+    "compute-emg-all": "rate.cli.commands.compute_emg_all",
+    "fooof": "rate.cli.commands.fooof",
+    "evoked-trf-scores": "rate.cli.commands.evoked_trf_scores",
+    "evoked-trf-subject": "rate.cli.commands.evoked_trf_subject",
+    "evoked-trf-subject-all": "rate.cli.commands.evoked_trf_subject_all",
+    "evoked-trf-aggregate": "rate.cli.commands.evoked_trf_aggregate",
+    "evoked-trf-reconstruction-aggregate": "rate.cli.commands.evoked_trf_reconstruction_aggregate",
+    "evoked-trf-similarity-aggregate": "rate.cli.commands.evoked_trf_similarity_aggregate",
+    "induced-trf-subject": "rate.cli.commands.induced_trf_subject",
+    "induced-trf-sliding-fooof-subject": "rate.cli.commands.induced_trf_sliding_fooof_subject",
+    "induced-trf-subject-all": "rate.cli.commands.induced_trf_subject_all",
+    "induced-trf-aggregate": "rate.cli.commands.induced_trf_aggregate",
+    "stats-kernel0": "rate.cli.commands.stats_kernel0",
+    "stats-emg-onset-evoked": "rate.cli.commands.stats_emg_onset_evoked",
+    "stats-reconstruction-erp-r2": "rate.cli.commands.stats_reconstruction_erp_r2",
+    "stats-export-subject-zmaps": "rate.cli.commands.stats_export_subject_zmaps",
+    "clean": "rate.cli.commands.clean",
+    "run-tests": "rate.cli.commands.run_tests",
+    "figures": "rate.cli.commands.figures",
 }
+
+
+def _load_command_module(module_path: str) -> object | None:
+    try:
+        return importlib.import_module(module_path)
+    except Exception as exc:
+        LOGGER.warning("Skipping CLI command module %s: %s", module_path, exc)
+        return None
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -89,12 +71,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    for name, module in _COMMANDS.items():
+    available_commands: dict[str, object] = {}
+    for name, module_path in _COMMANDS.items():
+        module = _load_command_module(module_path)
+        if module is None:
+            continue
+        available_commands[name] = module
         add_subparser = getattr(module, "add_subparser", None) or getattr(module, "register_subparser", None)
         if add_subparser is None:
             raise RuntimeError(f"CLI command module for '{name}' is missing add_subparser().")
         add_subparser(subparsers)
 
+    parser.set_defaults(_available_commands=available_commands)
     return parser
 
 
@@ -117,7 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     command_name = str(args.command)
-    module = _COMMANDS.get(command_name)
+    available_commands = getattr(args, "_available_commands", {})
+    module = available_commands.get(command_name)
     if module is None:
         raise RuntimeError(f"Unknown command: {command_name}")
 
