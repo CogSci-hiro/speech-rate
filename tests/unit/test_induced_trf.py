@@ -19,11 +19,11 @@ def _base_cfg() -> dict:
             "bands": ["theta"],
             "target_kinds": ["raw", "residual"],
             "residual_bands": ["theta"],
-            "fooof_sliding": {
-                "window_s": 1.0,
-                "step_s": 0.1,
-                "fit_range_hz": [2.0, 40.0],
-            },
+        },
+        "fooof_sliding": {
+            "window_s": 1.0,
+            "step_s": 0.1,
+            "fit_range_hz": [2.0, 40.0],
         },
     }
 

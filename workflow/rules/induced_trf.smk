@@ -72,9 +72,44 @@ def _induced_subject_outputs(_wildcards):
     ]
 
 
-rule induced_trf_subject:
-    wildcard_constraints:
-        analysis="induced_trf_.+"
+def _band_hz(band: str):
+    ind_cfg = compute_induced_trf_config
+    bands_hz = ind_cfg.get("bands_hz", {}) or {}
+    rng = bands_hz.get(str(band))
+    if not isinstance(rng, (list, tuple)) or len(rng) != 2:
+        raise ValueError(f"Missing induced_trf.bands_hz entry for band={band!r}")
+    return float(rng[0]), float(rng[1])
+
+
+rule induced_trf_sliding_fooof_subject:
+    input:
+        config="config/fooof.yaml",
+        dataset_index=OUT_DIR + "/dataset/index.parquet",
+        events=OUT_DIR + "/events/events.parquet",
+    output:
+        done=OUT_DIR + "/induced_trf_{band}_residual/subjects/{dyad_id}/{subject}/targets/aperiodic/_done.txt"
+    params:
+        band_fmin=lambda wc: _band_hz(wc.band)[0],
+        band_fmax=lambda wc: _band_hz(wc.band)[1],
+    log:
+        OUT_DIR + "/logs/induced_trf/sliding_fooof_{band}_{dyad_id}_{subject}.log"
+    shell:
+        r"""
+        set -euo pipefail
+        MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main induced-trf-sliding-fooof-subject \
+            --dyad-id {wildcards.dyad_id} \
+            --subject {wildcards.subject} \
+            --band {wildcards.band} \
+            --band-fmin {params.band_fmin} \
+            --band-fmax {params.band_fmax} \
+            --config config/fooof.yaml \
+            --out-dir {OUT_DIR} \
+            --done-file {output.done} \
+            2>&1 | tee {log}
+        """
+
+
+rule induced_trf_subject_raw:
     input:
         events=OUT_DIR + "/events/events.parquet",
         dataset_index=OUT_DIR + "/dataset/index.parquet",
@@ -82,21 +117,46 @@ rule induced_trf_subject:
         validate_config=OUT_DIR + "/_meta/config_validated.json",
         write_manifest=OUT_DIR + "/_meta/run_manifest.json",
     output:
-        scores=OUT_DIR + "/{analysis}/subjects/{dyad_id}/{subject}/scores.parquet"
+        scores=OUT_DIR + "/induced_trf_{band}/subjects/{dyad_id}/{subject}/scores.parquet"
     threads: 1
-    params:
-        band=lambda wc: _analysis_parts(wc.analysis)[0],
-        target_kind=lambda wc: _analysis_parts(wc.analysis)[1],
     log:
-        OUT_DIR + "/logs/induced_trf/{analysis}_{dyad_id}_{subject}.log"
+        OUT_DIR + "/logs/induced_trf/induced_trf_{band}_{dyad_id}_{subject}.log"
     shell:
         r"""
         set -euo pipefail
         MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main induced-trf-subject \
             --dyad-id {wildcards.dyad_id} \
             --subject {wildcards.subject} \
-            --band {params.band} \
-            --target-kind {params.target_kind} \
+            --band {wildcards.band} \
+            --target-kind raw \
+            --config config/config.yaml \
+            --schema config/schema.json \
+            --out-dir {OUT_DIR} \
+            2>&1 | tee {log}
+        """
+
+
+rule induced_trf_subject_residual:
+    input:
+        events=OUT_DIR + "/events/events.parquet",
+        dataset_index=OUT_DIR + "/dataset/index.parquet",
+        emg=OUT_DIR + "/features/emg/{dyad_id}/{subject}/emg_env.parquet",
+        validate_config=OUT_DIR + "/_meta/config_validated.json",
+        write_manifest=OUT_DIR + "/_meta/run_manifest.json",
+        sliding_done=OUT_DIR + "/induced_trf_{band}_residual/subjects/{dyad_id}/{subject}/targets/aperiodic/_done.txt",
+    output:
+        scores=OUT_DIR + "/induced_trf_{band}_residual/subjects/{dyad_id}/{subject}/scores.parquet"
+    threads: 1
+    log:
+        OUT_DIR + "/logs/induced_trf/induced_trf_{band}_residual_{dyad_id}_{subject}.log"
+    shell:
+        r"""
+        set -euo pipefail
+        MNE_TQDM=off MNE_LOGGING_LEVEL=WARNING PYTHONPATH=src python -u -m rate.cli.main induced-trf-subject \
+            --dyad-id {wildcards.dyad_id} \
+            --subject {wildcards.subject} \
+            --band {wildcards.band} \
+            --target-kind residual \
             --config config/config.yaml \
             --schema config/schema.json \
             --out-dir {OUT_DIR} \

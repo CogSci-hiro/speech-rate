@@ -178,8 +178,8 @@ def parse_evoked_models_config(models_cfg: Any) -> tuple[DesignModelSpec, ...]:
         models_cfg = list(DEFAULT_EVOKED_TRF_MODELS)
     if not isinstance(models_cfg, list):
         raise ValueError("evoked_trf.models must be a list of model mappings")
-    if len(models_cfg) != 1:
-        raise ValueError("Confirmatory TRF requires exactly one model in evoked_trf.models")
+    if not models_cfg:
+        raise ValueError("evoked_trf.models must contain at least one model")
 
     out: list[DesignModelSpec] = []
     seen_names: set[str] = set()
@@ -202,12 +202,6 @@ def parse_evoked_models_config(models_cfg: Any) -> tuple[DesignModelSpec, ...]:
             if not isinstance(reg_item, str):
                 raise ValueError(f"evoked_trf.models[{idx}].regressors[{j}] must be a string")
             parsed_regs.append(_parse_regressor_expression(reg_item))
-        canonical_expr = tuple(str(r.expression).strip() for r in parsed_regs)
-        if canonical_expr != UNIFIED_TRF_REGRESSOR_EXPRESSIONS:
-            raise ValueError(
-                "Confirmatory TRF requires regressors exactly "
-                f"{list(UNIFIED_TRF_REGRESSOR_EXPRESSIONS)} in that order"
-            )
         seen_names.add(name)
         out.append(DesignModelSpec(model_name=name, regressors=tuple(parsed_regs)))
     return tuple(out)

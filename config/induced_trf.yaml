@@ -21,13 +21,3 @@ induced_trf:
   power:
     method: "hilbert"
     log_transform: "log10"   # options: none | log10 | ln
-
-  fooof_sliding:
-    window_s: 1.0
-    step_s: 0.1
-    fit_range_hz: [2.0, 40.0]
-    edge_drop: "half_window"
-    aperiodic_mode: "fixed"
-    max_n_peaks: 6
-    peak_width_limits_hz: [1.0, 12.0]
-    min_peak_height: 0.0

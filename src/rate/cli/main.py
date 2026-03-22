@@ -39,6 +39,7 @@ import rate.cli.commands.evoked_trf_aggregate as cmd_evoked_trf_aggregate
 import rate.cli.commands.evoked_trf_reconstruction_aggregate as cmd_evoked_trf_reconstruction_aggregate
 import rate.cli.commands.evoked_trf_similarity_aggregate as cmd_evoked_trf_similarity_aggregate
 import rate.cli.commands.induced_trf_subject as cmd_induced_trf_subject
+import rate.cli.commands.induced_trf_sliding_fooof_subject as cmd_induced_trf_sliding_fooof_subject
 import rate.cli.commands.induced_trf_subject_all as cmd_induced_trf_subject_all
 import rate.cli.commands.induced_trf_aggregate as cmd_induced_trf_aggregate
 import rate.cli.commands.stats_kernel0 as cmd_stats_kernel0
@@ -66,6 +67,7 @@ _COMMANDS = {
     "evoked-trf-reconstruction-aggregate": cmd_evoked_trf_reconstruction_aggregate,
     "evoked-trf-similarity-aggregate": cmd_evoked_trf_similarity_aggregate,
     "induced-trf-subject": cmd_induced_trf_subject,
+    "induced-trf-sliding-fooof-subject": cmd_induced_trf_sliding_fooof_subject,
     "induced-trf-subject-all": cmd_induced_trf_subject_all,
     "induced-trf-aggregate": cmd_induced_trf_aggregate,
     "stats-kernel0": cmd_stats_kernel0,

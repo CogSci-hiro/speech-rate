@@ -30,8 +30,8 @@ paths:
 # ============================================================
 # Project-wide resampling / TRF sampling rate (Hz). Compute code prefers this
 # value and falls back to branch-local downsample_hz for backward compatibility.
-sampling:
-  downsample_hz: 16.0
+# sampling:
+#   downsample_hz: 16.0
 
 
 # ============================================================

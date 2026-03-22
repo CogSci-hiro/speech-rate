@@ -26,7 +26,9 @@ from rate.evoked_trf.utils import (
     standardize_design_matrix_foldwise,
 )
 from rate.induced_trf.aperiodic import SlidingAperiodicConfig
+from rate.induced_trf.sliding_fooof import parse_sliding_fooof_config, run_aperiodic_path
 from rate.targets.induced import load_induced_band_run_target
+from rate.targets.induced import build_residual_target_from_aperiodic_df
 from rate.trf.design import DesignModelSpec, parse_evoked_models_config
 from rate.trf.engine import TRFResult, run_trf
 from rate.trf.io_contract import write_trf_artifacts
@@ -101,41 +103,11 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
             raise ValueError("Confirmatory induced TRF requires induced_trf.residual_bands == ['theta']")
     residual_bands = ("theta",)
 
-    fooof_sliding = ind.get("fooof_sliding") or {}
-    if fooof_sliding is None:
-        fooof_sliding = {}
-    if not isinstance(fooof_sliding, dict):
-        raise ValueError("induced_trf.fooof_sliding must be a mapping")
-    edge_drop = str(fooof_sliding.get("edge_drop", "none"))
-    edge_window_s = float(fooof_sliding["window_s"]) if "window_s" in fooof_sliding else None
     fooof_sliding_cfg: SlidingAperiodicConfig | None = None
     if ("residual" in set(target_kinds)) and residual_bands:
-        required = ("window_s", "step_s", "fit_range_hz")
-        missing = [k for k in required if k not in fooof_sliding]
-        if missing:
-            raise ValueError(
-                "induced_trf.fooof_sliding must define window_s, step_s, fit_range_hz when target_kinds includes "
-                f"'residual' (missing: {missing})"
-            )
-        fit_range_hz = fooof_sliding.get("fit_range_hz")
-        if not isinstance(fit_range_hz, (list, tuple)) or len(fit_range_hz) != 2:
-            raise ValueError("induced_trf.fooof_sliding.fit_range_hz must be [fmin, fmax]")
-        peak_width_limits_hz = fooof_sliding.get("peak_width_limits_hz", [1.0, 12.0])
-        if not isinstance(peak_width_limits_hz, (list, tuple)) or len(peak_width_limits_hz) != 2:
-            raise ValueError("induced_trf.fooof_sliding.peak_width_limits_hz must be [fmin, fmax]")
-        fooof_sliding_cfg = SlidingAperiodicConfig(
-            window_s=float(fooof_sliding["window_s"]),
-            step_s=float(fooof_sliding["step_s"]),
-            fit_range_hz=(float(fit_range_hz[0]), float(fit_range_hz[1])),
-            edge_drop=edge_drop,
-            aperiodic_mode=str(fooof_sliding.get("aperiodic_mode", "fixed")).strip().lower(),
-            peak_width_limits_hz=(float(peak_width_limits_hz[0]), float(peak_width_limits_hz[1])),
-            max_n_peaks=int(fooof_sliding.get("max_n_peaks", 6)),
-            min_peak_height=float(fooof_sliding.get("min_peak_height", 0.0)),
-            peak_threshold=(
-                float(fooof_sliding["peak_threshold"]) if ("peak_threshold" in fooof_sliding) else None
-            ),
-        )
+        fooof_sliding_cfg = parse_sliding_fooof_config(cfg)
+    edge_drop = str(fooof_sliding_cfg.edge_drop if fooof_sliding_cfg is not None else "none")
+    edge_window_s = float(fooof_sliding_cfg.window_s) if fooof_sliding_cfg is not None else None
 
     lags_cfg = ev.get("lags_s") or {}
     if not isinstance(lags_cfg, dict):
@@ -235,18 +207,39 @@ def _prepare_induced_subject_runs(
 
     # induced models can still use event-derived regressors and optional emg if provided later
     for run in runs:
-        eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
-        run_target = load_induced_band_run_target(
-            eeg_path,
-            band=band,
-            bands_hz=cfg.bands_hz,
-            downsample_hz=cfg.downsample_hz,
-            target_kind=target_kind,
-            fooof_sliding_cfg=cfg.fooof_sliding_cfg,
-            edge_drop=cfg.edge_drop,
-            edge_window_s=cfg.edge_window_s,
-            picks=picks,
-        )
+        if str(target_kind).strip().lower() == "residual":
+            aperiodic_path = run_aperiodic_path(
+                out_dir=out_dir,
+                band=band,
+                dyad_id=dyad_id,
+                subject=subject,
+                run=int(run),
+            )
+            if not aperiodic_path.exists():
+                raise FileNotFoundError(
+                    f"Missing precomputed sliding FOOOF target: {aperiodic_path}. "
+                    "Run the sliding FOOOF rule before fitting residual induced TRF."
+                )
+            aperiodic_df = pd.read_parquet(aperiodic_path)
+            run_target = build_residual_target_from_aperiodic_df(
+                aperiodic_df,
+                downsample_hz=cfg.downsample_hz,
+                edge_drop=cfg.edge_drop,
+                edge_window_s=cfg.edge_window_s,
+            )
+        else:
+            eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
+            run_target = load_induced_band_run_target(
+                eeg_path,
+                band=band,
+                bands_hz=cfg.bands_hz,
+                downsample_hz=cfg.downsample_hz,
+                target_kind=target_kind,
+                fooof_sliding_cfg=cfg.fooof_sliding_cfg,
+                edge_drop=cfg.edge_drop,
+                edge_window_s=cfg.edge_window_s,
+                picks=picks,
+            )
         if channel_names_ref is None:
             channel_names_ref = tuple(str(ch) for ch in run_target.channel_names)
         elif tuple(str(ch) for ch in run_target.channel_names) != channel_names_ref:
@@ -412,7 +405,7 @@ def write_subject_output(
     subject_tables.inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
     subject_tables.outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
 
-    if per_run_aperiodic:
+    if per_run_aperiodic and target_mode != "residual":
         aperiodic_dir = subject_dir / "targets" / "aperiodic"
         aperiodic_dir.mkdir(parents=True, exist_ok=True)
         for run in runs:

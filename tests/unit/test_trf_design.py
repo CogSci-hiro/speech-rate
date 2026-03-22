@@ -81,11 +81,23 @@ def test_config_design_matrix_matches_legacy_builder_for_existing_models() -> No
 
 
 def test_parse_evoked_models_config_rejects_unsupported_grammar() -> None:
-    with pytest.raises(ValueError, match="exactly one model"):
+    with pytest.raises(ValueError, match="at least one model"):
         parse_evoked_models_config([])
-
-    with pytest.raises(ValueError, match="regressors exactly"):
-        parse_evoked_models_config([{"name": "bad", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg"]}])
 
     with pytest.raises(ValueError, match="Unsupported feature"):
         parse_evoked_models_config([{"name": "bad", "regressors": ["not_a_feature"]}])
+
+
+def test_parse_evoked_models_config_accepts_multiple_models_in_order() -> None:
+    models = parse_evoked_models_config(
+        [
+            {"name": "baseline", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg"]},
+            {"name": "self_rate", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "self_rate"]},
+            {"name": "interaction", "regressors": ["self_ipu_onset", "emg", "self_rate*emg"]},
+        ]
+    )
+
+    assert [m.model_name for m in models] == ["baseline", "self_rate", "interaction"]
+    assert [r.name for r in models[0].regressors] == ["self_onset_impulse", "other_offset_impulse", "emg"]
+    assert [r.name for r in models[1].regressors] == ["self_onset_impulse", "other_offset_impulse", "emg", "self_rate"]
+    assert [r.name for r in models[2].regressors] == ["self_onset_impulse", "emg", "self_rate__x__emg"]
