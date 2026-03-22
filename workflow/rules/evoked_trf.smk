@@ -29,26 +29,26 @@ def _active_evoked_models():
     return out
 
 
-PHASE5_PRIMARY_MODELS = _active_evoked_models()
+PRIMARY_EVOKED_MODELS = _active_evoked_models()
 
 
 def _evoked_reconstruction_subject_sidecars(wildcards):
     return [
         f"{OUT_DIR}/evoked_trf/subjects/{wildcards.dyad_id}/{wildcards.subject}/models/{model}/reconstruction_metrics.parquet"
-        for model in PHASE5_PRIMARY_MODELS
+        for model in PRIMARY_EVOKED_MODELS
     ]
 
 
 def _evoked_reconstruction_done_outputs(_wildcards):
     return [
-        f"{OUT_DIR}/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_reconstruction.done"
+        f"{OUT_DIR}/evoked_trf/subjects/{dyad_id}/{subject}/_reconstruction.done"
         for dyad_id, subject in _subject_pairs()
     ]
 
 
 def _evoked_similarity_done_outputs(_wildcards):
     return [
-        f"{OUT_DIR}/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_similarity.done"
+        f"{OUT_DIR}/evoked_trf/subjects/{dyad_id}/{subject}/_similarity.done"
         for dyad_id, subject in _subject_pairs()
     ]
 
@@ -101,7 +101,7 @@ rule evoked_trf_reconstruction_subject:
         scores=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/scores.parquet",
         recon=_evoked_reconstruction_subject_sidecars,
     output:
-        done=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_reconstruction.done"
+        done=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/_reconstruction.done"
     shell:
         r"""
         set -euo pipefail
@@ -114,7 +114,7 @@ rule evoked_trf_similarity_subject:
         scores=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/scores.parquet",
         sim=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/models/unified/self_rate-ave.fif",
     output:
-        done=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/_phase5_similarity.done"
+        done=OUT_DIR + "/evoked_trf/subjects/{dyad_id}/{subject}/_similarity.done"
     shell:
         r"""
         set -euo pipefail
