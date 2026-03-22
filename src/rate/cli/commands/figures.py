@@ -41,10 +41,12 @@ CLUSTER_TEND_COL = "t_end"
 SEMANTIC_COLOR_MAP = {
     "self_rate": "firebrick",
     "other_rate": "royalblue",
-    "abs_diff": "seagreen",
+    "alignment": "seagreen",
+    "convergence": "darkorange",
     "self_rate_sq": "firebrick",
     "other_rate_sq": "royalblue",
-    "abs_diff_sq": "seagreen",
+    "alignment_sq": "seagreen",
+    "convergence_sq": "darkorange",
     "self": "firebrick",
     "other": "royalblue",
 }
@@ -58,7 +60,7 @@ BASELINE_CONTROL_REGRESSORS = {
     "self_ipu_onset",
     "other_ipu_offset",
 }
-TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "abs_diff"}
+TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "alignment", "convergence"}
 
 
 def add_subparser(subparsers) -> ArgumentParser:
@@ -377,9 +379,14 @@ def run_trf_figures(
             raise ValueError(f"{figure} is only supported for family='evoked_trf'")
         panel_kind = "linear" if figure == FIGURE_RECON_ERP_LINEAR else "quadratic"
         condition_to_model = (
-            {"self": "self_rate", "other": "other_rate", "abs_diff": "abs_diff"}
+            {"self": "self_rate", "other": "other_rate", "alignment": "alignment", "convergence": "convergence"}
             if panel_kind == "linear"
-            else {"self": "self_rate_sq", "other": "other_rate_sq", "abs_diff": "abs_diff_sq"}
+            else {
+                "self": "self_rate_sq",
+                "other": "other_rate_sq",
+                "alignment": "alignment_sq",
+                "convergence": "convergence_sq",
+            }
         )
         try:
             info_for_insets = _load_group_evoked(
@@ -399,7 +406,8 @@ def run_trf_figures(
                 colors={
                     "self": SEMANTIC_COLOR_MAP["self"],
                     "other": SEMANTIC_COLOR_MAP["other"],
-                    "abs_diff": SEMANTIC_COLOR_MAP["abs_diff"],
+                    "alignment": SEMANTIC_COLOR_MAP["alignment"],
+                    "convergence": SEMANTIC_COLOR_MAP["convergence"],
                 },
                 out_dir=out_dir,
                 family=family,
@@ -982,13 +990,14 @@ def _feature_index_for_regressor(*, regressor: str, n_features: int) -> int | No
         "emg": 2,
         "self_rate": 3,
         "other_rate": 4,
-        "abs_diff": 5,
+        "alignment": 5,
+        "convergence": 6,
     }
     idx = unified.get(token)
     if idx is not None and idx < int(n_features):
         return int(idx)
     # Backward-compatible fallback for legacy single-target model artifacts.
-    if token in {"self_rate", "other_rate", "abs_diff"} and int(n_features) > 0:
+    if token in {"self_rate", "other_rate", "alignment", "convergence"} and int(n_features) > 0:
         return int(n_features - 1)
     return None
 

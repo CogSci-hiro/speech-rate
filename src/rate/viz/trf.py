@@ -273,7 +273,7 @@ def plot_reconstruction_erp_grid(
             ax = axes[row, col]
             signal_items = list(panel_data[electrode][signal].items())
             if signal == "original":
-                signal_items = [(condition, arr) for condition, arr in signal_items if condition != "abs_diff"]
+                signal_items = [(condition, arr) for condition, arr in signal_items if condition in {"self", "other"}]
             for condition, arr in signal_items:
                 vals = np.asarray(arr, dtype=float)
                 t = vals[:, 0]
