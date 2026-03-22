@@ -11,10 +11,12 @@ RegressorKind = Literal[
     "impulse",
     "self_rate",
     "other_rate",
-    "abs_diff",
+    "alignment",
+    "convergence",
     "self_rate_sq",
     "other_rate_sq",
-    "abs_diff_sq",
+    "alignment_sq",
+    "convergence_sq",
     "emg",
 ]
 TimeLock = Literal["self_IPU_onset", "other_IPU_offset"]
@@ -133,12 +135,21 @@ def other_rate_regressor() -> RegressorSpec:
     )
 
 
-def abs_diff_regressor() -> RegressorSpec:
+def alignment_regressor() -> RegressorSpec:
     return RegressorSpec(
-        name="abs_diff",
-        column="abs_diff",
+        name="alignment",
+        column="alignment",
         time_lock="self_IPU_onset",
-        kind="abs_diff",
+        kind="alignment",
+    )
+
+
+def convergence_regressor() -> RegressorSpec:
+    return RegressorSpec(
+        name="convergence",
+        column="convergence",
+        time_lock="self_IPU_onset",
+        kind="convergence",
     )
 
 
@@ -169,12 +180,21 @@ def other_rate_sq_regressor() -> RegressorSpec:
     )
 
 
-def abs_diff_sq_regressor() -> RegressorSpec:
+def alignment_sq_regressor() -> RegressorSpec:
     return RegressorSpec(
-        name="abs_diff_sq",
-        column="abs_diff_sq",
+        name="alignment_sq",
+        column="alignment_sq",
         time_lock="self_IPU_onset",
-        kind="abs_diff_sq",
+        kind="alignment_sq",
+    )
+
+
+def convergence_sq_regressor() -> RegressorSpec:
+    return RegressorSpec(
+        name="convergence_sq",
+        column="convergence_sq",
+        time_lock="self_IPU_onset",
+        kind="convergence_sq",
     )
 
 
@@ -195,14 +215,18 @@ def get_models() -> tuple[ModelSpec, ...]:
         Baseline + self speaking-rate regressor.
     other_rate
         Baseline + partner speaking-rate regressor.
-    abs_diff
-        Baseline + absolute rate-difference regressor.
+    alignment
+        Baseline + negative absolute rate-difference regressor.
+    convergence
+        Baseline + median-referenced convergence regressor.
     self_rate_sq
         Baseline + self speaking-rate regressor + squared self speaking-rate regressor.
     other_rate_sq
         Baseline + partner speaking-rate regressor + squared partner speaking-rate regressor.
-    abs_diff_sq
-        Baseline + absolute rate-difference regressor + squared absolute rate-difference regressor.
+    alignment_sq
+        Baseline + alignment regressor + squared alignment regressor.
+    convergence_sq
+        Baseline + convergence regressor + squared convergence regressor.
 
     Usage example
     -------------
@@ -236,13 +260,22 @@ def get_models() -> tuple[ModelSpec, ...]:
             other_rate_regressor(),
         ),
     )
-    abs_diff = ModelSpec(
-        model_name="abs_diff",
+    alignment = ModelSpec(
+        model_name="alignment",
         regressors=(
             baseline_self_onset_impulse(),
             baseline_other_offset_impulse(),
             emg_regressor(),
-            abs_diff_regressor(),
+            alignment_regressor(),
+        ),
+    )
+    convergence = ModelSpec(
+        model_name="convergence",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            convergence_regressor(),
         ),
     )
     self_rate_sq = ModelSpec(
@@ -265,17 +298,37 @@ def get_models() -> tuple[ModelSpec, ...]:
             other_rate_sq_regressor(),
         ),
     )
-    abs_diff_sq = ModelSpec(
-        model_name="abs_diff_sq",
+    alignment_sq = ModelSpec(
+        model_name="alignment_sq",
         regressors=(
             baseline_self_onset_impulse(),
             baseline_other_offset_impulse(),
             emg_regressor(),
-            abs_diff_regressor(),
-            abs_diff_sq_regressor(),
+            alignment_regressor(),
+            alignment_sq_regressor(),
         ),
     )
-    return (baseline, self_rate, other_rate, abs_diff, self_rate_sq, other_rate_sq, abs_diff_sq)
+    convergence_sq = ModelSpec(
+        model_name="convergence_sq",
+        regressors=(
+            baseline_self_onset_impulse(),
+            baseline_other_offset_impulse(),
+            emg_regressor(),
+            convergence_regressor(),
+            convergence_sq_regressor(),
+        ),
+    )
+    return (
+        baseline,
+        self_rate,
+        other_rate,
+        alignment,
+        convergence,
+        self_rate_sq,
+        other_rate_sq,
+        alignment_sq,
+        convergence_sq,
+    )
 
 
 # ---------------------------------------------------------------------

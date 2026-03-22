@@ -20,5 +20,6 @@ evoked_trf:
         - "emg"
         - "self_rate"
         - "other_rate"
-        - "abs_diff"
+        - "alignment"
+        - "convergence"
   n_jobs: 1

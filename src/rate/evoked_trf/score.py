@@ -30,7 +30,7 @@ from rate.trf.design import DesignModelSpec, build_design_matrix as build_design
 
 LOGGER = logging.getLogger(__name__)
 
-PHASE5_PRIMARY_MODELS = ("baseline", "self_rate", "other_rate", "abs_diff")
+PHASE5_PRIMARY_MODELS = ("baseline", "self_rate", "other_rate", "alignment", "convergence")
 
 
 # =============================================================================
@@ -191,7 +191,7 @@ def _canonical_lags_s(*, sfreq_hz: float, tmin_s: float, tmax_s: float) -> np.nd
 
 def _reconstruction_event_lock_for_model(model_name: str) -> str:
     model = str(model_name)
-    if model in {"self_rate", "abs_diff"}:
+    if model in {"self_rate", "alignment", "convergence"}:
         return "self_IPU_onset"
     if model == "other_rate":
         return "other_IPU_offset"
