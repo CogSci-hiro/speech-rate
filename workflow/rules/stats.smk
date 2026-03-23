@@ -268,23 +268,6 @@ rule stats_kernel0_behavior_subject_level:
         KERNEL0_BEHAVIOR_SUBJECT_Z_TARGETS
 
 
-rule stats_reconstruction_erp_r2_evoked:
-    input:
-        scores=f"{_stats_out_dir()}/evoked_trf/scores/scores.parquet",
-    output:
-        RECONSTRUCTION_ERP_R2_STAT_TARGETS
-        + RECONSTRUCTION_ERP_R2_MEAN_TARGETS
-        + RECONSTRUCTION_ERP_R2_LABEL_TARGETS
-        + RECONSTRUCTION_ERP_R2_CHNAME_TARGETS
-    shell:
-        """
-        python -m rate.cli.main stats-reconstruction-erp-r2 \
-            --analysis evoked_trf \
-            --config config/stats.yaml \
-            --schema config/schema.json
-        """
-
-
 rule stats_evoked_emg_onset_by_subject_emg:
     input:
         dataset_index=f"{_stats_out_dir()}/dataset/index.parquet",
