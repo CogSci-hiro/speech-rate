@@ -195,19 +195,19 @@ def _evoked_cluster_input(wildcards):
 
 def _evoked_timecourse_kernel_inputs(_wildcards):
     return [
-        f"{_viz_out_dir()}/stats/evoked_trf/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
+        f"{_viz_out_dir()}/stats/evoked_trf/{_configured_model_for_regressor(family='evoked_trf', regressor=reg)}/{reg}/grand_average_trfs-ave.fif"
         for reg in _configured_regressors_for_family("evoked_trf")
     ]
 
 
 def _family_kernel_input(wildcards):
-    model = _trf_model_for_regressor(str(wildcards.regressor))
+    model = _configured_model_for_regressor(family=str(wildcards.family), regressor=str(wildcards.regressor))
     family = str(wildcards.family)
     return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
 
 
 def _family_cluster_input(wildcards):
-    model = _trf_model_for_regressor(str(wildcards.regressor))
+    model = _configured_model_for_regressor(family=str(wildcards.family), regressor=str(wildcards.regressor))
     family = str(wildcards.family)
     return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
 
