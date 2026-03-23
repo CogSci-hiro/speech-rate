@@ -169,7 +169,7 @@ def _baseline_control_dependency(regressor: str) -> str:
 
 def _evoked_kernel_input(wildcards):
     regressor = str(wildcards.regressor).strip()
-    model = _trf_model_for_regressor(regressor)
+    model = _configured_model_for_regressor(family="evoked_trf", regressor=regressor)
     if regressor == "emg":
         del model
         return f"{_viz_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
@@ -182,7 +182,7 @@ def _evoked_kernel_input(wildcards):
 
 def _evoked_cluster_input(wildcards):
     regressor = str(wildcards.regressor).strip()
-    model = _trf_model_for_regressor(regressor)
+    model = _configured_model_for_regressor(family="evoked_trf", regressor=regressor)
     if regressor == "emg":
         # EMG onset-locked grand average currently has no cluster-table companion.
         del model
