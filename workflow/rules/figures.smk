@@ -414,7 +414,7 @@ rule figure_evoked_trf_reconstruction_erp_linear:
         # Stats outputs ensure upstream compute/stats are available before rendering.
         expand(
             f"{_viz_out_dir()}/stats/evoked_trf/{{model}}/{{model}}/grand_average_trfs-ave.fif",
-            model=["self_rate", "other_rate", "abs_diff"],
+            model=LINEAR_RECONSTRUCTION_MODELS,
         )
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_linear.pdf"
