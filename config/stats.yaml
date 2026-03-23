@@ -9,6 +9,7 @@ reporting:
 # Keep induced band metadata local to stats config so stats rule expansion does not
 # depend on the tracked compute config.
 induced_trf:
+  targets: ["theta", "alpha", "offset", "exponent"]
   bands: ["theta", "alpha"]
   target_kinds: ["residual"]
   # Optional: restrict residual induced analyses to this subset; [] disables residual analyses.
@@ -21,7 +22,7 @@ stats:
   kernel_cluster:
     method: "tfce"   # tfce | threshold
     allow_placeholder_outputs: false  # debug-only; when true writes zero-filled fallback outputs on failure
-    n_permutations: 100
+    n_permutations: 1000
     seed: 42
     threshold_p: 0.05  # Only used if method = threshold
     tfce:
