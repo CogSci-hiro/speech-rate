@@ -660,10 +660,6 @@ def _stats_feature_dir(*, out_dir: Path, family: str, regressor: str) -> Path:
     return out_dir / "stats" / family / model / str(regressor)
 
 
-def _reconstruction_erp_r2_stats_dir(*, out_dir: Path, family: str, model: str) -> Path:
-    return out_dir / "stats" / family / str(model) / "reconstruction_erp_r2_vs_baseline"
-
-
 def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
     """Load first evoked entry for a frozen group kernel file."""
     kernel_path = _kernel_path(out_dir=out_dir, family=family, regressor=regressor)
