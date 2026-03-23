@@ -21,7 +21,24 @@ def _viz_out_dir() -> str:
 
 def _viz_regressors():
     trf_reporting = viz_config.get("reporting", {}).get("trf", {})
-    return list(trf_reporting.get("regressors", []))
+    def _normalize_regressor(value):
+        token = str(value).strip()
+        if "*" in token:
+            parts = [part.strip() for part in token.split("*", 1)]
+            if len(parts) == 2 and all(parts):
+                return f"{_normalize_regressor(parts[0])}__x__{_normalize_regressor(parts[1])}"
+        aliases = {
+            "self_ipu_onset": "self_onset_impulse",
+            "other_ipu_offset": "other_offset_impulse",
+            "self_rate^2": "self_rate_sq",
+            "other_rate^2": "other_rate_sq",
+            "alignment^2": "alignment_sq",
+            "convergence^2": "convergence_sq",
+            "mean_rate^2": "mean_rate_sq",
+        }
+        return aliases.get(token, token)
+
+    return [_normalize_regressor(reg) for reg in trf_reporting.get("regressors", []) if str(reg).strip()]
 
 
 def _viz_table_ext() -> str:
