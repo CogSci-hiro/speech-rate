@@ -22,6 +22,7 @@ REQUIRED_EVENT_COLUMNS = {
     "latency",
     "alignment",
     "convergence",
+    "mean_rate",
     "self_rate_sq",
     "other_rate_sq",
     "alignment_sq",
@@ -179,6 +180,7 @@ def test_other_rate_alignment_and_convergence_present_for_two_subject_streams(tm
     assert events_df["latency"].notna().all()
     assert events_df["alignment"].notna().all()
     assert events_df["convergence"].notna().all()
+    assert events_df["mean_rate"].notna().all()
     assert events_df["self_rate_sq"].notna().all()
     assert events_df["other_rate_sq"].notna().all()
     assert events_df["alignment_sq"].notna().all()
@@ -242,6 +244,7 @@ def test_other_rate_is_nan_when_no_partner_target_in_window(tmp_path: Path) -> N
     assert events_df["listener"].isna().all()
     assert events_df["alignment"].isna().all()
     assert events_df["convergence"].isna().all()
+    assert events_df["mean_rate"].isna().all()
     assert events_df["self_rate_sq"].notna().all()
     assert events_df["other_rate_sq"].isna().all()
     assert events_df["alignment_sq"].isna().all()
@@ -307,6 +310,11 @@ def test_alignment_and_convergence_follow_defined_formulas(tmp_path: Path) -> No
     assert np.allclose(
         events_df["convergence"].to_numpy(dtype=float),
         expected_convergence.to_numpy(dtype=float),
+        equal_nan=True,
+    )
+    assert np.allclose(
+        events_df["mean_rate"].to_numpy(dtype=float),
+        ((events_df["self_rate"] + events_df["other_rate"]) / 2.0).to_numpy(dtype=float),
         equal_nan=True,
     )
 

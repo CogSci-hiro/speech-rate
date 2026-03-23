@@ -24,6 +24,13 @@ def _base_cfg() -> dict:
             "bands": ["theta", "alpha"],
             "target_kinds": ["raw", "residual"],
             "residual_bands": ["theta", "alpha"],
+            "models": [
+                {
+                    "name": "rate_effect",
+                    "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "self_rate", "other_rate"],
+                    "targets": ["theta", "alpha", "offset", "exponent"],
+                }
+            ],
         },
         "fooof_sliding": {
             "window_s": 1.0,
@@ -76,7 +83,7 @@ def test_sliding_aperiodic_emits_per_channel_rows():
     assert np.isfinite(df["band_total_power"]).any()
 
 
-def test_induced_aggregate_extracts_target_kind(tmp_path):
+def test_induced_aggregate_extracts_target(tmp_path):
     try:
         pd.DataFrame({"x": [1]}).to_parquet(tmp_path / "_probe.parquet", index=False)
     except Exception:
@@ -97,13 +104,12 @@ def test_induced_aggregate_extracts_target_kind(tmp_path):
     raw_path = tmp_path / "induced_trf_theta" / "subjects" / "dyad-01" / "sub-01" / "scores.parquet"
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     base_row.to_parquet(raw_path, index=False)
-    res_path = tmp_path / "induced_trf_theta_residual" / "subjects" / "dyad-01" / "sub-01" / "scores.parquet"
-    res_path.parent.mkdir(parents=True, exist_ok=True)
-    base_row.to_parquet(res_path, index=False)
+    offset_path = tmp_path / "induced_trf_offset" / "subjects" / "dyad-01" / "sub-01" / "scores.parquet"
+    offset_path.parent.mkdir(parents=True, exist_ok=True)
+    base_row.to_parquet(offset_path, index=False)
 
     out = aggregate_subject_scores(out_dir=tmp_path)
-    assert set(out["target_kind"].unique().tolist()) == {"raw", "residual"}
-    assert set(out["band"].unique().tolist()) == {"theta"}
+    assert set(out["target"].unique().tolist()) == {"theta", "offset"}
 
 
 def test_parse_induced_trf_confirmatory_defaults():
@@ -111,6 +117,8 @@ def test_parse_induced_trf_confirmatory_defaults():
     assert parsed.bands == ("theta", "alpha")
     assert parsed.target_kinds == ("raw", "residual")
     assert parsed.residual_bands == ("theta", "alpha")
+    assert parsed.requested_targets == ("theta", "alpha", "offset", "exponent")
+    assert parsed.aperiodic_source_band == "theta"
 
 
 def test_parse_induced_trf_allows_residual_only_target_kind():
@@ -189,6 +197,14 @@ def test_parse_induced_trf_rejects_missing_band_definition():
     cfg = _base_cfg()
     del cfg["induced_trf"]["bands_hz"]["alpha"]
     with pytest.raises(ValueError, match="Missing induced_trf.bands_hz entries"):
+        parse_induced_trf_config(cfg)
+
+
+def test_parse_induced_trf_rejects_unsupported_model_target():
+    cfg = _base_cfg()
+    cfg["induced_trf"]["models"][0]["targets"] = ["theta", "beta"]
+
+    with pytest.raises(ValueError, match="Unsupported induced_trf model targets"):
         parse_induced_trf_config(cfg)
 
 

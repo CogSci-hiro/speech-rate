@@ -27,6 +27,7 @@ def _demo_events_df():
                 "other_rate": [1.5, 2.5, 3.5],
                 "alignment": [-0.5, -0.5, -0.5],
                 "convergence": [0.0, 1.0, 2.0],
+                "mean_rate": [1.75, 2.75, 3.75],
             }
         )
     )
@@ -105,3 +106,41 @@ def test_parse_evoked_models_config_accepts_multiple_models_in_order() -> None:
     assert models[1].targets == ("evoked",)
     assert [r.name for r in models[1].regressors] == ["self_onset_impulse", "other_offset_impulse", "emg", "self_rate"]
     assert [r.name for r in models[2].regressors] == ["self_onset_impulse", "emg", "alignment__x__emg"]
+
+
+def test_parse_evoked_models_config_accepts_mean_rate_feature() -> None:
+    models = parse_evoked_models_config(
+        [
+            {"name": "mean_rate", "regressors": ["self_ipu_onset", "other_ipu_offset", "emg", "mean_rate"]},
+        ]
+    )
+
+    assert [r.name for r in models[0].regressors] == [
+        "self_onset_impulse",
+        "other_offset_impulse",
+        "emg",
+        "mean_rate",
+    ]
+
+
+def test_build_design_matrix_supports_mean_rate_feature() -> None:
+    model = parse_evoked_models_config(
+        [{"name": "mean_rate", "regressors": ["self_ipu_onset", "emg", "mean_rate"]}]
+    )[0]
+    events = _demo_events_df()
+    emg = np.linspace(0.1, 1.0, 8, dtype=float)
+
+    X, names = build_design_matrix(
+        model_spec=model,
+        events_df=events,
+        run_id=1,
+        sfreq=2.0,
+        lags=np.array([-1.0, 0.0, 1.0], dtype=float),
+        n_samples=8,
+        sample_t0_s=0.0,
+        continuous_regressors={"emg": emg},
+        return_feature_names=True,
+    )
+
+    assert names == ["self_onset_impulse", "emg", "mean_rate"]
+    assert np.allclose(X[:, 2], [0.0, 1.75, 0.0, 2.75, 0.0, 3.75, 0.0, 0.0])

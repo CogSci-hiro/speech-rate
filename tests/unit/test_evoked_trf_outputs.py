@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from rate.evoked_trf.score import validate_events_table
 from rate.trf import scoring as trf_scoring
 
 
@@ -62,3 +63,24 @@ def test_target_aware_summary_keeps_baseline_within_target() -> None:
     theta = summary.loc[(summary["target"] == "theta") & (summary["model"] == "rate_effect")].iloc[0]
     assert evoked["delta_r"] == pytest.approx(0.2)
     assert theta["delta_r"] == pytest.approx(0.3)
+
+
+def test_validate_events_table_backfills_mean_rate_for_legacy_events() -> None:
+    events = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-01",
+                "subject_id": "sub-01",
+                "run": 1,
+                "t_onset": 0.0,
+                "t_offset": 1.0,
+                "self_rate": 4.0,
+                "other_rate": 2.0,
+            }
+        ]
+    )
+
+    out = validate_events_table(events)
+
+    assert "mean_rate" in out.columns
+    assert out.loc[0, "mean_rate"] == pytest.approx(3.0)
