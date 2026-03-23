@@ -436,36 +436,6 @@ def run_trf_figures(
             )
         return
 
-    if figure == FIGURE_RECON_ERP_R2_TOPO:
-        if family != "evoked_trf":
-            raise ValueError(f"{figure} is only supported for family='evoked_trf'")
-        model = _require_regressor(regressor=regressor, figure=figure)
-        if model == "baseline":
-            raise ValueError(f"{figure} expects a non-baseline model in --regressor")
-        stats_dir = _reconstruction_erp_r2_stats_dir(out_dir=out_dir, family=family, model=model)
-        mean_delta = np.asarray(np.load(stats_dir / "mean_delta_r2.npy"), dtype=float).reshape(-1)
-        ch_names = _load_reconstruction_erp_r2_channel_names(stats_dir=stats_dir)
-        info = _make_reconstruction_topomap_info(config=config, mne=mne, ch_names=ch_names)
-        alpha = _get_viz_significance_p_threshold(config)
-        sig_mask = _load_reconstruction_erp_r2_significance_mask(stats_dir=stats_dir, alpha=alpha, n_channels=mean_delta.size)
-        plot_spatial_stat_topomap(
-            stat=mean_delta,
-            info=info,
-            title=f"{family} reconstruction ERP ΔR² ({model} - baseline)",
-            out_dir=out_dir,
-            family=family,
-            name=f"reconstruction_erp_r2_topomap_{model}_vs_baseline",
-            mask=sig_mask,
-            mask_params={
-                "marker": "o",
-                "markerfacecolor": "0.75",
-                "markeredgecolor": "black",
-                "markersize": 10,
-            },
-            cbar_label="Mean ΔR²",
-        )
-        return
-
     raise ValueError(f"Unsupported figure mode: {figure}")
 
 
