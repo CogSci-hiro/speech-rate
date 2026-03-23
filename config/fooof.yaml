@@ -1,5 +1,5 @@
 sampling:
-  downsample_hz: 16.0
+  downsample_hz: 2.0
 
 fooof_sliding:
   window_s: 1.0
