@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from rate.config import ConfigValidationError, load_and_validate_config
-from rate.induced_trf.score import write_subject_output
 
 LOGGER = logging.getLogger(__name__)
 REQUIRES_CONFIG = True
