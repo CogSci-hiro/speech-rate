@@ -82,6 +82,19 @@ def _trf_model_for_regressor(regressor: str) -> str:
     return "baseline" if value in BASELINE_CONTROL_REGRESSORS else value
 
 
+def _canonical_feature_name(value: str) -> str:
+    token = str(value).strip()
+    aliases = {
+        "self_ipu_onset": "self_onset_impulse",
+        "other_ipu_offset": "other_offset_impulse",
+        "self_rate^2": "self_rate_sq",
+        "other_rate^2": "other_rate_sq",
+        "alignment^2": "alignment_sq",
+        "convergence^2": "convergence_sq",
+    }
+    return aliases.get(token, token)
+
+
 def _active_model_names(branch_cfg, branch_key: str):
     block = branch_cfg.get(branch_key, {}) or {}
     specs = block.get("models", []) or []
