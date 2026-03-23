@@ -63,6 +63,24 @@ BASELINE_CONTROL_REGRESSORS = {
 TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "alignment", "convergence", "mean_rate"}
 
 
+def _canonical_regressor_name(value: str) -> str:
+    token = str(value).strip()
+    if "*" in token:
+        parts = [part.strip() for part in token.split("*", 1)]
+        if len(parts) == 2 and all(parts):
+            return f"{_canonical_regressor_name(parts[0])}__x__{_canonical_regressor_name(parts[1])}"
+    aliases = {
+        "self_ipu_onset": "self_onset_impulse",
+        "other_ipu_offset": "other_offset_impulse",
+        "self_rate^2": "self_rate_sq",
+        "other_rate^2": "other_rate_sq",
+        "alignment^2": "alignment_sq",
+        "convergence^2": "convergence_sq",
+        "mean_rate^2": "mean_rate_sq",
+    }
+    return aliases.get(token, token)
+
+
 def add_subparser(subparsers) -> ArgumentParser:
     """Register the `figures` subcommand."""
     parser = subparsers.add_parser(
@@ -161,13 +179,13 @@ def run_trf_figures(
 
     if figure in (FIGURE_JOINT, FIGURE_TOPO):
         reg_name = _require_regressor(regressor=regressor, figure=figure)
-        is_target_regressor = reg_name in TARGET_BEHAVIOR_REGRESSORS
+        has_cluster_stats = _cluster_path(out_dir=out_dir, family=family, regressor=reg_name).exists()
         evoked = _load_group_evoked(mne=mne, out_dir=out_dir, family=family, regressor=reg_name)
         cluster_intervals = (
             _load_cluster_intervals(
                 cluster_path=_cluster_path(out_dir=out_dir, family=family, regressor=reg_name)
             )
-            if is_target_regressor
+            if has_cluster_stats
             else None
         )
 
@@ -187,7 +205,7 @@ def run_trf_figures(
                     alpha=alpha,
                     expected_shape=stat_map.shape,
                 )
-                if is_target_regressor
+                if has_cluster_stats
                 else None
             )
             joint_time_clusters = cluster_intervals
@@ -233,7 +251,7 @@ def run_trf_figures(
                 alpha=alpha,
                 expected_shape=stat_map.shape,
             )
-            if is_target_regressor
+            if has_cluster_stats
             else None
         )
         plot_stat_topomap_sequence(
@@ -450,7 +468,7 @@ def _get_trf_regressors(config: Mapping[str, Any]) -> list[str]:
     if not isinstance(regressors, Sequence) or isinstance(regressors, (str, bytes)):
         raise ValueError("config.reporting.trf.regressors must be a non-empty list of strings")
 
-    values = [str(item) for item in regressors if str(item)]
+    values = [_canonical_regressor_name(item) for item in regressors if str(item).strip()]
     if not values:
         raise ValueError("config.reporting.trf.regressors must contain at least one regressor")
     return values
