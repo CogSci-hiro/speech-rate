@@ -16,6 +16,7 @@ AllowedFeature = Literal[
     "other_rate",
     "alignment",
     "convergence",
+    "mean_rate",
     "emg",
     "run",
     "time_within_run",
@@ -29,6 +30,7 @@ _FEATURES: set[str] = {
     "other_rate",
     "alignment",
     "convergence",
+    "mean_rate",
     "emg",
     "run",
     "time_within_run",
@@ -44,9 +46,10 @@ _DEFAULT_LOCK_BY_FEATURE = {
     "other_rate": "other_ipu_offset",
     "alignment": "self_ipu_onset",
     "convergence": "self_ipu_onset",
+    "mean_rate": "self_ipu_onset",
 }
 _IMPULSE_FEATURES = {"self_ipu_onset", "other_ipu_offset"}
-_EVENT_SCALAR_FEATURES = {"self_rate", "other_rate", "alignment", "convergence"}
+_EVENT_SCALAR_FEATURES = {"self_rate", "other_rate", "alignment", "convergence", "mean_rate"}
 _CONTINUOUS_FEATURES = {"emg", "run", "time_within_run"}
 
 
@@ -143,7 +146,7 @@ def _canonical_term_name(*, left: DesignFactor, right: DesignFactor | None) -> s
             return "self_onset_impulse"
         if left.feature == "other_ipu_offset":
             return "other_offset_impulse"
-        if left.squared and left.feature in {"self_rate", "other_rate", "alignment", "convergence"}:
+        if left.squared and left.feature in {"self_rate", "other_rate", "alignment", "convergence", "mean_rate"}:
             return f"{left.feature}_sq"
         return left.feature
     left_name = _canonical_term_name(left=left, right=None)
@@ -293,6 +296,13 @@ def _factor_to_series(
             reg = RegressorSpec(
                 name="convergence",
                 column="convergence",
+                time_lock=_LOCK_ALIASES[factor.lock_event],
+                kind="convergence",
+            )
+        elif feature == "mean_rate":
+            reg = RegressorSpec(
+                name="mean_rate",
+                column="mean_rate",
                 time_lock=_LOCK_ALIASES[factor.lock_event],
                 kind="convergence",
             )

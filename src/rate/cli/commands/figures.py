@@ -41,10 +41,12 @@ SEMANTIC_COLOR_MAP = {
     "other_rate": "royalblue",
     "alignment": "seagreen",
     "convergence": "darkorange",
+    "mean_rate": "slateblue",
     "self_rate_sq": "firebrick",
     "other_rate_sq": "royalblue",
     "alignment_sq": "seagreen",
     "convergence_sq": "darkorange",
+    "mean_rate_sq": "slateblue",
     "self": "firebrick",
     "other": "royalblue",
 }
@@ -58,7 +60,7 @@ BASELINE_CONTROL_REGRESSORS = {
     "self_ipu_onset",
     "other_ipu_offset",
 }
-TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "alignment", "convergence"}
+TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "alignment", "convergence", "mean_rate"}
 
 
 def add_subparser(subparsers) -> ArgumentParser:

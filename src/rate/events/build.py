@@ -34,6 +34,7 @@ REQUIRED_EVENTS_COLUMNS = [
     "latency",
     "alignment",
     "convergence",
+    "mean_rate",
     "self_rate_sq",
     "other_rate_sq",
     "alignment_sq",
@@ -127,6 +128,7 @@ def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[s
     unit_df["latency"] = pd.NA
     unit_df["alignment"] = pd.NA
     unit_df["convergence"] = pd.NA
+    unit_df["mean_rate"] = pd.NA
     unit_df["self_rate_sq"] = pd.NA
     unit_df["other_rate_sq"] = pd.NA
     unit_df["alignment_sq"] = pd.NA

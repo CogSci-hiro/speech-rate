@@ -5,7 +5,7 @@ BASELINE_CONTROL_REGRESSORS = {
     "self_ipu_onset",
     "other_ipu_offset",
 }
-TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "alignment", "convergence"}
+TARGET_BEHAVIOR_REGRESSORS = {"self_rate", "other_rate", "alignment", "convergence", "mean_rate"}
 DEFAULT_BASELINE_VIZ_REGRESSORS = (
     "self_onset_impulse",
     "other_offset_impulse",
@@ -35,45 +35,21 @@ if not RAW_REGRESSORS:
     raise ValueError("config/viz.yaml reporting.trf.regressors must define at least one TRF regressor")
 
 
-def _induced_bands():
+def _induced_targets():
     ind_cfg = viz_induced_trf_config
+    targets = ind_cfg.get("targets")
+    if targets:
+        return [str(target).strip().lower() for target in targets if str(target).strip()]
     bands = ind_cfg.get("bands")
     if bands:
-        return [str(b) for b in bands]
+        return [str(band).strip().lower() for band in bands if str(band).strip()]
     bands_hz = ind_cfg.get("bands_hz", {}) or {}
-    return sorted(str(k) for k in bands_hz.keys())
-
-
-def _induced_target_kinds():
-    ind_cfg = viz_induced_trf_config
-    kinds = ind_cfg.get("target_kinds")
-    if kinds:
-        return [str(k).strip().lower() for k in kinds]
-    return ["raw"]
-
-
-def _induced_bands_for_target_kind(target_kind: str):
-    base = _induced_bands()
-    mode = str(target_kind).strip().lower()
-    if mode != "residual":
-        return base
-    ind_cfg = viz_induced_trf_config
-    residual = ind_cfg.get("residual_bands")
-    if residual is None:
-        return base
-    return [str(b).strip() for b in residual if str(b).strip() and str(b).strip() in set(base)]
-
-
-def _induced_family_name(band: str, target_kind: str) -> str:
-    if str(target_kind).strip().lower() == "raw":
-        return f"induced_trf_{str(band)}"
-    return f"induced_trf_{str(band)}_{str(target_kind).strip().lower()}"
+    return sorted(str(k).strip().lower() for k in bands_hz.keys() if str(k).strip())
 
 
 INDUCED_FAMILIES = [
-    _induced_family_name(band, target_kind)
-    for target_kind in _induced_target_kinds()
-    for band in _induced_bands_for_target_kind(target_kind)
+    f"induced_trf_{target}"
+    for target in _induced_targets()
 ]
 
 
@@ -244,7 +220,7 @@ if "baseline" in ACTIVE_EVOKED_MODELS:
         *DEFAULT_BASELINE_VIZ_REGRESSORS,
     ]))
 LINEAR_RECONSTRUCTION_MODELS = [
-    model for model in ("self_rate", "other_rate", "alignment", "convergence")
+    model for model in ("self_rate", "other_rate", "alignment", "convergence", "mean_rate")
     if model in ACTIVE_EVOKED_MODELS
 ]
 QUADRATIC_RECONSTRUCTION_MODELS = [

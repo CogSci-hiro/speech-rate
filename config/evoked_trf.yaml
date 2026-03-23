@@ -1,4 +1,3 @@
-# Phase 1 modular config duplicate from config/config.yaml
 evoked_trf:
   downsample_hz: 16.0
 
@@ -22,10 +21,6 @@ evoked_trf:
         - "other_rate"
       targets:
         - "evoked"
-        - "theta"
-        - "alpha"
-        - "offset"
-        - "exponent"
     - name: "alignment"
       regressors:
         - "self_ipu_onset"
@@ -33,6 +28,40 @@ evoked_trf:
         - "emg"
         - "self_rate"
         - "other_rate"
+        - "alignment"
       targets:
         - "evoked"
+    - name: "convergence"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "self_rate"
+        - "other_rate"
+        - "convergence"
+      targets:
+        - "evoked"
+    - name: "mean_rate"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "self_rate"
+        - "other_rate"
+        - "mean_rate"
+      targets:
+        - "evoked"
+    - name: "alignment_mean"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "self_rate"
+        - "other_rate"
+        - "alignment"
+        - "mean_rate"
+      targets:
+        - "evoked"
+
+
   n_jobs: 1

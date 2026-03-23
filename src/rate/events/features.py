@@ -90,6 +90,11 @@ def compute_convergence(self_rate: pd.Series, other_rate: pd.Series) -> pd.Serie
     return 1.0 - ((other_median - self_vals) / denom).abs()
 
 
+def compute_mean_rate(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
+    """Compute dyadic mean speaking rate per matched event."""
+    return (self_rate.astype(float) + other_rate.astype(float)) / 2.0
+
+
 def add_event_rate_features(
     unit_df: pd.DataFrame,
     absdiff_window_s: float,
@@ -107,6 +112,7 @@ def add_event_rate_features(
     )
     enriched["alignment"] = compute_alignment(enriched["self_rate"], enriched["other_rate"])
     enriched["convergence"] = compute_convergence(enriched["self_rate"], enriched["other_rate"])
+    enriched["mean_rate"] = compute_mean_rate(enriched["self_rate"], enriched["other_rate"])
     enriched["self_rate_sq"] = enriched["self_rate"] ** 2
     enriched["other_rate_sq"] = enriched["other_rate"] ** 2
     enriched["alignment_sq"] = enriched["alignment"] ** 2

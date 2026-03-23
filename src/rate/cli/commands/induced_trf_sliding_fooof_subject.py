@@ -25,8 +25,8 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--dyad-id", required=True, help="Dyad ID (e.g., dyad-001).")
     parser.add_argument("--subject", required=True, help="Subject ID (e.g., sub-001).")
     parser.add_argument("--band", required=True, help="Band name (e.g., theta).")
-    parser.add_argument("--band-fmin", required=True, type=float, help="Band lower edge in Hz.")
-    parser.add_argument("--band-fmax", required=True, type=float, help="Band upper edge in Hz.")
+    parser.add_argument("--band-fmin", type=float, help="Band lower edge in Hz.")
+    parser.add_argument("--band-fmax", type=float, help="Band upper edge in Hz.")
     parser.add_argument("--done-file", help="Optional explicit done marker path.")
     parser.set_defaults(command_func=run)
     return parser
@@ -42,6 +42,7 @@ def run(args: Namespace, config=None) -> int:
         parse_sliding_fooof_config,
         write_subject_sliding_fooof_outputs,
     )
+    from rate.induced_trf.score import parse_induced_trf_config
 
     if config is None:
         try:
@@ -57,14 +58,22 @@ def run(args: Namespace, config=None) -> int:
         raise FileNotFoundError(f"dataset index not found: {dataset_index_path}")
 
     sliding_cfg = parse_sliding_fooof_config(resolved)
+    induced_cfg = parse_induced_trf_config(resolved)
     dataset_index = pd.read_parquet(dataset_index_path)
+    if args.band_fmin is None or args.band_fmax is None:
+        band_name = str(args.band).strip()
+        if band_name not in induced_cfg.bands_hz:
+            raise ValueError(f"Unknown induced band '{band_name}' in induced_trf.bands_hz")
+        band_hz = induced_cfg.bands_hz[band_name]
+    else:
+        band_hz = (float(args.band_fmin), float(args.band_fmax))
     write_subject_sliding_fooof_outputs(
         sliding_cfg=sliding_cfg,
         out_dir=out_dir,
         dyad_id=str(args.dyad_id),
         subject=str(args.subject),
         band=str(args.band),
-        band_hz=(float(args.band_fmin), float(args.band_fmax)),
+        band_hz=band_hz,
         dataset_index=dataset_index,
     )
 
