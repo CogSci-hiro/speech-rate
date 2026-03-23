@@ -50,6 +50,8 @@ def register_subparser(subparsers) -> ArgumentParser:
 
 
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
+    from rate.induced_trf.score import parse_induced_trf_config, write_subject_output
+
     if config is None:
         try:
             resolved = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))
