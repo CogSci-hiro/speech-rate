@@ -108,6 +108,24 @@ def _active_model_names(branch_cfg, branch_key: str):
     return out
 
 
+def _regressor_model_map(branch_cfg, branch_key: str):
+    block = branch_cfg.get(branch_key, {}) or {}
+    specs = block.get("models", []) or []
+    out = {}
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        model_name = str(spec.get("name", "")).strip()
+        regressors = [str(r).strip() for r in (spec.get("regressors", []) or [])]
+        if not model_name:
+            continue
+        for regressor in regressors:
+            canonical = _canonical_feature_name(regressor)
+            if canonical:
+                out.setdefault(canonical, model_name)
+    return out
+
+
 ACTIVE_EVOKED_MODELS = set(_active_model_names(evoked_trf_config, "evoked_trf"))
 ACTIVE_INDUCED_MODELS = set(_active_model_names(induced_trf_config, "induced_trf"))
 
