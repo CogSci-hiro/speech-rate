@@ -37,6 +37,7 @@ reporting:
 # Keep induced band metadata local to viz config so figure rule expansion does not
 # depend on the tracked compute config.
 induced_trf:
+  targets: ["theta", "alpha", "offset", "exponent"]
   bands: ["theta", "alpha"]
   target_kinds: ["residual"]
   residual_bands: ["theta", "alpha"]
