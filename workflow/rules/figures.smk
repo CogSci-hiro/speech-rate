@@ -267,10 +267,6 @@ if _has_evoked_models(["self_rate_sq", "other_rate_sq", "abs_diff_sq"]):
     EVOKED_RECONSTRUCTION_ERP_TARGETS.append(
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"
     )
-EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS = [
-    f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_r2_topomap_{model}_vs_baseline.pdf"
-    for model in AVAILABLE_EVOKED_RECONSTRUCTION_R2_MODELS
-]
 FOOOF_PSD_TARGETS = [
     f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_grid.pdf",
     f"{_viz_out_dir()}/final/figures/fooof/psd_quantile_raw_row.pdf",
