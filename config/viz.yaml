@@ -11,7 +11,15 @@ reporting:
   alpha: 0.01
   tables_format: "csv"  # csv | parquet
   trf:
-    regressors: ["self_onset_impulse", "other_offset_impulse", "emg", "self_rate", "other_rate", "alignment", "convergence"]
+    regressors:
+      - "self_onset_impulse"
+      - "other_offset_impulse"
+      - "self_rate"
+      - "other_rate"
+      - "alignment"
+      - "convergence"
+      - "mean_rate"
+      - "mean_rate * alignment"
     electrodes: ["Fz", "Pz"]
     # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
     # Global for all regressors:
