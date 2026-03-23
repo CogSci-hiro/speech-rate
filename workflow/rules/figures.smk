@@ -215,7 +215,7 @@ def _family_cluster_input(wildcards):
 def _family_timecourse_kernel_inputs(wildcards):
     family = str(wildcards.family)
     return [
-        f"{_viz_out_dir()}/stats/{family}/{_trf_model_for_regressor(reg)}/{reg}/grand_average_trfs-ave.fif"
+        f"{_viz_out_dir()}/stats/{family}/{_configured_model_for_regressor(family=family, regressor=reg)}/{reg}/grand_average_trfs-ave.fif"
         for reg in AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY.get(family, [])
     ]
 
