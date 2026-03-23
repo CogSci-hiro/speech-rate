@@ -37,6 +37,12 @@ def register_subparser(subparsers) -> ArgumentParser:
 
 
 def run(args: Namespace, config=None) -> int:
+    from rate.induced_trf.sliding_fooof import (
+        done_marker_path,
+        parse_sliding_fooof_config,
+        write_subject_sliding_fooof_outputs,
+    )
+
     if config is None:
         try:
             resolved = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))
