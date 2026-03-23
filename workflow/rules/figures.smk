@@ -434,7 +434,7 @@ rule figure_evoked_trf_reconstruction_erp_quadratic:
     input:
         expand(
             f"{_viz_out_dir()}/stats/evoked_trf/{{model}}/{{model}}/grand_average_trfs-ave.fif",
-            model=["self_rate_sq", "other_rate_sq", "abs_diff_sq"],
+            model=QUADRATIC_RECONSTRUCTION_MODELS,
         )
     output:
         f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_quadratic.pdf"
@@ -448,40 +448,6 @@ rule figure_evoked_trf_reconstruction_erp_quadratic:
             --figure reconstruction_erp_quadratic \
             --config config/viz.yaml
         """
-
-
-rule figure_evoked_trf_reconstruction_erp_r2_topo_by_model:
-    input:
-        mean_delta=(
-            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/mean_delta_r2.npy"
-        ),
-        labels=(
-            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/cluster_labels.npy"
-        ),
-        clusters=(
-            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/clusters.{_viz_table_ext()}"
-        ),
-        ch_names=(
-            f"{_viz_out_dir()}/stats/evoked_trf/{{regressor}}/reconstruction_erp_r2_vs_baseline/channel_names.npy"
-        ),
-    output:
-        f"{_viz_out_dir()}/final/figures/evoked_trf/reconstruction_erp_r2_topomap_{{regressor}}_vs_baseline.pdf"
-    params:
-        out_dir=VIZ_OUT_DIR
-    shell:
-        """
-        python -m rate.cli.main figures \
-            --out-dir {params.out_dir} \
-            --family evoked_trf \
-            --figure reconstruction_erp_r2_topo \
-            --config config/viz.yaml \
-            --regressor {wildcards.regressor}
-        """
-
-
-rule figure_evoked_trf_reconstruction_erp_r2_topo:
-    input:
-        EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
 
 
 rule figure_fooof_psd_panel:
@@ -527,14 +493,15 @@ rule figure_fooof_psd:
 
 rule figures_all:
     input:
-        EVOKED_JOINT_TARGETS
-        + EVOKED_TOPO_TARGETS
-        #+ INDUCED_JOINT_TARGETS
-        #+ INDUCED_TOPO_TARGETS
-        + [
-            f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
-            *EVOKED_RECONSTRUCTION_ERP_TARGETS,
-        ]
-        + EVOKED_RECONSTRUCTION_ERP_R2_TOPO_TARGETS
-        #+ INDUCED_TIMECOURSE_TARGETS
-        + FOOOF_PSD_TARGETS
+        (
+            EVOKED_JOINT_TARGETS
+            + EVOKED_TOPO_TARGETS
+            + INDUCED_JOINT_TARGETS
+            # + INDUCED_TOPO_TARGETS
+            # + [
+            #     f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",
+            #     *EVOKED_RECONSTRUCTION_ERP_TARGETS,
+            # ]
+            # + INDUCED_TIMECOURSE_TARGETS
+            # + FOOOF_PSD_TARGETS
+        )
