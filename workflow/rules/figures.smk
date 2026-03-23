@@ -230,9 +230,13 @@ if "baseline" in ACTIVE_EVOKED_MODELS:
         *AVAILABLE_EVOKED_REGRESSORS,
         *DEFAULT_BASELINE_VIZ_REGRESSORS,
     ]))
-AVAILABLE_EVOKED_RECONSTRUCTION_R2_MODELS = [
-    str(model) for model in sorted(ACTIVE_EVOKED_MODELS)
-    if str(model) != "baseline"
+LINEAR_RECONSTRUCTION_MODELS = [
+    model for model in ("self_rate", "other_rate", "alignment", "convergence")
+    if model in ACTIVE_EVOKED_MODELS
+]
+QUADRATIC_RECONSTRUCTION_MODELS = [
+    model for model in ("self_rate_sq", "other_rate_sq", "alignment_sq", "convergence_sq")
+    if model in ACTIVE_EVOKED_MODELS
 ]
 AVAILABLE_INDUCED_REGRESSORS_BY_FAMILY = {
     family: _configured_regressors_for_family(family)
