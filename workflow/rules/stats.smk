@@ -115,11 +115,17 @@ def _model_feature_index_from_cfg(branch_cfg, branch_key: str, model_name: str, 
 def _kernel0_feature_index(wildcards):
     feature_name = str(wildcards.feature_name)
     analysis = str(wildcards.analysis)
+    model_name = str(wildcards.model)
+    branch_cfg = evoked_trf_config if analysis == "evoked_trf" else induced_trf_config
+    branch_key = "evoked_trf" if analysis == "evoked_trf" else "induced_trf"
+    direct = _model_feature_index_from_cfg(branch_cfg, branch_key, model_name=model_name, feature_name=feature_name)
+    if direct is not None:
+        return int(direct)
     feature_map = EVOKED_KERNEL0_FEATURE_MAP if analysis == "evoked_trf" else INDUCED_KERNEL0_FEATURE_MAP
     meta = feature_map.get(feature_name)
     if meta is None:
         raise ValueError(
-            f"Cannot resolve feature_index for analysis={analysis} feature_name={feature_name}."
+            f"Cannot resolve feature_index for analysis={analysis} model={model_name} feature_name={feature_name}."
         )
     return int(meta["feature_index"])
 

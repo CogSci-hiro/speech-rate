@@ -1,4 +1,7 @@
 import pandas as pd
+import pytest
+
+from rate.trf import scoring as trf_scoring
 
 
 def test_scores_schema_baseline_only_contract() -> None:
@@ -41,3 +44,21 @@ def test_cv_splits_schema() -> None:
     )
     required = {"dyad_id", "run", "fold_id", "bin_id", "bin_t0", "bin_t1", "split"}
     assert required.issubset(splits.columns)
+
+
+def test_target_aware_summary_keeps_baseline_within_target() -> None:
+    outer = pd.DataFrame(
+        [
+            {"dyad_id": "dyad-01", "subject": "sub-01", "target": "evoked", "model": "baseline", "fold_id": 0, "test_run": 1, "alpha": 1.0, "chosen_alpha": 1.0, "r": 0.1},
+            {"dyad_id": "dyad-01", "subject": "sub-01", "target": "evoked", "model": "rate_effect", "fold_id": 0, "test_run": 1, "alpha": 1.0, "chosen_alpha": 1.0, "r": 0.3},
+            {"dyad_id": "dyad-01", "subject": "sub-01", "target": "theta", "model": "baseline", "fold_id": 0, "test_run": 1, "alpha": 1.0, "chosen_alpha": 1.0, "r": 0.2},
+            {"dyad_id": "dyad-01", "subject": "sub-01", "target": "theta", "model": "rate_effect", "fold_id": 0, "test_run": 1, "alpha": 1.0, "chosen_alpha": 1.0, "r": 0.5},
+        ]
+    )
+
+    summary = trf_scoring.summarize_scores(dyad_id="dyad-01", subject="sub-01", outer_scores=outer)
+
+    evoked = summary.loc[(summary["target"] == "evoked") & (summary["model"] == "rate_effect")].iloc[0]
+    theta = summary.loc[(summary["target"] == "theta") & (summary["model"] == "rate_effect")].iloc[0]
+    assert evoked["delta_r"] == pytest.approx(0.2)
+    assert theta["delta_r"] == pytest.approx(0.3)

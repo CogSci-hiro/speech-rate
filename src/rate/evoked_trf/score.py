@@ -1,11 +1,12 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
-from rate.config import get_project_downsample_hz
+from rate.config import get_evoked_downsample_hz
+from rate.eeg.io import read_raw_eeg
 
 from rate.evoked_trf.fit import (
     fit_receptive_field,
@@ -28,6 +29,9 @@ from rate.trf.similarity import cross_kernel_temporal_similarity
 from rate.trf import scoring as trf_scoring
 from rate.trf.design import DesignModelSpec, build_design_matrix as build_design_matrix_from_config, parse_evoked_models_config
 
+if TYPE_CHECKING:
+    from rate.induced_trf.aperiodic import SlidingAperiodicConfig
+
 LOGGER = logging.getLogger(__name__)
 
 PHASE5_PRIMARY_MODELS = ("baseline", "self_rate", "other_rate", "alignment", "convergence")
@@ -48,6 +52,8 @@ class EvokedTrfConfig:
     ridge_alpha_default: float
     emg_zscore_within_run: bool
     models: tuple[DesignModelSpec, ...]
+    target_bands_hz: dict[str, tuple[float, float]]
+    fooof_sliding_cfg: "SlidingAperiodicConfig" | None
 
 
 def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
@@ -81,15 +87,45 @@ def parse_evoked_trf_config(cfg: dict[str, Any]) -> EvokedTrfConfig:
     if not isinstance(emg_cfg, dict):
         raise ValueError("emg must be a mapping when provided")
 
+    models = parse_evoked_models_config(ev.get("models"))
+
+    induced_cfg = dict(cfg.get("induced_trf") or {})
+    bands_hz_cfg = induced_cfg.get("bands_hz") or {}
+    if bands_hz_cfg and not isinstance(bands_hz_cfg, dict):
+        raise ValueError("induced_trf.bands_hz must be a mapping when provided")
+    target_bands_hz = {
+        str(name).strip().lower(): (float(rng[0]), float(rng[1]))
+        for name, rng in dict(bands_hz_cfg).items()
+        if isinstance(rng, (list, tuple)) and len(rng) == 2
+    }
+
+    requested_targets = tuple(dict.fromkeys(target for model in models for target in model.targets))
+    supported_targets = {"evoked", "offset", "exponent"} | set(target_bands_hz)
+    unknown_targets = [target for target in requested_targets if target not in supported_targets]
+    if unknown_targets:
+        raise ValueError(
+            "Unsupported evoked_trf model targets: "
+            f"{unknown_targets}. Supported targets are evoked, offset, exponent, and induced_trf.bands_hz keys."
+        )
+
+    needs_aperiodic = any(target in {"offset", "exponent"} for target in requested_targets)
+    fooof_sliding_cfg = None
+    if needs_aperiodic:
+        from rate.induced_trf.sliding_fooof import parse_sliding_fooof_config
+
+        fooof_sliding_cfg = parse_sliding_fooof_config(cfg)
+
     return EvokedTrfConfig(
-        downsample_hz=get_project_downsample_hz(cfg, fallback_section="evoked_trf"),
+        downsample_hz=get_evoked_downsample_hz(cfg),
         tmin_s=float(ev["lags_s"]["tmin"]),
         tmax_s=float(ev["lags_s"]["tmax"]),
         regularization_type=regularization_type,
         ridge_alpha_grid=grid,
         ridge_alpha_default=float(ev.get("ridge_alpha", 1.0)),
         emg_zscore_within_run=bool(emg_cfg.get("zscore_within_run", True)),
-        models=parse_evoked_models_config(ev.get("models")),
+        models=models,
+        target_bands_hz=target_bands_hz,
+        fooof_sliding_cfg=fooof_sliding_cfg,
     )
 
 
@@ -186,6 +222,151 @@ def build_run_matrices(
     return X_by_model, names_by_model
 
 
+def _requested_targets(models: tuple[DesignModelSpec, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(str(target).strip().lower() for model in models for target in model.targets))
+
+
+def _load_or_compute_aperiodic_run_df(
+    *,
+    cfg: EvokedTrfConfig,
+    out_dir: Path,
+    eeg_path: Path,
+    dyad_id: str,
+    subject: str,
+    run: int,
+    target_name: str,
+    picks: str | list[str],
+) -> pd.DataFrame:
+    if cfg.fooof_sliding_cfg is None:
+        raise ValueError(f"Target '{target_name}' requires fooof_sliding config")
+
+    residual_band = next(iter(cfg.target_bands_hz.keys()), None)
+    if residual_band is not None:
+        cached = (
+            Path(out_dir)
+            / f"induced_trf_{str(residual_band)}_residual"
+            / "subjects"
+            / str(dyad_id)
+            / str(subject)
+            / "targets"
+            / "aperiodic"
+            / f"run-{int(run):02d}.parquet"
+        )
+        if cached.exists():
+            return pd.read_parquet(cached)
+
+    from rate.induced_trf.aperiodic import compute_sliding_aperiodic
+
+    raw = read_raw_eeg(Path(eeg_path), preload=False, verbose="ERROR")
+    if picks is not None:
+        raw = raw.copy().pick(picks)
+    aperiodic_df = compute_sliding_aperiodic(
+        raw.get_data(),
+        float(raw.info["sfreq"]),
+        raw.times,
+        cfg.fooof_sliding_cfg,
+        band_hz=(4.0, 8.0),
+        channel_names=tuple(str(ch) for ch in raw.ch_names),
+    )
+    return aperiodic_df
+
+
+def _load_neural_run_target(
+    *,
+    cfg: EvokedTrfConfig,
+    out_dir: Path,
+    eeg_path: Path,
+    dyad_id: str,
+    subject: str,
+    run: int,
+    target_name: str,
+    picks: str | list[str],
+):
+    target = str(target_name).strip().lower()
+    if target == "evoked":
+        return load_eeg_run(eeg_path, downsample_hz=cfg.downsample_hz, picks=picks)
+    if target in cfg.target_bands_hz:
+        from rate.targets.induced import load_induced_band_run_target
+
+        return load_induced_band_run_target(
+            eeg_path,
+            band=target,
+            bands_hz=cfg.target_bands_hz,
+            downsample_hz=cfg.downsample_hz,
+            target_kind="raw",
+            edge_drop="none",
+            edge_window_s=None,
+            picks=picks,
+        )
+    if target in {"offset", "exponent"}:
+        from rate.targets.induced import build_aperiodic_param_target_from_aperiodic_df
+
+        aperiodic_df = _load_or_compute_aperiodic_run_df(
+            cfg=cfg,
+            out_dir=out_dir,
+            eeg_path=eeg_path,
+            dyad_id=dyad_id,
+            subject=subject,
+            run=run,
+            target_name=target,
+            picks=picks,
+        )
+        edge_drop = str(cfg.fooof_sliding_cfg.edge_drop) if cfg.fooof_sliding_cfg is not None else "none"
+        edge_window_s = float(cfg.fooof_sliding_cfg.window_s) if cfg.fooof_sliding_cfg is not None else None
+        return build_aperiodic_param_target_from_aperiodic_df(
+            aperiodic_df,
+            value_column=target,
+            downsample_hz=cfg.downsample_hz,
+            edge_drop=edge_drop,
+            edge_window_s=edge_window_s,
+        )
+    raise ValueError(f"Unsupported neural target '{target_name}'")
+
+
+def _align_target_to_reference_grid(
+    *,
+    run_target: Any,
+    reference_times_s: np.ndarray,
+    reference_sfreq_hz: float,
+    reference_channel_names: tuple[str, ...] | None = None,
+) -> np.ndarray:
+    y = np.asarray(run_target.y, dtype=float)
+    times_s = np.asarray(run_target.times_s, dtype=float).reshape(-1)
+    if y.ndim != 2:
+        raise ValueError(f"Expected 2D target array, got shape={y.shape}")
+    if times_s.ndim != 1 or times_s.size != y.shape[0]:
+        raise ValueError(f"Target times/array shape mismatch: times={times_s.shape}, y={y.shape}")
+
+    target_channel_names = tuple(str(ch) for ch in getattr(run_target, "channel_names", ()))
+    if reference_channel_names is not None and target_channel_names and target_channel_names != tuple(reference_channel_names):
+        raise ValueError("Target channel names do not match evoked reference channel names.")
+
+    ref_times = np.asarray(reference_times_s, dtype=float).reshape(-1)
+    if ref_times.ndim != 1 or ref_times.size == 0:
+        raise ValueError("reference_times_s must be a non-empty 1D array")
+
+    if (
+        np.isclose(float(run_target.sfreq_hz), float(reference_sfreq_hz), atol=1e-9)
+        and times_s.shape == ref_times.shape
+        and np.allclose(times_s, ref_times, atol=1e-8, rtol=1e-6)
+    ):
+        return y
+
+    if times_s.size == 1:
+        return np.repeat(y, ref_times.size, axis=0)
+
+    aligned = np.empty((ref_times.size, y.shape[1]), dtype=float)
+    for ch_idx in range(y.shape[1]):
+        aligned[:, ch_idx] = np.interp(
+            ref_times,
+            times_s,
+            y[:, ch_idx],
+            left=float(y[0, ch_idx]),
+            right=float(y[-1, ch_idx]),
+        )
+    return aligned
+
+
 # =============================================================================
 # CV + scoring
 # =============================================================================
@@ -223,8 +404,8 @@ def _compute_one_dyad_subject(
     ds_index: pd.DataFrame,
     trf_cfg: EvokedTrfConfig,
     picks: str | list[str],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, TRFResult]]:
-    _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_subject_run_data(
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[tuple[str, str], TRFResult]]:
+    _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz, _ = _prepare_subject_run_data(
         out_dir=out_dir,
         dyad_id=dyad_id,
         subject=subject,
@@ -241,19 +422,20 @@ def _compute_one_dyad_subject(
         int(run): ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy() for run in runs
     }
 
-    models = list_models(trf_cfg.models)
     inner_rows: list[pd.DataFrame] = []
     outer_rows: list[pd.DataFrame] = []
     best_alpha_frames: list[pd.DataFrame] = []
-    trf_results_by_model: dict[str, TRFResult] = {}
+    trf_results_by_model_target: dict[tuple[str, str], TRFResult] = {}
 
     lags_s = _canonical_lags_s(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s)
     gap_samples = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s) + 1
 
-    for model_name in models:
-        trf_result = run_trf(
+    for model in trf_cfg.models:
+        model_name = model.model_name
+        for target_name in model.targets:
+            trf_result = run_trf(
                 X_by_run={r: per_run_X[r][model_name] for r in runs},  # type: ignore[arg-type]
-                y_by_run={r: per_run_y[r] for r in runs},  # type: ignore[arg-type]
+                y_by_run={r: per_run_y[r][target_name] for r in runs},  # type: ignore[arg-type]
                 lags=np.asarray(lags_s, dtype=float),
                 alpha_grid=np.asarray(trf_cfg.ridge_alpha_grid, dtype=float),
                 cv_config={
@@ -282,28 +464,33 @@ def _compute_one_dyad_subject(
                         "dyad_id": dyad_id,
                         "subject": subject,
                         "model": model_name,
+                        "target": str(target_name),
                     },
                     "outer_progress_enabled": True,
-                    "outer_progress_desc": f"outer-cv {dyad_id}/{subject}/{model_name}",
+                    "outer_progress_desc": f"outer-cv {dyad_id}/{subject}/{model_name}/{target_name}",
                     "outer_progress_unit": "fold",
                     "collect_predictions": False,
-                    "enable_reconstruction": True,
-                    "reconstruction_fn": compute_reconstruction_metrics_df,
-                    "events_by_run": {r: per_run_events[r] for r in runs},
-                    "reconstruction_kwargs": {
-                        "sfreq": float(sfreq_hz),
-                        "tmin": float(trf_cfg.tmin_s),
-                        "tmax": float(trf_cfg.tmax_s),
-                        "event_lock": _reconstruction_event_lock_for_model(model_name),
-                    },
+                    "enable_reconstruction": bool(str(target_name) == "evoked"),
+                    "reconstruction_fn": compute_reconstruction_metrics_df if str(target_name) == "evoked" else None,
+                    "events_by_run": ({r: per_run_events[r] for r in runs} if str(target_name) == "evoked" else None),
+                    "reconstruction_kwargs": (
+                        {
+                            "sfreq": float(sfreq_hz),
+                            "tmin": float(trf_cfg.tmin_s),
+                            "tmax": float(trf_cfg.tmax_s),
+                            "event_lock": _reconstruction_event_lock_for_model(model_name),
+                        }
+                        if str(target_name) == "evoked"
+                        else {}
+                    ),
                 },
             )
-        trf_results_by_model[model_name] = trf_result
-        if trf_result.inner_scores is not None:
-            inner_rows.append(trf_result.inner_scores)
-        outer_rows.append(trf_result.outer_scores)
-        if trf_result.best_alpha_table is not None:
-            best_alpha_frames.append(trf_result.best_alpha_table)
+            trf_results_by_model_target[(model_name, str(target_name))] = trf_result
+            if trf_result.inner_scores is not None:
+                inner_rows.append(trf_result.inner_scores)
+            outer_rows.append(trf_result.outer_scores)
+            if trf_result.best_alpha_table is not None:
+                best_alpha_frames.append(trf_result.best_alpha_table)
 
     inner_scores = pd.concat(inner_rows, ignore_index=True) if inner_rows else pd.DataFrame()
     if not inner_scores.empty:
@@ -322,24 +509,7 @@ def _compute_one_dyad_subject(
     # Summary delta_r using chosen_alpha score for each fold/model vs baseline chosen_alpha
     summary = trf_scoring.summarize_scores(dyad_id=dyad_id, subject=subject, outer_scores=outer_scores)
 
-    # Best model per subject = max mean delta_r (excluding baseline)
-    best_model = trf_scoring.best_model_table(dyad_id=dyad_id, subject=subject, summary=summary)
-
-    # Save final RF params for the best model only (trained on all runs)
-    final_model_rows = fit_and_package_best_model(
-        dyad_id=dyad_id,
-        subject=subject,
-        best_model=best_model,
-        per_run_y=per_run_y,
-        per_run_X=per_run_X,
-        per_run_feature_names=per_run_feature_names,
-        sfreq_hz=sfreq_hz,
-        tmin_s=trf_cfg.tmin_s,
-        tmax_s=trf_cfg.tmax_s,
-        regularization_type=trf_cfg.regularization_type,
-    )
-
-    return summary, inner_scores, outer_scores, pd.concat([best_alpha, final_model_rows], ignore_index=True), trf_results_by_model
+    return summary, inner_scores, outer_scores, best_alpha, trf_results_by_model_target
 
 
 def _prepare_subject_run_data(
@@ -351,7 +521,15 @@ def _prepare_subject_run_data(
     ds_index: pd.DataFrame,
     trf_cfg: EvokedTrfConfig,
     picks: str | list[str],
-) -> tuple[pd.DataFrame, list[int], dict[int, np.ndarray], dict[int, dict[str, np.ndarray]], dict[int, dict[str, list[str]]], float]:
+) -> tuple[
+    pd.DataFrame,
+    list[int],
+    dict[int, dict[str, np.ndarray]],
+    dict[int, dict[str, np.ndarray]],
+    dict[int, dict[str, list[str]]],
+    float,
+    dict[str, tuple[str, ...]],
+]:
     dyad_norm = str(dyad_id).strip()
     subject_norm = str(subject).strip()
     ev_subj = events.loc[
@@ -365,41 +543,85 @@ def _prepare_subject_run_data(
             f"leave_one_run_out requires >=2 runs, got {len(runs)} for dyad_id={dyad_id}, subject={subject}"
         )
 
-    per_run_y: dict[int, np.ndarray] = {}
+    per_run_y: dict[int, dict[str, np.ndarray]] = {}
     per_run_X: dict[int, dict[str, np.ndarray]] = {}
     per_run_feature_names: dict[int, dict[str, list[str]]] = {}
     sfreqs: set[float] = set()
+    channel_names_by_target: dict[str, tuple[str, ...]] = {}
     emg_subject = load_subject_emg(out_dir=out_dir, dyad_id=dyad_id, subject=subject)
+    targets = _requested_targets(trf_cfg.models)
 
     for run in runs:
         eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
-        run_data = load_eeg_run(eeg_path, downsample_hz=trf_cfg.downsample_hz, picks=picks)
-
-        y = run_data.y
-        sfreq_hz = float(run_data.sfreq_hz)
+        evoked_target = _load_neural_run_target(
+            cfg=trf_cfg,
+            out_dir=out_dir,
+            eeg_path=eeg_path,
+            dyad_id=dyad_id,
+            subject=subject,
+            run=int(run),
+            target_name="evoked",
+            picks=picks,
+        )
+        sfreq_hz = float(evoked_target.sfreq_hz)
         sfreqs.add(sfreq_hz)
+        reference_times_s = np.asarray(evoked_target.times_s, dtype=float)
+        reference_channel_names_raw = tuple(str(ch) for ch in getattr(evoked_target, "channel_names", ()))
+        reference_channel_names = reference_channel_names_raw if reference_channel_names_raw else None
+        if "evoked" not in channel_names_by_target:
+            channel_names_by_target["evoked"] = reference_channel_names_raw
+        elif reference_channel_names is not None and channel_names_by_target["evoked"] != reference_channel_names:
+            raise ValueError("Evoked target channel names are inconsistent across runs.")
+
+        run_targets: dict[str, np.ndarray] = {
+            "evoked": np.asarray(evoked_target.y, dtype=float),
+        }
+        for target_name in targets:
+            if str(target_name) == "evoked":
+                continue
+            run_target = _load_neural_run_target(
+                cfg=trf_cfg,
+                out_dir=out_dir,
+                eeg_path=eeg_path,
+                dyad_id=dyad_id,
+                subject=subject,
+                run=int(run),
+                target_name=target_name,
+                picks=picks,
+            )
+            ch_names = tuple(str(ch) for ch in getattr(run_target, "channel_names", ()))
+            if target_name not in channel_names_by_target:
+                channel_names_by_target[target_name] = ch_names
+            elif channel_names_by_target[target_name] != ch_names:
+                raise ValueError(f"Target channel names are inconsistent across runs for target='{target_name}'")
+            run_targets[str(target_name)] = _align_target_to_reference_grid(
+                run_target=run_target,
+                reference_times_s=reference_times_s,
+                reference_sfreq_hz=sfreq_hz,
+                reference_channel_names=reference_channel_names,
+            )
 
         ev_run = ev_subj.loc[ev_subj["run"].astype(int) == int(run)].copy()
         emg_run = emg_for_run_aligned(
             emg_subject=emg_subject,
             run=int(run),
-            n_samples=y.shape[0],
+            n_samples=run_targets["evoked"].shape[0],
             sfreq_hz=sfreq_hz,
-            sample_t0_s=float(run_data.times_s[0]),
+            sample_t0_s=float(evoked_target.times_s[0]),
             zscore_within_run=trf_cfg.emg_zscore_within_run,
         )
         X_by_model, names_by_model = build_run_matrices(
             ev_run=ev_run,
             sfreq_hz=sfreq_hz,
             lags_s=_canonical_lags_s(sfreq_hz=sfreq_hz, tmin_s=trf_cfg.tmin_s, tmax_s=trf_cfg.tmax_s),
-            n_samples=y.shape[0],
+            n_samples=run_targets["evoked"].shape[0],
             run_id=int(run),
-            sample_t0_s=float(run_data.times_s[0]),
+            sample_t0_s=float(evoked_target.times_s[0]),
             models=trf_cfg.models,
             continuous_regressors={"emg": emg_run},
         )
 
-        per_run_y[int(run)] = y
+        per_run_y[int(run)] = run_targets
         per_run_X[int(run)] = X_by_model
         per_run_feature_names[int(run)] = names_by_model
 
@@ -407,7 +629,7 @@ def _prepare_subject_run_data(
         raise ValueError(f"Expected identical sfreq across runs after resample; got {sorted(sfreqs)}")
     sfreq_hz = float(next(iter(sfreqs)))
 
-    return ev_subj, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz
+    return ev_subj, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz, channel_names_by_target
 
 
 # =============================================================================
@@ -598,7 +820,7 @@ def _compute_subject_artifacts(
     dyad_id: str,
     subject: str,
     picks: str | list[str] = "eeg",
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, TRFResult]]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[tuple[str, str], TRFResult]]:
     trf_cfg = parse_evoked_trf_config(cfg)
 
     events, ds_index = load_input_tables(out_dir)
@@ -642,8 +864,9 @@ def _extract_rf_coef_and_lags(*, rf: Any, sfreq_hz: float, tmin_s: float, tmax_s
 def _fit_full_data_kernel(
     *,
     model_name: str,
+    target_name: str,
     alpha: float,
-    per_run_y: dict[int, np.ndarray],
+    per_run_y: dict[int, dict[str, np.ndarray]],
     per_run_X: dict[int, dict[str, np.ndarray]],
     sfreq_hz: float,
     tmin_s: float,
@@ -652,7 +875,7 @@ def _fit_full_data_kernel(
 ) -> tuple[np.ndarray, np.ndarray]:
     gap = max_lag_samples(sfreq_hz=sfreq_hz, tmin_s=tmin_s, tmax_s=tmax_s) + 1
     runs = sorted(per_run_y.keys())
-    y_all = concatenate_with_gap([per_run_y[r] for r in runs], gap_samples=gap)
+    y_all = concatenate_with_gap([per_run_y[r][target_name] for r in runs], gap_samples=gap)
     X_all = concatenate_with_gap([per_run_X[r][model_name] for r in runs], gap_samples=gap)
     X_all, _ = standardize_design_matrix_foldwise(X_all, X_all)
     rf = fit_receptive_field(
@@ -720,7 +943,7 @@ def write_subject_output(
     subject: str,
     picks: str | list[str] = "eeg",
 ) -> Path:
-    scores, inner_scores, outer_scores, _, trf_results_by_model = _compute_subject_artifacts(
+    scores, inner_scores, outer_scores, _, trf_results_by_model_target = _compute_subject_artifacts(
         cfg=cfg,
         out_dir=out_dir,
         dyad_id=dyad_id,
@@ -736,7 +959,7 @@ def write_subject_output(
     trf_cfg = parse_evoked_trf_config(cfg)
     events, ds_index = load_input_tables(out_dir)
     events = validate_events_table(events)
-    _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz = _prepare_subject_run_data(
+    _, runs, per_run_y, per_run_X, per_run_feature_names, sfreq_hz, channel_names_by_target = _prepare_subject_run_data(
         out_dir=out_dir,
         dyad_id=str(dyad_id),
         subject=str(subject),
@@ -773,89 +996,117 @@ def write_subject_output(
     write_parquet(subject_tables.outer_sorted, subject_dir / "outer_cv_scores.parquet")
 
     model_to_regs = {m.model_name: [r.name for r in m.regressors] for m in trf_cfg.models}
-    for model_name in model_to_regs:
+    for model in trf_cfg.models:
+        model_name = model.model_name
         model_dir = subject_dir / "models" / model_name
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        model_outer = subject_tables.outer_fold_scores.loc[subject_tables.outer_fold_scores["model"] == model_name].copy()
-        model_outer = model_outer[
-            ["dyad_id", "subject", "model", "test_run", "alpha", "r", "baseline_r", "delta_r"]
-        ].sort_values(["test_run"], kind="mergesort")
-        model_trf = trf_results_by_model.get(model_name)
-        if model_trf is None:
-            raise ValueError(f"Missing TRF result for model={model_name}")
-        write_trf_artifacts(
-            TRFResult(
-                kernels_outer=np.asarray(model_trf.kernels_outer),
-                chosen_alpha=np.asarray(model_trf.chosen_alpha, dtype=float),
-                outer_scores=model_outer,
-                lags=np.asarray(model_trf.lags, dtype=float),
-                channel_names=tuple(str(ch) for ch in info["ch_names"]),
-                predictions_by_fold=None,
-                reconstruction_r2=(
-                    model_trf.reconstruction_r2.sort_values(
-                        [c for c in ["fold_id", "channel", "time_s"] if c in model_trf.reconstruction_r2.columns],
-                        kind="mergesort",
-                    ).reset_index(drop=True)
-                    if model_trf.reconstruction_r2 is not None and not model_trf.reconstruction_r2.empty
-                    else model_trf.reconstruction_r2
+        for target_name in model.targets:
+            target_dir = model_dir if str(target_name) == "evoked" else (model_dir / "targets" / str(target_name))
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            model_outer = subject_tables.outer_fold_scores.loc[
+                (subject_tables.outer_fold_scores["model"] == model_name)
+                & (
+                    (subject_tables.outer_fold_scores["target"] == str(target_name))
+                    if "target" in subject_tables.outer_fold_scores.columns
+                    else True
+                )
+            ].copy()
+            cols = ["dyad_id", "subject"] + (["target"] if "target" in model_outer.columns else []) + [
+                "model",
+                "test_run",
+                "alpha",
+                "r",
+                "baseline_r",
+                "delta_r",
+            ]
+            model_outer = model_outer[cols].sort_values((["target"] if "target" in model_outer.columns else []) + ["test_run"], kind="mergesort")
+            model_trf = trf_results_by_model_target.get((model_name, str(target_name)))
+            if model_trf is None:
+                raise ValueError(f"Missing TRF result for model={model_name}, target={target_name}")
+            write_trf_artifacts(
+                TRFResult(
+                    kernels_outer=np.asarray(model_trf.kernels_outer),
+                    chosen_alpha=np.asarray(model_trf.chosen_alpha, dtype=float),
+                    outer_scores=model_outer,
+                    lags=np.asarray(model_trf.lags, dtype=float),
+                    channel_names=channel_names_by_target.get(str(target_name), tuple(str(ch) for ch in info["ch_names"])),
+                    predictions_by_fold=None,
+                    reconstruction_r2=(
+                        model_trf.reconstruction_r2.sort_values(
+                            [c for c in ["fold_id", "channel", "time_s"] if c in model_trf.reconstruction_r2.columns],
+                            kind="mergesort",
+                        ).reset_index(drop=True)
+                        if model_trf.reconstruction_r2 is not None and not model_trf.reconstruction_r2.empty
+                        else model_trf.reconstruction_r2
+                    ),
                 ),
-            ),
-            model_dir,
-        )
-
-        best_alpha_row = subject_tables.best_alpha_by_model.loc[subject_tables.best_alpha_by_model["model"] == model_name]
-        if best_alpha_row.empty:
-            chosen = np.asarray(model_trf.chosen_alpha, dtype=float).ravel()
-            finite = chosen[np.isfinite(chosen)]
-            if finite.size > 0:
-                best_alpha = float(pd.Series(finite.tolist()).mode().iloc[0])
-                LOGGER.warning(
-                    "Missing best_alpha table row for model=%s; using mode(chosen_alpha)=%.6g fallback.",
-                    model_name,
-                    best_alpha,
-                )
-            else:
-                best_alpha = float(trf_cfg.ridge_alpha_default)
-                LOGGER.warning(
-                    "Missing best_alpha table row for model=%s and no finite chosen_alpha; using default alpha=%.6g.",
-                    model_name,
-                    best_alpha,
-                )
-        else:
-            best_alpha = float(best_alpha_row.iloc[0]["best_alpha"])
-        coef_full, lags_full = _fit_full_data_kernel(
-            model_name=model_name,
-            alpha=best_alpha,
-            per_run_y=per_run_y,
-            per_run_X=per_run_X,
-            sfreq_hz=sfreq_hz,
-            tmin_s=trf_cfg.tmin_s,
-            tmax_s=trf_cfg.tmax_s,
-            regularization_type=trf_cfg.regularization_type,
-        )
-        if not np.allclose(np.asarray(model_trf.lags, dtype=float), np.asarray(lags_full, dtype=float)):
-            raise ValueError(f"Refit lag grid mismatch for model={model_name}")
-        regs = per_run_feature_names[runs[0]][model_name]
-        for reg_idx, reg_name in enumerate(regs):
-            reg_data = np.asarray(coef_full)[:, reg_idx, :]
-            evoked_name = _evoked_fname_for_regressor(reg_name)
-            import mne
-
-            evoked = mne.EvokedArray(
-                data=reg_data,
-                info=info.copy(),
-                tmin=float(lags_full[0]),
-                comment=str(reg_name),
-                nave=len(runs),
-                verbose=False,
+                target_dir,
             )
-            evoked.save(model_dir / evoked_name, overwrite=True)
+
+            best_alpha_row = subject_tables.best_alpha_by_model.loc[
+                (subject_tables.best_alpha_by_model["model"] == model_name)
+                & (
+                    (subject_tables.best_alpha_by_model["target"] == str(target_name))
+                    if "target" in subject_tables.best_alpha_by_model.columns
+                    else True
+                )
+            ]
+            if best_alpha_row.empty:
+                chosen = np.asarray(model_trf.chosen_alpha, dtype=float).ravel()
+                finite = chosen[np.isfinite(chosen)]
+                if finite.size > 0:
+                    best_alpha = float(pd.Series(finite.tolist()).mode().iloc[0])
+                    LOGGER.warning(
+                        "Missing best_alpha table row for model=%s target=%s; using mode(chosen_alpha)=%.6g fallback.",
+                        model_name,
+                        target_name,
+                        best_alpha,
+                    )
+                else:
+                    best_alpha = float(trf_cfg.ridge_alpha_default)
+                    LOGGER.warning(
+                        "Missing best_alpha table row for model=%s target=%s and no finite chosen_alpha; using default alpha=%.6g.",
+                        model_name,
+                        target_name,
+                        best_alpha,
+                    )
+            else:
+                best_alpha = float(best_alpha_row.iloc[0]["best_alpha"])
+            coef_full, lags_full = _fit_full_data_kernel(
+                model_name=model_name,
+                target_name=str(target_name),
+                alpha=best_alpha,
+                per_run_y=per_run_y,
+                per_run_X=per_run_X,
+                sfreq_hz=sfreq_hz,
+                tmin_s=trf_cfg.tmin_s,
+                tmax_s=trf_cfg.tmax_s,
+                regularization_type=trf_cfg.regularization_type,
+            )
+            if not np.allclose(np.asarray(model_trf.lags, dtype=float), np.asarray(lags_full, dtype=float)):
+                raise ValueError(f"Refit lag grid mismatch for model={model_name}, target={target_name}")
+            regs = per_run_feature_names[runs[0]][model_name]
+            for reg_idx, reg_name in enumerate(regs):
+                reg_data = np.asarray(coef_full)[:, reg_idx, :]
+                evoked_name = _evoked_fname_for_regressor(reg_name)
+                import mne
+
+                evoked = mne.EvokedArray(
+                    data=reg_data,
+                    info=info.copy(),
+                    tmin=float(lags_full[0]),
+                    comment=str(reg_name),
+                    nave=len(runs),
+                    verbose=False,
+                )
+                evoked.save(target_dir / evoked_name, overwrite=True)
 
     # Phase 5 confirmatory sidecar: cross-kernel temporal similarity (self_rate vs other_rate).
     if {"self_rate", "other_rate"}.issubset(set(model_to_regs)):
-        self_res = trf_results_by_model.get("self_rate")
-        other_res = trf_results_by_model.get("other_rate")
+        self_res = trf_results_by_model_target.get(("self_rate", "evoked"))
+        other_res = trf_results_by_model_target.get(("other_rate", "evoked"))
         if self_res is not None and other_res is not None:
             self_regs = per_run_feature_names[runs[0]].get("self_rate", [])
             other_regs = per_run_feature_names[runs[0]].get("other_rate", [])
@@ -896,7 +1147,7 @@ def aggregate_subject_scores(*, out_dir: Path) -> pd.DataFrame:
             raise ValueError(f"Failed to read subject scores parquet: {path}") from exc
     scores = pd.concat(frames, ignore_index=True)
     return scores.sort_values(
-        ["dyad_id", "subject", "run", "model", "fold_id"],
+        [c for c in ["dyad_id", "subject", "target", "run", "model", "fold_id"] if c in scores.columns],
         kind="mergesort",
     ).reset_index(drop=True)
 
@@ -986,30 +1237,32 @@ def write_detailed_package(
 
     # best alpha per dyad/subject/model: mode across outer folds
     if not outer_scores.empty and "chosen_alpha" in outer_scores.columns:
+        group_cols = [c for c in ["dyad_id", "subject", "target", "model"] if c in outer_scores.columns]
         best_alpha = (
-            outer_scores[["dyad_id", "subject", "model", "chosen_alpha"]]
+            outer_scores[group_cols + ["chosen_alpha"]]
             .drop_duplicates()
-            .groupby(["dyad_id", "subject", "model"], as_index=False)["chosen_alpha"]
+            .groupby(group_cols, as_index=False)["chosen_alpha"]
             .agg(lambda x: float(pd.Series(list(x)).mode().iloc[0]))
             .rename(columns={"chosen_alpha": "best_alpha"})
         )
     else:
-        best_alpha = pd.DataFrame(columns=["dyad_id", "subject", "model", "best_alpha"])
+        best_alpha = pd.DataFrame(columns=["dyad_id", "subject", "target", "model", "best_alpha"])
     write_parquet(best_alpha, paths.best_alpha)
 
     # best model per subject
     scores_path = out_dir / "evoked_trf" / "scores" / "scores.parquet"
     if scores_path.exists():
         scores = pd.read_parquet(scores_path)
-        means = scores.groupby(["dyad_id", "subject", "model"], as_index=False)["r"].mean(numeric_only=True)
+        group_cols = [c for c in ["dyad_id", "subject", "target", "model"] if c in scores.columns]
+        means = scores.groupby(group_cols, as_index=False)["r"].mean(numeric_only=True)
         best = (
-            means.sort_values(["dyad_id", "subject", "r"], ascending=[True, True, False])
-            .groupby(["dyad_id", "subject"], as_index=False)
+            means.sort_values([c for c in ["dyad_id", "subject", "target", "r"] if c in means.columns], ascending=[True] * (len(group_cols) - 1) + [False])
+            .groupby([c for c in ["dyad_id", "subject", "target"] if c in means.columns], as_index=False)
             .head(1)
             .rename(columns={"model": "best_model", "r": "mean_r"})
         )
     else:
-        best = pd.DataFrame(columns=["dyad_id", "subject", "best_model", "mean_r"])
+        best = pd.DataFrame(columns=["dyad_id", "subject", "target", "best_model", "mean_r"])
     write_parquet(best, paths.best_model)
 
     # Save packaged model params (best model per subject; one file per subject)

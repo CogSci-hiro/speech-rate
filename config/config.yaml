@@ -26,12 +26,11 @@ paths:
   annotations_dir: "/Users/hiro/PycharmProjects/hyperscanning-working/data/annotations"
 
 # ============================================================
-# GLOBAL SAMPLING
+# TRF SAMPLING
 # ============================================================
-# Project-wide resampling / TRF sampling rate (Hz). Compute code prefers this
-# value and falls back to branch-local downsample_hz for backward compatibility.
-# sampling:
-#   downsample_hz: 16.0
+# Sampling rates are configured independently in each compute branch:
+#   evoked_trf.downsample_hz
+#   induced_trf.downsample_hz
 
 
 # ============================================================

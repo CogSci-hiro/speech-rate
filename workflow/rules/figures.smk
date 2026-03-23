@@ -137,7 +137,10 @@ def _configured_model_for_regressor(*, family: str, regressor: str) -> str:
     if token in BASELINE_CONTROL_REGRESSORS:
         return "baseline"
     model_map = EVOKED_REGRESSOR_MODEL_MAP if family == "evoked_trf" else INDUCED_REGRESSOR_MODEL_MAP
-    return str(model_map.get(token, token))
+    model = model_map.get(token)
+    if model is None:
+        return ""
+    return str(model)
 
 
 def _configured_regressors_for_family(family: str):
@@ -145,6 +148,8 @@ def _configured_regressors_for_family(family: str):
     out = []
     for reg in RAW_REGRESSORS:
         model = _configured_model_for_regressor(family=family, regressor=reg)
+        if not model:
+            continue
         if model in active_models:
             out.append(reg)
         elif model == "baseline" and "baseline" in active_models:
@@ -173,6 +178,8 @@ def _evoked_kernel_input(wildcards):
     if regressor == "emg":
         del model
         return f"{_viz_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
+    if not model:
+        raise ValueError(f"Regressor '{regressor}' is not configured for family='evoked_trf'")
     if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
         # Baseline controls may be rendered from subject-level FIFs even when
         # stats-level grand-average files are not present.
@@ -187,6 +194,8 @@ def _evoked_cluster_input(wildcards):
         # EMG onset-locked grand average currently has no cluster-table companion.
         del model
         return f"{_viz_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
+    if not model:
+        raise ValueError(f"Regressor '{regressor}' is not configured for family='evoked_trf'")
     if model == "baseline" and regressor in BASELINE_CONTROL_REGRESSORS:
         # No cluster table is required for baseline-control rendering fallback.
         return _baseline_control_dependency(regressor)
@@ -203,12 +212,16 @@ def _evoked_timecourse_kernel_inputs(_wildcards):
 def _family_kernel_input(wildcards):
     model = _configured_model_for_regressor(family=str(wildcards.family), regressor=str(wildcards.regressor))
     family = str(wildcards.family)
+    if not model:
+        raise ValueError(f"Regressor '{wildcards.regressor}' is not configured for family='{family}'")
     return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/grand_average_trfs-ave.fif"
 
 
 def _family_cluster_input(wildcards):
     model = _configured_model_for_regressor(family=str(wildcards.family), regressor=str(wildcards.regressor))
     family = str(wildcards.family)
+    if not model:
+        raise ValueError(f"Regressor '{wildcards.regressor}' is not configured for family='{family}'")
     return f"{_viz_out_dir()}/stats/{family}/{model}/{wildcards.regressor}/clusters.{_viz_table_ext()}"
 
 
@@ -496,7 +509,7 @@ rule figures_all:
         (
             EVOKED_JOINT_TARGETS
             + EVOKED_TOPO_TARGETS
-            + INDUCED_JOINT_TARGETS
+            # + INDUCED_JOINT_TARGETS
             # + INDUCED_TOPO_TARGETS
             # + [
             #     f"{_viz_out_dir()}/final/figures/evoked_trf/timecourse_panel.pdf",

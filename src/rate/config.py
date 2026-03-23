@@ -109,31 +109,21 @@ def _maybe_attach_modular_compute_sections(
     return out
 
 
-def get_project_downsample_hz(
-    cfg: Mapping[str, Any],
-    *,
-    fallback_section: str | None = None,
-) -> float:
-    """Return project-wide sampling/downsample frequency in Hz.
+def _require_section_downsample_hz(cfg: Mapping[str, Any], *, section_name: str) -> float:
+    section = cfg.get(str(section_name), {})
+    if isinstance(section, Mapping) and "downsample_hz" in section:
+        return float(section["downsample_hz"])
+    raise ConfigValidationError(f"Missing {section_name}.downsample_hz.")
 
-    Preferred location:
-      - config.sampling.downsample_hz
 
-    Backward-compatible fallback:
-      - config[fallback_section].downsample_hz
-    """
-    sampling = cfg.get("sampling", {})
-    if isinstance(sampling, Mapping) and "downsample_hz" in sampling:
-        return float(sampling["downsample_hz"])
+def get_evoked_downsample_hz(cfg: Mapping[str, Any]) -> float:
+    """Return the evoked-TRF sampling/downsample frequency in Hz."""
+    return _require_section_downsample_hz(cfg, section_name="evoked_trf")
 
-    if fallback_section:
-        section = cfg.get(str(fallback_section), {})
-        if isinstance(section, Mapping) and "downsample_hz" in section:
-            return float(section["downsample_hz"])
 
-    raise ConfigValidationError(
-        "Missing sampling.downsample_hz (and no fallback section downsample_hz was found)."
-    )
+def get_induced_downsample_hz(cfg: Mapping[str, Any]) -> float:
+    """Return the induced-TRF sampling/downsample frequency in Hz."""
+    return _require_section_downsample_hz(cfg, section_name="induced_trf")
 
 
 def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:

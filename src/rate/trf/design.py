@@ -62,7 +62,11 @@ UNIFIED_TRF_REGRESSOR_EXPRESSIONS: tuple[str, ...] = (
 )
 
 DEFAULT_EVOKED_TRF_MODELS: tuple[dict[str, Any], ...] = (
-    {"name": UNIFIED_TRF_MODEL_NAME, "regressors": list(UNIFIED_TRF_REGRESSOR_EXPRESSIONS)},
+    {
+        "name": UNIFIED_TRF_MODEL_NAME,
+        "regressors": list(UNIFIED_TRF_REGRESSOR_EXPRESSIONS),
+        "targets": ["evoked"],
+    },
 )
 
 
@@ -86,6 +90,7 @@ class DesignRegressorSpec:
 class DesignModelSpec:
     model_name: str
     regressors: tuple[DesignRegressorSpec, ...]
+    targets: tuple[str, ...] = ("evoked",)
 
 
 def _normalize_token(value: str) -> str:
@@ -190,8 +195,8 @@ def parse_evoked_models_config(models_cfg: Any) -> tuple[DesignModelSpec, ...]:
     for idx, item in enumerate(models_cfg):
         if not isinstance(item, dict):
             raise ValueError(f"evoked_trf.models[{idx}] must be a mapping")
-        if set(item.keys()) - {"name", "regressors"}:
-            extra = sorted(set(item.keys()) - {"name", "regressors"})
+        if set(item.keys()) - {"name", "regressors", "targets"}:
+            extra = sorted(set(item.keys()) - {"name", "regressors", "targets"})
             raise ValueError(f"evoked_trf.models[{idx}] has unsupported keys: {extra}")
         name = str(item.get("name", "")).strip()
         if not name:
@@ -206,8 +211,23 @@ def parse_evoked_models_config(models_cfg: Any) -> tuple[DesignModelSpec, ...]:
             if not isinstance(reg_item, str):
                 raise ValueError(f"evoked_trf.models[{idx}].regressors[{j}] must be a string")
             parsed_regs.append(_parse_regressor_expression(reg_item))
+        targets_cfg = item.get("targets", ["evoked"])
+        if not isinstance(targets_cfg, list) or not targets_cfg:
+            raise ValueError(f"evoked_trf.models[{idx}].targets must be a non-empty list when provided")
+        parsed_targets: list[str] = []
+        seen_targets: set[str] = set()
+        for j, target_item in enumerate(targets_cfg):
+            if not isinstance(target_item, str):
+                raise ValueError(f"evoked_trf.models[{idx}].targets[{j}] must be a string")
+            target_name = str(target_item).strip().lower()
+            if not target_name:
+                raise ValueError(f"evoked_trf.models[{idx}].targets[{j}] must be non-empty")
+            if target_name in seen_targets:
+                continue
+            seen_targets.add(target_name)
+            parsed_targets.append(target_name)
         seen_names.add(name)
-        out.append(DesignModelSpec(model_name=name, regressors=tuple(parsed_regs)))
+        out.append(DesignModelSpec(model_name=name, regressors=tuple(parsed_regs), targets=tuple(parsed_targets)))
     return tuple(out)
 
 

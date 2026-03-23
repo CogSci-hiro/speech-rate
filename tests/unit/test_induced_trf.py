@@ -10,12 +10,13 @@ from rate.evoked_trf.score import select_eeg_path
 
 def _base_cfg() -> dict:
     return {
-        "sampling": {"downsample_hz": 32.0},
         "evoked_trf": {
+            "downsample_hz": 32.0,
             "lags_s": {"tmin": -0.5, "tmax": 0.5},
             "regularization": {"type": "ridge"},
         },
         "induced_trf": {
+            "downsample_hz": 32.0,
             "bands_hz": {
                 "theta": [4.0, 7.0],
                 "alpha": [8.0, 12.0],
@@ -124,19 +125,18 @@ def test_parse_induced_trf_allows_residual_only_target_kind():
 
 def test_parse_sliding_fooof_derives_step_from_induced_downsample():
     cfg = _base_cfg()
-    cfg["sampling"]["downsample_hz"] = 16.0
+    cfg["induced_trf"]["downsample_hz"] = 16.0
 
     parsed = parse_sliding_fooof_config(cfg)
 
     assert parsed.step_s == pytest.approx(1.0 / 16.0)
 
 
-def test_parse_induced_trf_no_longer_falls_back_to_induced_downsample():
+def test_parse_induced_trf_requires_branch_local_downsample():
     cfg = _base_cfg()
-    cfg.pop("sampling")
-    cfg["induced_trf"]["downsample_hz"] = 16.0
+    del cfg["induced_trf"]["downsample_hz"]
 
-    with pytest.raises(ConfigValidationError, match="sampling.downsample_hz"):
+    with pytest.raises(ConfigValidationError, match="induced_trf.downsample_hz"):
         parse_induced_trf_config(cfg)
 
 

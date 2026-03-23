@@ -5,7 +5,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from rate.config import get_project_downsample_hz, load_yaml_config
+from rate.config import get_induced_downsample_hz, load_yaml_config
 from rate.eeg.io import read_raw_eeg
 from rate.evoked_trf.fit import _configure_mne_logging
 from rate.evoked_trf.score import select_eeg_path
@@ -33,7 +33,7 @@ def parse_sliding_fooof_config(cfg: Mapping[str, Any]) -> SlidingAperiodicConfig
     peak_width_limits_hz = sliding.get("peak_width_limits_hz", [1.0, 12.0])
     if not isinstance(peak_width_limits_hz, (list, tuple)) or len(peak_width_limits_hz) != 2:
         raise ValueError("fooof_sliding.peak_width_limits_hz must be [fmin, fmax]")
-    downsample_hz = get_project_downsample_hz(cfg)
+    downsample_hz = get_induced_downsample_hz(cfg)
     spectrum_method = str(sliding.get("spectrum_method", sliding.get("method", "welch"))).strip().lower()
     if spectrum_method not in {"welch", "multitaper"}:
         raise ValueError("fooof_sliding.spectrum_method must be 'welch' or 'multitaper'")

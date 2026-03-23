@@ -1,6 +1,6 @@
 # Phase 1 modular config duplicate from config/config.yaml
 evoked_trf:
-  downsample_hz: 2.0
+  downsample_hz: 16.0
 
   lags_s:
     tmin: -2.0
@@ -9,9 +9,9 @@ evoked_trf:
   regularization:
     type: "ridge"  # options: ridge | laplacian
   ridge_alpha_grid:
-    min: 2
-    max: 7
-    n_alpha: 5
+    min: 1
+    max: 8
+    n_alpha: 10
   models:
     - name: "rate_effect"
       regressors:
@@ -20,4 +20,19 @@ evoked_trf:
         - "emg"
         - "self_rate"
         - "other_rate"
+      targets:
+        - "evoked"
+        - "theta"
+        - "alpha"
+        - "offset"
+        - "exponent"
+    - name: "alignment"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "self_rate"
+        - "other_rate"
+      targets:
+        - "evoked"
   n_jobs: 1

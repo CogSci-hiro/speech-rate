@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from rate.config import ConfigValidationError, get_project_downsample_hz, load_and_validate_config
+from rate.config import ConfigValidationError, get_evoked_downsample_hz, load_and_validate_config
 from rate.debug import limit_dataframe_by_debug_max_files
 from rate.eeg.resample import resample_index_table
 
@@ -54,7 +54,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         label="resample dataset index",
     )
 
-    downsample_hz = get_project_downsample_hz(cfg, fallback_section="evoked_trf")
+    downsample_hz = get_evoked_downsample_hz(cfg)
     eeg_cache_dir = out_dir / "eeg_resampled"
 
     LOGGER.info("Caching resampled EEG (%.3f Hz) to: %s", downsample_hz, eeg_cache_dir)
