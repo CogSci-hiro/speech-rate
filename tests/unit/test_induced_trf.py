@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
 import pytest
+from rate.config import ConfigValidationError
 from rate.induced_trf.aperiodic import compute_sliding_aperiodic, SlidingAperiodicConfig
 from rate.induced_trf.score import aggregate_subject_scores, parse_induced_trf_config
 from rate.induced_trf.sliding_fooof import parse_sliding_fooof_config
+from rate.evoked_trf.score import select_eeg_path
 
 
 def _base_cfg() -> dict:
@@ -129,6 +131,15 @@ def test_parse_sliding_fooof_derives_step_from_induced_downsample():
     assert parsed.step_s == pytest.approx(1.0 / 16.0)
 
 
+def test_parse_induced_trf_no_longer_falls_back_to_induced_downsample():
+    cfg = _base_cfg()
+    cfg.pop("sampling")
+    cfg["induced_trf"]["downsample_hz"] = 16.0
+
+    with pytest.raises(ConfigValidationError, match="sampling.downsample_hz"):
+        parse_induced_trf_config(cfg)
+
+
 def test_parse_sliding_fooof_exposes_multitaper_parameters():
     cfg = _base_cfg()
     cfg["fooof_sliding"]["spectrum_method"] = "multitaper"
@@ -179,3 +190,19 @@ def test_parse_induced_trf_rejects_missing_band_definition():
     del cfg["induced_trf"]["bands_hz"]["alpha"]
     with pytest.raises(ValueError, match="Missing induced_trf.bands_hz entries"):
         parse_induced_trf_config(cfg)
+
+
+def test_select_eeg_path_rejects_missing_value():
+    ds = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-002",
+                "subject_id": "sub-004",
+                "run": 1,
+                "eeg_path": np.nan,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="missing eeg_path"):
+        select_eeg_path(ds, dyad_id="dyad-002", subject="sub-004", run=1)

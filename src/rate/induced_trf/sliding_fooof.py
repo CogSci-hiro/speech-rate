@@ -33,7 +33,7 @@ def parse_sliding_fooof_config(cfg: Mapping[str, Any]) -> SlidingAperiodicConfig
     peak_width_limits_hz = sliding.get("peak_width_limits_hz", [1.0, 12.0])
     if not isinstance(peak_width_limits_hz, (list, tuple)) or len(peak_width_limits_hz) != 2:
         raise ValueError("fooof_sliding.peak_width_limits_hz must be [fmin, fmax]")
-    downsample_hz = get_project_downsample_hz(cfg, fallback_section="induced_trf")
+    downsample_hz = get_project_downsample_hz(cfg)
     spectrum_method = str(sliding.get("spectrum_method", sliding.get("method", "welch"))).strip().lower()
     if spectrum_method not in {"welch", "multitaper"}:
         raise ValueError("fooof_sliding.spectrum_method must be 'welch' or 'multitaper'")
@@ -91,9 +91,13 @@ def write_subject_sliding_fooof_outputs(
         (dataset_index["dyad_id"].astype(str).str.strip() == str(dyad_id).strip())
         & (dataset_index["subject_id"].astype(str).str.strip() == str(subject).strip())
     ].copy()
+    if "status" in ds.columns:
+        ds = ds.loc[ds["status"].astype(str).str.strip().str.lower() == "ok"].copy()
+    ds = ds.loc[ds["eeg_path"].notna()].copy()
+    ds = ds.loc[~ds["eeg_path"].astype(str).str.strip().str.lower().isin({"", "none", "nan"})].copy()
     runs = sorted(ds["run"].astype(int).unique().tolist())
     if not runs:
-        raise ValueError(f"No runs found in dataset index for {dyad_id}/{subject}")
+        raise ValueError(f"No runnable EEG runs found in dataset index for {dyad_id}/{subject}")
 
     out_paths: list[Path] = []
     for run in runs:

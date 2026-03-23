@@ -93,17 +93,19 @@ def _maybe_attach_modular_compute_sections(
 
     parent = path.parent
     for section_key, filename in MODULAR_COMPUTE_FILES.items():
-        if section_key in out:
-            continue
         modular_path = parent / filename
         if not modular_path.exists():
             continue
         modular_payload = load_yaml_config(modular_path)
+        sibling_defaults = {key: value for key, value in modular_payload.items() if key != section_key}
+        if sibling_defaults:
+            # Let modular files contribute shared top-level defaults, while
+            # keeping any values already defined in config.yaml authoritative.
+            out = _deep_merge(sibling_defaults, out)
+        if section_key in out:
+            continue
         if section_key in modular_payload:
             out[section_key] = modular_payload[section_key]
-        else:
-            # Allow whole-file payloads to be merged if future modular files expand.
-            out = _deep_merge(out, modular_payload)
     return out
 
 

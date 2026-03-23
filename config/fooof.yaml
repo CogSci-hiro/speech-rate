@@ -1,9 +1,12 @@
+sampling:
+  downsample_hz: 16.0
+
 fooof_sliding:
   window_s: 1.0
   fit_range_hz: [3.0, 30.0]
   edge_drop: "half_window"
   spectrum_method: "multitaper"  # welch | multitaper
-  welch_overlap: 0.0
+  welch_overlap: 0.5
   multitaper_bandwidth_hz:
   multitaper_adaptive: false
   multitaper_low_bias: true

@@ -149,7 +149,7 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         ridge_alpha_grid = [float(a) for a in grid_cfg]
 
     return InducedTrfConfig(
-        downsample_hz=get_project_downsample_hz(cfg, fallback_section="induced_trf"),
+        downsample_hz=get_project_downsample_hz(cfg),
         bands=bands,
         target_kinds=target_kinds,
         residual_bands=residual_bands,

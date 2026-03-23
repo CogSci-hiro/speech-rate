@@ -133,7 +133,17 @@ def select_eeg_path(ds_index: pd.DataFrame, *, subject: str, dyad_id: str, run: 
     if sub.empty:
         raise ValueError(f"No dataset index row for dyad_id={dyad_id}, subject_id={subject}, run={run}")
 
-    eeg_path = Path(str(sub.iloc[0]["eeg_path"])).expanduser()
+    eeg_value = sub.iloc[0]["eeg_path"]
+    if pd.isna(eeg_value):
+        raise ValueError(
+            f"Dataset index row has missing eeg_path for dyad_id={dyad_id}, subject_id={subject}, run={run}"
+        )
+    eeg_text = str(eeg_value).strip()
+    if not eeg_text or eeg_text.lower() in {"none", "nan"}:
+        raise ValueError(
+            f"Dataset index row has blank eeg_path for dyad_id={dyad_id}, subject_id={subject}, run={run}: {eeg_value!r}"
+        )
+    eeg_path = Path(eeg_text).expanduser()
     return eeg_path
 
 

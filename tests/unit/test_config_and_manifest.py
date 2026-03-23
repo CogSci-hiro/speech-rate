@@ -48,6 +48,7 @@ def test_repository_config_validates() -> None:
 
     expected_logs = str(Path(resolved["paths"]["out_dir"]) / "logs")
     assert resolved["paths"]["logs_dir"] == expected_logs
+    assert resolved["sampling"]["downsample_hz"] == pytest.approx(16.0)
 
 
 def test_schema_rejects_missing_required_key(tmp_path: Path) -> None:
@@ -75,6 +76,27 @@ def test_default_logs_dir_applied(tmp_path: Path) -> None:
     resolved = load_and_validate_config(cfg_path, schema_path=Path("config/schema.json"))
 
     assert resolved["paths"]["logs_dir"] == str(out_dir / "logs")
+
+
+def test_modular_compute_files_can_supply_shared_top_level_defaults(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    _write_yaml(
+        cfg_path,
+        {
+            "paths": {"out_dir": str(tmp_path / "outputs")},
+            "dataset": {},
+            "events": {},
+            "reporting": {},
+        },
+    )
+    _write_yaml(tmp_path / "fooof.yaml", {"sampling": {"downsample_hz": 24.0}, "fooof_sliding": {"window_s": 1.0}})
+    _write_yaml(tmp_path / "evoked_trf.yaml", {"evoked_trf": {}})
+    _write_yaml(tmp_path / "induced_trf.yaml", {"induced_trf": {}})
+    _write_yaml(tmp_path / "emg.yaml", {"emg": {}})
+
+    resolved = load_and_validate_config(cfg_path, schema_path=Path("config/schema.json"))
+
+    assert resolved["sampling"]["downsample_hz"] == pytest.approx(24.0)
 
 
 def test_manifest_written(tmp_path: Path) -> None:
