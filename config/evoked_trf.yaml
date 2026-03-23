@@ -62,6 +62,17 @@ evoked_trf:
         - "mean_rate"
       targets:
         - "evoked"
-
+    - name: "alignment_mean_int"
+      regressors:
+        - "self_ipu_onset"
+        - "other_ipu_offset"
+        - "emg"
+        - "self_rate"
+        - "other_rate"
+        - "alignment"
+        - "mean_rate"
+        - "mean_rate * alignment"
+      targets:
+        - "evoked"
 
   n_jobs: 1
