@@ -128,16 +128,33 @@ def _regressor_model_map(branch_cfg, branch_key: str):
 
 ACTIVE_EVOKED_MODELS = set(_active_model_names(evoked_trf_config, "evoked_trf"))
 ACTIVE_INDUCED_MODELS = set(_active_model_names(induced_trf_config, "induced_trf"))
+EVOKED_REGRESSOR_MODEL_MAP = _regressor_model_map(evoked_trf_config, "evoked_trf")
+INDUCED_REGRESSOR_MODEL_MAP = _regressor_model_map(induced_trf_config, "induced_trf")
+
+
+def _configured_model_for_regressor(*, family: str, regressor: str) -> str:
+    token = _canonical_feature_name(regressor)
+    if token in BASELINE_CONTROL_REGRESSORS:
+        return "baseline"
+    model_map = EVOKED_REGRESSOR_MODEL_MAP if family == "evoked_trf" else INDUCED_REGRESSOR_MODEL_MAP
+    return str(model_map.get(token, token))
 
 
 def _configured_regressors_for_family(family: str):
     active_models = ACTIVE_EVOKED_MODELS if family == "evoked_trf" else ACTIVE_INDUCED_MODELS
-    return [reg for reg in RAW_REGRESSORS if _trf_model_for_regressor(reg) in active_models]
+    out = []
+    for reg in RAW_REGRESSORS:
+        model = _configured_model_for_regressor(family=family, regressor=reg)
+        if model in active_models:
+            out.append(reg)
+        elif model == "baseline" and "baseline" in active_models:
+            out.append(reg)
+    return out
 
 
 def _baseline_control_dependency(regressor: str) -> str:
     """Return an existing dependency path for baseline controls to avoid DAG-time missing-input errors."""
-    model = _trf_model_for_regressor(regressor)
+    model = _configured_model_for_regressor(family="evoked_trf", regressor=regressor)
     stats_kernel = (
         f"{_viz_out_dir()}/stats/evoked_trf/{model}/{regressor}/grand_average_trfs-ave.fif"
     )
