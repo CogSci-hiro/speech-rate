@@ -9,11 +9,6 @@ from pathlib import Path
 import pandas as pd
 
 from rate.config import ConfigValidationError, load_and_validate_config
-from rate.induced_trf.sliding_fooof import (
-    done_marker_path,
-    parse_sliding_fooof_config,
-    write_subject_sliding_fooof_outputs,
-)
 
 LOGGER = logging.getLogger(__name__)
 REQUIRES_CONFIG = True
