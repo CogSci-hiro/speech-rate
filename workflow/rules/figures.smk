@@ -77,6 +77,10 @@ def _trf_model_for_regressor(regressor: str) -> str:
 
 def _canonical_feature_name(value: str) -> str:
     token = str(value).strip()
+    if "*" in token:
+        parts = [part.strip() for part in token.split("*", 1)]
+        if len(parts) == 2 and all(parts):
+            return f"{_canonical_feature_name(parts[0])}__x__{_canonical_feature_name(parts[1])}"
     aliases = {
         "self_ipu_onset": "self_onset_impulse",
         "other_ipu_offset": "other_offset_impulse",
@@ -84,6 +88,7 @@ def _canonical_feature_name(value: str) -> str:
         "other_rate^2": "other_rate_sq",
         "alignment^2": "alignment_sq",
         "convergence^2": "convergence_sq",
+        "mean_rate^2": "mean_rate_sq",
     }
     return aliases.get(token, token)
 
