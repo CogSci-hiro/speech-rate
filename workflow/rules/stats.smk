@@ -13,52 +13,51 @@ def _stats_table_ext() -> str:
     return "csv" if tables_format == "csv" else "parquet"
 
 
-def _stats_induced_bands():
+def _stats_induced_targets():
     ind_cfg = stats_induced_trf_config
+    targets = ind_cfg.get("targets")
+    if targets:
+        return [str(target).strip().lower() for target in targets if str(target).strip()]
     bands = ind_cfg.get("bands")
     if bands:
-        return [str(b) for b in bands]
+        return [str(band).strip().lower() for band in bands if str(band).strip()]
     bands_hz = ind_cfg.get("bands_hz", {}) or {}
-    return sorted(str(k) for k in bands_hz.keys())
-
-
-def _stats_induced_target_kinds():
-    ind_cfg = stats_induced_trf_config
-    kinds = ind_cfg.get("target_kinds")
-    if kinds:
-        return [str(k).strip().lower() for k in kinds]
-    return ["raw"]
-
-
-def _stats_induced_bands_for_target_kind(target_kind: str):
-    base = _stats_induced_bands()
-    mode = str(target_kind).strip().lower()
-    if mode != "residual":
-        return base
-    ind_cfg = stats_induced_trf_config
-    residual = ind_cfg.get("residual_bands")
-    if residual is None:
-        return base
-    return [str(b).strip() for b in residual if str(b).strip() and str(b).strip() in set(base)]
-
-
-def _stats_induced_analysis_name(band: str, target_kind: str) -> str:
-    if str(target_kind).strip().lower() == "raw":
-        return f"induced_trf_{str(band)}"
-    return f"induced_trf_{str(band)}_{str(target_kind).strip().lower()}"
+    return sorted(str(k).strip().lower() for k in bands_hz.keys() if str(k).strip())
 
 
 INDUCED_ANALYSES = [
-    _stats_induced_analysis_name(band, target_kind)
-    for target_kind in _stats_induced_target_kinds()
-    for band in _stats_induced_bands_for_target_kind(target_kind)
+    f"induced_trf_{target}"
+    for target in _stats_induced_targets()
 ]
 
 
-KERNEL0_BEHAVIOR_FEATURES = ["self_rate", "other_rate", "alignment", "convergence"]
+KERNEL0_EXCLUDED_FEATURES = {
+    "self_onset_impulse",
+    "other_offset_impulse",
+    "emg",
+    "run",
+    "time_within_run",
+}
 
 
 def _branch_behavior_feature_indexes(branch_cfg, branch_key):
+    def _normalize_feature(value):
+        token = str(value).strip()
+        if "*" in token:
+            parts = [part.strip() for part in token.split("*", 1)]
+            if len(parts) == 2 and all(parts):
+                return f"{_normalize_feature(parts[0])}__x__{_normalize_feature(parts[1])}"
+        aliases = {
+            "self_ipu_onset": "self_onset_impulse",
+            "other_ipu_offset": "other_offset_impulse",
+            "self_rate^2": "self_rate_sq",
+            "other_rate^2": "other_rate_sq",
+            "alignment^2": "alignment_sq",
+            "convergence^2": "convergence_sq",
+            "mean_rate^2": "mean_rate_sq",
+        }
+        return aliases.get(token, token)
+
     block = branch_cfg.get(branch_key, {}) or {}
     specs = block.get("models", []) or []
     out = {}
@@ -69,11 +68,13 @@ def _branch_behavior_feature_indexes(branch_cfg, branch_key):
         regressors = [str(r).strip() for r in (spec.get("regressors", []) or [])]
         if not model_name:
             continue
-        for feature in KERNEL0_BEHAVIOR_FEATURES:
-            if feature in regressors and feature not in out:
-                out[feature] = {
+        canonical = [_normalize_feature(feature) for feature in regressors]
+        for idx, feature in enumerate(canonical):
+            if not feature or feature in KERNEL0_EXCLUDED_FEATURES or feature in out:
+                continue
+            out[feature] = {
                     "model_name": model_name,
-                    "feature_index": int(regressors.index(feature)),
+                    "feature_index": int(idx),
                 }
     return out
 
@@ -84,6 +85,10 @@ INDUCED_KERNEL0_FEATURE_MAP = _branch_behavior_feature_indexes(induced_trf_confi
 
 def _canonical_feature_name(value: str) -> str:
     token = str(value).strip()
+    if "*" in token:
+        parts = [part.strip() for part in token.split("*", 1)]
+        if len(parts) == 2 and all(parts):
+            return f"{_canonical_feature_name(parts[0])}__x__{_canonical_feature_name(parts[1])}"
     aliases = {
         "self_ipu_onset": "self_onset_impulse",
         "other_ipu_offset": "other_offset_impulse",
