@@ -1,6 +1,6 @@
 # Phase 1 modular config duplicate from config/config.yaml
 evoked_trf:
-  downsample_hz: 8.0
+  downsample_hz: 2.0
 
   lags_s:
     tmin: -2.0
