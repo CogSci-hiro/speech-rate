@@ -11,7 +11,6 @@ import pandas as pd
 
 from rate.config import ConfigValidationError, load_and_validate_config
 from rate.debug import limit_dataframe_by_debug_max_files
-from rate.induced_trf.score import parse_induced_trf_config, write_subject_output
 
 LOGGER = logging.getLogger(__name__)
 REQUIRES_CONFIG = True
