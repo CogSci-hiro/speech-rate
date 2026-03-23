@@ -9,7 +9,6 @@ from typing import Any, Mapping
 
 from rate.config import ConfigValidationError, load_and_validate_config
 from rate.debug import filter_dataframe_to_unit_keys, limit_dataframe_by_debug_max_files
-from rate.fooof.pipeline import run_fooof_pipeline
 from rate.paths import resolve_out_dir
 from rate.util import read_parquet_dataframe
 
