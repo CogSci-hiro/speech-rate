@@ -28,6 +28,8 @@ def register_subparser(subparsers) -> ArgumentParser:
 
 
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
+    from rate.induced_trf.score import write_aggregate_output
+
     if config is None:
         try:
             resolved = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))
