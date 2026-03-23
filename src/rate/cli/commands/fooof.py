@@ -75,6 +75,8 @@ def register_subparser(subparsers) -> ArgumentParser:
 
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     """Execute the FOOOF feature extraction pipeline."""
+    from rate.fooof.pipeline import run_fooof_pipeline
+
     if config is None:
         try:
             resolved = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))
