@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,8 +25,7 @@ from rate.evoked_trf.utils import (
 )
 from rate.induced_trf.aperiodic import SlidingAperiodicConfig
 from rate.induced_trf.sliding_fooof import parse_sliding_fooof_config, run_aperiodic_path
-from rate.targets.induced import load_induced_band_run_target
-from rate.targets.induced import build_residual_target_from_aperiodic_df
+from rate.targets.induced import build_aperiodic_param_target_from_aperiodic_df, load_induced_band_run_target
 from rate.trf.design import DesignModelSpec, parse_evoked_models_config
 from rate.trf.engine import TRFResult, run_trf
 from rate.trf.io_contract import write_trf_artifacts
@@ -42,6 +39,8 @@ class InducedTrfConfig:
     bands: tuple[str, ...]
     target_kinds: tuple[str, ...]
     residual_bands: tuple[str, ...]
+    requested_targets: tuple[str, ...]
+    aperiodic_source_band: str | None
     bands_hz: dict[str, tuple[float, float]]
     edge_drop: str
     edge_window_s: float | None
@@ -58,6 +57,10 @@ class InducedTrfConfig:
         if kind == "residual":
             return self.residual_bands
         return self.bands
+
+
+def _requested_targets(models: tuple[DesignModelSpec, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(str(target).strip().lower() for model in models for target in model.targets))
 
 
 def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
@@ -118,11 +121,23 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
     else:
         residual_bands = tuple()
 
+    models = parse_evoked_models_config(ind.get("models"))
+    requested_targets = _requested_targets(models)
+    supported_targets = set(bands) | {"offset", "exponent"}
+    unknown_targets = [target for target in requested_targets if target not in supported_targets]
+    if unknown_targets:
+        raise ValueError(
+            "Unsupported induced_trf model targets: "
+            f"{unknown_targets}. Supported targets are offset, exponent, and induced_trf.bands keys."
+        )
+
+    needs_aperiodic = any(target in {"offset", "exponent"} for target in requested_targets)
     fooof_sliding_cfg: SlidingAperiodicConfig | None = None
-    if ("residual" in set(target_kinds)) and residual_bands:
+    if (("residual" in set(target_kinds)) and residual_bands) or needs_aperiodic:
         fooof_sliding_cfg = parse_sliding_fooof_config(cfg)
     edge_drop = str(fooof_sliding_cfg.edge_drop if fooof_sliding_cfg is not None else "none")
     edge_window_s = float(fooof_sliding_cfg.window_s) if fooof_sliding_cfg is not None else None
+    aperiodic_source_band = residual_bands[0] if residual_bands else (bands[0] if needs_aperiodic else None)
 
     lags_cfg = ev.get("lags_s") or {}
     if not isinstance(lags_cfg, dict):
@@ -153,6 +168,8 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         bands=bands,
         target_kinds=target_kinds,
         residual_bands=residual_bands,
+        requested_targets=requested_targets,
+        aperiodic_source_band=aperiodic_source_band,
         bands_hz=bands_hz,
         edge_drop=edge_drop,
         edge_window_s=edge_window_s,
@@ -162,20 +179,16 @@ def parse_induced_trf_config(cfg: dict[str, Any]) -> InducedTrfConfig:
         regularization_type=regularization_type,
         ridge_alpha_grid=ridge_alpha_grid,
         ridge_alpha_default=float(ind.get("ridge_alpha", ev.get("ridge_alpha", 1.0))),
-        models=parse_evoked_models_config(ind.get("models")),
+        models=models,
     )
 
 
-def _analysis_name_for_band(band: str, *, target_kind: str) -> str:
-    band_name = str(band)
-    kind = str(target_kind).strip().lower()
-    if kind == "raw":
-        return f"induced_trf_{band_name}"
-    return f"induced_trf_{band_name}_{kind}"
+def _analysis_name_for_target(target: str) -> str:
+    return f"induced_trf_{str(target).strip().lower()}"
 
 
-def _subject_dir(*, out_dir: Path, band: str, target_kind: str, dyad_id: str, subject: str) -> Path:
-    return out_dir / _analysis_name_for_band(band, target_kind=target_kind) / "subjects" / str(dyad_id) / str(subject)
+def _subject_dir(*, out_dir: Path, target: str, dyad_id: str, subject: str) -> Path:
+    return out_dir / _analysis_name_for_target(target) / "subjects" / str(dyad_id) / str(subject)
 
 
 def load_induced_input_tables(out_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -190,8 +203,7 @@ def _prepare_induced_subject_runs(
     out_dir: Path,
     dyad_id: str,
     subject: str,
-    band: str,
-    target_kind: str,
+    target: str,
     events: pd.DataFrame,
     ds_index: pd.DataFrame,
     picks: str | list[str],
@@ -223,13 +235,16 @@ def _prepare_induced_subject_runs(
     channel_names_ref: tuple[str, ...] | None = None
     sfreqs: set[float] = set()
     emg_subject = load_subject_emg(out_dir=out_dir, dyad_id=dyad_id, subject=subject)
+    target_name = str(target).strip().lower()
 
     # induced models can still use event-derived regressors and optional emg if provided later
     for run in runs:
-        if str(target_kind).strip().lower() == "residual":
+        if target_name in {"offset", "exponent"}:
+            if cfg.aperiodic_source_band is None:
+                raise ValueError(f"Target '{target_name}' requires an induced_trf.residual_bands source band")
             aperiodic_path = run_aperiodic_path(
                 out_dir=out_dir,
-                band=band,
+                band=cfg.aperiodic_source_band,
                 dyad_id=dyad_id,
                 subject=subject,
                 run=int(run),
@@ -237,23 +252,26 @@ def _prepare_induced_subject_runs(
             if not aperiodic_path.exists():
                 raise FileNotFoundError(
                     f"Missing precomputed sliding FOOOF target: {aperiodic_path}. "
-                    "Run the sliding FOOOF rule before fitting residual induced TRF."
+                    "Run the sliding FOOOF rule before fitting induced TRF aperiodic targets."
                 )
             aperiodic_df = pd.read_parquet(aperiodic_path)
-            run_target = build_residual_target_from_aperiodic_df(
+            run_target = build_aperiodic_param_target_from_aperiodic_df(
                 aperiodic_df,
+                value_column=target_name,
                 downsample_hz=cfg.downsample_hz,
                 edge_drop=cfg.edge_drop,
                 edge_window_s=cfg.edge_window_s,
             )
         else:
+            if target_name not in cfg.bands_hz:
+                raise ValueError(f"Unknown induced TRF target '{target_name}'")
             eeg_path = select_eeg_path(ds_index, subject=subject, dyad_id=dyad_id, run=int(run))
             run_target = load_induced_band_run_target(
                 eeg_path,
-                band=band,
+                band=target_name,
                 bands_hz=cfg.bands_hz,
                 downsample_hz=cfg.downsample_hz,
-                target_kind=target_kind,
+                target_kind="raw",
                 fooof_sliding_cfg=cfg.fooof_sliding_cfg,
                 edge_drop=cfg.edge_drop,
                 edge_window_s=cfg.edge_window_s,
@@ -304,38 +322,42 @@ def write_subject_output(
     out_dir: Path,
     dyad_id: str,
     subject: str,
-    band: str,
-    target_kind: str = "raw",
+    target: str | None = None,
+    band: str | None = None,
+    target_kind: str | None = None,
     picks: str | list[str] = "eeg",
 ) -> Path:
     trf_cfg = parse_induced_trf_config(cfg)
-    band_name = str(band)
-    target_mode = str(target_kind).strip().lower()
-    if band_name not in trf_cfg.bands:
-        raise ValueError(f"Band '{band}' not enabled in induced_trf.bands={list(trf_cfg.bands)}")
-    if target_mode not in set(trf_cfg.target_kinds):
-        raise ValueError(
-            f"Target kind '{target_kind}' not enabled in induced_trf.target_kinds={list(trf_cfg.target_kinds)}"
-        )
-    allowed_bands_for_kind = set(trf_cfg.bands_for_target_kind(target_mode))
-    if band_name not in allowed_bands_for_kind:
-        if target_mode == "residual":
+    if target is None:
+        if band is None:
+            raise ValueError("write_subject_output requires `target` (or legacy `band` for raw band targets)")
+        legacy_mode = "raw" if target_kind is None else str(target_kind).strip().lower()
+        if legacy_mode != "raw":
             raise ValueError(
-                "Band "
-                f"'{band}' not enabled for induced_trf.target_kind='residual'; "
-                f"set induced_trf.residual_bands to include it (current={list(trf_cfg.residual_bands)})"
+                "Legacy induced target_kind modes are no longer supported here. "
+                "Specify an explicit target such as theta, alpha, offset, or exponent."
             )
-        raise ValueError(f"Band '{band}' is not enabled for induced_trf.target_kind='{target_mode}'")
+        target_name = str(band).strip().lower()
+    else:
+        target_name = str(target).strip().lower()
+
+    if target_name not in set(trf_cfg.requested_targets):
+        raise ValueError(
+            f"Target '{target_name}' not requested by induced_trf.models targets={list(trf_cfg.requested_targets)}"
+        )
+
+    active_models = tuple(model for model in trf_cfg.models if target_name in set(model.targets))
+    if not active_models:
+        raise ValueError(f"No induced TRF models are configured for target '{target_name}'")
 
     events, ds_index = load_induced_input_tables(out_dir)
     events = validate_events_table(events)
     runs, per_run_events, per_run_y, per_run_X, per_run_feature_names, per_run_aperiodic, channel_names, sfreq_hz = _prepare_induced_subject_runs(
-        cfg=trf_cfg,
+        cfg=InducedTrfConfig(**{**trf_cfg.__dict__, "models": active_models}),
         out_dir=out_dir,
         dyad_id=str(dyad_id),
         subject=str(subject),
-        band=band_name,
-        target_kind=target_mode,
+        target=target_name,
         events=events,
         ds_index=ds_index,
         picks=picks,
@@ -348,7 +370,7 @@ def write_subject_output(
     best_alpha_rows: list[pd.DataFrame] = []
     trf_results_by_model: dict[str, TRFResult] = {}
 
-    for model in trf_cfg.models:
+    for model in active_models:
         result = run_trf(
             X_by_run={r: per_run_X[r][model.model_name] for r in runs},
             y_by_run={r: per_run_y[r] for r in runs},
@@ -376,9 +398,14 @@ def write_subject_output(
                     tmin_s=trf_cfg.tmin_s,
                     tmax_s=trf_cfg.tmax_s,
                 ),
-                "table_meta": {"dyad_id": str(dyad_id), "subject": str(subject), "model": model.model_name},
+                "table_meta": {
+                    "dyad_id": str(dyad_id),
+                    "subject": str(subject),
+                    "target": target_name,
+                    "model": model.model_name,
+                },
                 "outer_progress_enabled": True,
-                "outer_progress_desc": f"outer-cv {dyad_id}/{subject}/{model.model_name}/{band}",
+                "outer_progress_desc": f"outer-cv {dyad_id}/{subject}/{model.model_name}/{target_name}",
                 "outer_progress_unit": "fold",
                 "enable_reconstruction": True,
                 "reconstruction_fn": compute_reconstruction_r2,
@@ -408,8 +435,7 @@ def write_subject_output(
 
     subject_dir = _subject_dir(
         out_dir=out_dir,
-        band=str(band),
-        target_kind=str(target_kind),
+        target=target_name,
         dyad_id=str(dyad_id),
         subject=str(subject),
     )
@@ -424,7 +450,7 @@ def write_subject_output(
     subject_tables.inner_sorted.to_parquet(subject_dir / "inner_cv_scores.parquet", index=False)
     subject_tables.outer_sorted.to_parquet(subject_dir / "outer_cv_scores.parquet", index=False)
 
-    if per_run_aperiodic and target_mode != "residual":
+    if per_run_aperiodic:
         aperiodic_dir = subject_dir / "targets" / "aperiodic"
         aperiodic_dir.mkdir(parents=True, exist_ok=True)
         for run in runs:
@@ -436,13 +462,12 @@ def write_subject_output(
             run_df.insert(0, "dyad_id", str(dyad_id))
             run_df.to_parquet(aperiodic_dir / f"run-{int(run):02d}.parquet", index=False)
 
-    for model in trf_cfg.models:
+    for model in active_models:
         model_name = model.model_name
         model_dir = subject_dir / "models" / model_name
         model_outer = subject_tables.outer_fold_scores.loc[subject_tables.outer_fold_scores["model"] == model_name].copy()
-        model_outer = model_outer[
-            ["dyad_id", "subject", "model", "test_run", "alpha", "r", "baseline_r", "delta_r"]
-        ].sort_values(["test_run"], kind="mergesort").reset_index(drop=True)
+        cols = ["dyad_id", "subject", "target", "model", "test_run", "alpha", "r", "baseline_r", "delta_r"]
+        model_outer = model_outer[cols].sort_values(["test_run"], kind="mergesort").reset_index(drop=True)
         trf_result = trf_results_by_model[model_name]
         write_trf_artifacts(
             TRFResult(
@@ -499,17 +524,11 @@ def aggregate_subject_scores(*, out_dir: Path) -> pd.DataFrame:
         analysis_name = str(path.parents[3].name)
         if analysis_name.startswith("induced_trf_"):
             df = df.copy()
-            remainder = analysis_name.removeprefix("induced_trf_")
-            if remainder.endswith("_residual"):
-                df["target_kind"] = "residual"
-                df["band"] = remainder[: -len("_residual")]
-            else:
-                df["target_kind"] = "raw"
-                df["band"] = remainder
+            df["target"] = analysis_name.removeprefix("induced_trf_")
         frames.append(df)
 
     scores = pd.concat(frames, ignore_index=True)
-    sort_cols = [c for c in ["band", "target_kind", "dyad_id", "subject", "run", "model", "fold_id"] if c in scores.columns]
+    sort_cols = [c for c in ["target", "dyad_id", "subject", "run", "model", "fold_id"] if c in scores.columns]
     if sort_cols:
         scores = scores.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
     return scores

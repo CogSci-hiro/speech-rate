@@ -151,7 +151,13 @@ def validate_events_table(events: pd.DataFrame) -> pd.DataFrame:
     missing = required - set(events.columns)
     if missing:
         raise ValueError(f"events table missing required columns: {sorted(missing)}")
-    return add_timelock_columns(events)
+    out = events.copy()
+    if "mean_rate" not in out.columns:
+        if {"self_rate", "other_rate"}.issubset(out.columns):
+            out["mean_rate"] = (out["self_rate"].astype(float) + out["other_rate"].astype(float)) / 2.0
+        else:
+            out["mean_rate"] = np.nan
+    return add_timelock_columns(out)
 
 
 def select_eeg_path(ds_index: pd.DataFrame, *, subject: str, dyad_id: str, run: int) -> Path:
