@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 from rate.induced_trf.aperiodic import compute_sliding_aperiodic, SlidingAperiodicConfig
 from rate.induced_trf.score import aggregate_subject_scores, parse_induced_trf_config
+from rate.induced_trf.sliding_fooof import parse_sliding_fooof_config
 
 
 def _base_cfg() -> dict:
@@ -15,14 +16,14 @@ def _base_cfg() -> dict:
         "induced_trf": {
             "bands_hz": {
                 "theta": [4.0, 7.0],
+                "alpha": [8.0, 12.0],
             },
-            "bands": ["theta"],
+            "bands": ["theta", "alpha"],
             "target_kinds": ["raw", "residual"],
-            "residual_bands": ["theta"],
+            "residual_bands": ["theta", "alpha"],
         },
         "fooof_sliding": {
             "window_s": 1.0,
-            "step_s": 0.1,
             "fit_range_hz": [2.0, 40.0],
         },
     }
@@ -104,9 +105,9 @@ def test_induced_aggregate_extracts_target_kind(tmp_path):
 
 def test_parse_induced_trf_confirmatory_defaults():
     parsed = parse_induced_trf_config(_base_cfg())
-    assert parsed.bands == ("theta",)
+    assert parsed.bands == ("theta", "alpha")
     assert parsed.target_kinds == ("raw", "residual")
-    assert parsed.residual_bands == ("theta",)
+    assert parsed.residual_bands == ("theta", "alpha")
 
 
 def test_parse_induced_trf_allows_residual_only_target_kind():
@@ -116,7 +117,31 @@ def test_parse_induced_trf_allows_residual_only_target_kind():
     parsed = parse_induced_trf_config(cfg)
 
     assert parsed.target_kinds == ("residual",)
-    assert parsed.residual_bands == ("theta",)
+    assert parsed.residual_bands == ("theta", "alpha")
+
+
+def test_parse_sliding_fooof_derives_step_from_induced_downsample():
+    cfg = _base_cfg()
+    cfg["sampling"]["downsample_hz"] = 16.0
+
+    parsed = parse_sliding_fooof_config(cfg)
+
+    assert parsed.step_s == pytest.approx(1.0 / 16.0)
+
+
+def test_parse_sliding_fooof_exposes_multitaper_parameters():
+    cfg = _base_cfg()
+    cfg["fooof_sliding"]["spectrum_method"] = "multitaper"
+    cfg["fooof_sliding"]["multitaper_bandwidth_hz"] = 3.0
+    cfg["fooof_sliding"]["multitaper_adaptive"] = True
+    cfg["fooof_sliding"]["multitaper_low_bias"] = False
+
+    parsed = parse_sliding_fooof_config(cfg)
+
+    assert parsed.spectrum_method == "multitaper"
+    assert parsed.multitaper_bandwidth_hz == pytest.approx(3.0)
+    assert parsed.multitaper_adaptive is True
+    assert parsed.multitaper_low_bias is False
 
 
 def test_parse_induced_trf_prefers_induced_ridge_settings():
@@ -135,22 +160,22 @@ def test_parse_induced_trf_prefers_induced_ridge_settings():
     assert parsed.ridge_alpha_default == 100.0
 
 
-def test_parse_induced_trf_rejects_nonconfirmatory_residual_bands():
+def test_parse_induced_trf_rejects_empty_residual_bands():
     cfg = _base_cfg()
     cfg["induced_trf"]["residual_bands"] = []
     with pytest.raises(ValueError, match="residual_bands"):
         parse_induced_trf_config(cfg)
 
 
-def test_parse_induced_trf_rejects_nonconfirmatory_bands():
+def test_parse_induced_trf_rejects_residual_bands_outside_enabled_bands():
     cfg = _base_cfg()
-    cfg["induced_trf"]["bands_hz"]["alpha"] = [8.0, 12.0]
-    with pytest.raises(ValueError, match="forbids additional bands"):
+    cfg["induced_trf"]["residual_bands"] = ["theta", "beta"]
+    with pytest.raises(ValueError, match="subset of induced_trf.bands"):
         parse_induced_trf_config(cfg)
 
 
-def test_parse_induced_trf_rejects_nonconfirmatory_theta_limits():
+def test_parse_induced_trf_rejects_missing_band_definition():
     cfg = _base_cfg()
-    cfg["induced_trf"]["bands_hz"]["theta"] = [4.0, 8.0]
-    with pytest.raises(ValueError, match="theta == \\[4.0, 7.0\\]"):
+    del cfg["induced_trf"]["bands_hz"]["alpha"]
+    with pytest.raises(ValueError, match="Missing induced_trf.bands_hz entries"):
         parse_induced_trf_config(cfg)

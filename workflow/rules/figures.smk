@@ -35,7 +35,7 @@ if not RAW_REGRESSORS:
     raise ValueError("config/viz.yaml reporting.trf.regressors must define at least one TRF regressor")
 
 
-def _induced_bands():
+def _viz_induced_bands():
     ind_cfg = viz_induced_trf_config
     bands = ind_cfg.get("bands")
     if bands:
@@ -44,7 +44,7 @@ def _induced_bands():
     return sorted(str(k) for k in bands_hz.keys())
 
 
-def _induced_target_kinds():
+def _viz_induced_target_kinds():
     ind_cfg = viz_induced_trf_config
     kinds = ind_cfg.get("target_kinds")
     if kinds:
@@ -52,8 +52,8 @@ def _induced_target_kinds():
     return ["raw"]
 
 
-def _induced_bands_for_target_kind(target_kind: str):
-    base = _induced_bands()
+def _viz_induced_bands_for_target_kind(target_kind: str):
+    base = _viz_induced_bands()
     mode = str(target_kind).strip().lower()
     if mode != "residual":
         return base
@@ -64,16 +64,16 @@ def _induced_bands_for_target_kind(target_kind: str):
     return [str(b).strip() for b in residual if str(b).strip() and str(b).strip() in set(base)]
 
 
-def _induced_family_name(band: str, target_kind: str) -> str:
+def _viz_induced_family_name(band: str, target_kind: str) -> str:
     if str(target_kind).strip().lower() == "raw":
         return f"induced_trf_{str(band)}"
     return f"induced_trf_{str(band)}_{str(target_kind).strip().lower()}"
 
 
 INDUCED_FAMILIES = [
-    _induced_family_name(band, target_kind)
-    for target_kind in _induced_target_kinds()
-    for band in _induced_bands_for_target_kind(target_kind)
+    _viz_induced_family_name(band, target_kind)
+    for target_kind in _viz_induced_target_kinds()
+    for band in _viz_induced_bands_for_target_kind(target_kind)
 ]
 
 

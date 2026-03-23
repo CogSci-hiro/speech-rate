@@ -8,13 +8,13 @@ OUT_DIR = COMPUTE_OUT_DIR
 ruleorder: induced_trf_subject_residual > induced_trf_subject_raw
 
 
-def _subject_pairs():
+def _compute_subject_pairs():
     ckpt = checkpoints.subject_targets.get()
     df = pd.read_csv(ckpt.output[0], sep="\t")
     return [(str(r.dyad_id), str(r.subject_id)) for r in df.itertuples(index=False)]
 
 
-def _induced_bands():
+def _compute_induced_bands():
     ind_cfg = compute_induced_trf_config
     bands = ind_cfg.get("bands")
     if bands:
@@ -23,7 +23,7 @@ def _induced_bands():
     return sorted(str(k) for k in bands_hz.keys())
 
 
-def _induced_target_kinds():
+def _compute_induced_target_kinds():
     ind_cfg = compute_induced_trf_config
     kinds = ind_cfg.get("target_kinds")
     if kinds:
@@ -31,8 +31,8 @@ def _induced_target_kinds():
     return ["raw"]
 
 
-def _induced_bands_for_target_kind(target_kind: str):
-    base = _induced_bands()
+def _compute_induced_bands_for_target_kind(target_kind: str):
+    base = _compute_induced_bands()
     mode = str(target_kind).strip().lower()
     if mode != "residual":
         return base
@@ -43,7 +43,7 @@ def _induced_bands_for_target_kind(target_kind: str):
     return [str(b).strip() for b in residual if str(b).strip() and str(b).strip() in set(base)]
 
 
-def _analysis_name(band: str, target_kind: str) -> str:
+def _compute_analysis_name(band: str, target_kind: str) -> str:
     band_name = str(band)
     mode = str(target_kind).strip().lower()
     if mode == "raw":
@@ -51,7 +51,7 @@ def _analysis_name(band: str, target_kind: str) -> str:
     return f"induced_trf_{band_name}_{mode}"
 
 
-def _analysis_parts(analysis: str):
+def _compute_analysis_parts(analysis: str):
     text = str(analysis)
     if not text.startswith("induced_trf_"):
         raise ValueError(f"Unsupported induced analysis name: {analysis}")
@@ -61,23 +61,23 @@ def _analysis_parts(analysis: str):
     return suffix, "raw"
 
 
-def _induced_analyses():
+def _compute_induced_analyses():
     return [
-        _analysis_name(band, target_kind)
-        for target_kind in _induced_target_kinds()
-        for band in _induced_bands_for_target_kind(target_kind)
+        _compute_analysis_name(band, target_kind)
+        for target_kind in _compute_induced_target_kinds()
+        for band in _compute_induced_bands_for_target_kind(target_kind)
     ]
 
 
-def _induced_subject_outputs(_wildcards):
+def _compute_induced_subject_outputs(_wildcards):
     return [
         f"{OUT_DIR}/{analysis}/subjects/{dyad_id}/{subject}/scores.parquet"
-        for analysis in _induced_analyses()
-        for dyad_id, subject in _subject_pairs()
+        for analysis in _compute_induced_analyses()
+        for dyad_id, subject in _compute_subject_pairs()
     ]
 
 
-def _band_hz(band: str):
+def _compute_band_hz(band: str):
     ind_cfg = compute_induced_trf_config
     bands_hz = ind_cfg.get("bands_hz", {}) or {}
     rng = bands_hz.get(str(band))
@@ -88,14 +88,16 @@ def _band_hz(band: str):
 
 rule induced_trf_sliding_fooof_subject:
     input:
-        config="config/fooof.yaml",
+        config="config/config.yaml",
+        fooof_config="config/fooof.yaml",
+        induced_config="config/induced_trf.yaml",
         dataset_index=OUT_DIR + "/dataset/index.parquet",
         events=OUT_DIR + "/events/events.parquet",
     output:
         done=OUT_DIR + "/induced_trf_{band}_residual/subjects/{dyad_id}/{subject}/targets/aperiodic/_done.txt"
     params:
-        band_fmin=lambda wc: _band_hz(wc.band)[0],
-        band_fmax=lambda wc: _band_hz(wc.band)[1],
+        band_fmin=lambda wc: _compute_band_hz(wc.band)[0],
+        band_fmax=lambda wc: _compute_band_hz(wc.band)[1],
     log:
         OUT_DIR + "/logs/induced_trf/sliding_fooof_{band}_{dyad_id}_{subject}.log"
     shell:
@@ -107,7 +109,8 @@ rule induced_trf_sliding_fooof_subject:
             --band {wildcards.band} \
             --band-fmin {params.band_fmin} \
             --band-fmax {params.band_fmax} \
-            --config config/fooof.yaml \
+            --config config/config.yaml \
+            --schema config/schema.json \
             --out-dir {OUT_DIR} \
             --done-file {output.done} \
             2>&1 | tee {log}
@@ -181,7 +184,7 @@ rule induced_trf_aggregate:
         OUT_DIR + "/_meta/features_emg_done.txt",
         OUT_DIR + "/_meta/config_validated.json",
         OUT_DIR + "/_meta/run_manifest.json",
-        _induced_subject_outputs
+        _compute_induced_subject_outputs
     output:
         OUT_DIR + "/induced_trf/scores/scores.parquet"
     log:

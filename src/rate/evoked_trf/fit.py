@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from rate.eeg.io import read_raw_eeg
 from rate.evoked_trf.spec import ModelSpec, RegressorSpec, get_event_times_and_amps
 
 _MNE_LOGGING_CONFIGURED = False
@@ -130,7 +131,7 @@ def load_eeg_run(
     if not eeg_path.exists():
         raise FileNotFoundError(str(eeg_path))
 
-    raw = mne.io.read_raw(eeg_path, preload=True, verbose="ERROR")
+    raw = read_raw_eeg(eeg_path, preload=True, verbose="ERROR")
 
     if downsample_hz <= 0:
         raise ValueError("downsample_hz must be > 0")

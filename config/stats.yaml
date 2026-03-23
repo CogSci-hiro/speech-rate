@@ -14,9 +14,8 @@ induced_trf:
   # Optional: restrict residual induced analyses to this subset; [] disables residual analyses.
   residual_bands: ["theta", "alpha"]
   bands_hz:
-    theta: [4.0, 8.0]
+    theta: [4.0, 7.0]
     alpha: [8.0, 12.0]
-    beta: [13.0, 30.0]
 
 stats:
   kernel_cluster:

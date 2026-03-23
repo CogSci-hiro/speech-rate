@@ -5,7 +5,8 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from rate.config import load_yaml_config
+from rate.config import get_project_downsample_hz, load_yaml_config
+from rate.eeg.io import read_raw_eeg
 from rate.evoked_trf.fit import _configure_mne_logging
 from rate.evoked_trf.score import select_eeg_path
 from rate.induced_trf.aperiodic import SlidingAperiodicConfig, compute_sliding_aperiodic
@@ -21,10 +22,10 @@ def parse_sliding_fooof_config(cfg: Mapping[str, Any]) -> SlidingAperiodicConfig
     if not isinstance(sliding, Mapping):
         raise ValueError("fooof_sliding must be a mapping")
 
-    required = ("window_s", "step_s", "fit_range_hz")
+    required = ("window_s", "fit_range_hz")
     missing = [key for key in required if key not in sliding]
     if missing:
-        raise ValueError(f"fooof_sliding must define window_s, step_s, fit_range_hz (missing: {missing})")
+        raise ValueError(f"fooof_sliding must define window_s and fit_range_hz (missing: {missing})")
 
     fit_range_hz = sliding.get("fit_range_hz")
     if not isinstance(fit_range_hz, (list, tuple)) or len(fit_range_hz) != 2:
@@ -32,12 +33,25 @@ def parse_sliding_fooof_config(cfg: Mapping[str, Any]) -> SlidingAperiodicConfig
     peak_width_limits_hz = sliding.get("peak_width_limits_hz", [1.0, 12.0])
     if not isinstance(peak_width_limits_hz, (list, tuple)) or len(peak_width_limits_hz) != 2:
         raise ValueError("fooof_sliding.peak_width_limits_hz must be [fmin, fmax]")
+    downsample_hz = get_project_downsample_hz(cfg, fallback_section="induced_trf")
+    spectrum_method = str(sliding.get("spectrum_method", sliding.get("method", "welch"))).strip().lower()
+    if spectrum_method not in {"welch", "multitaper"}:
+        raise ValueError("fooof_sliding.spectrum_method must be 'welch' or 'multitaper'")
 
     return SlidingAperiodicConfig(
         window_s=float(sliding["window_s"]),
-        step_s=float(sliding["step_s"]),
+        step_s=float(1.0 / float(downsample_hz)),
         fit_range_hz=(float(fit_range_hz[0]), float(fit_range_hz[1])),
         edge_drop=str(sliding.get("edge_drop", "none")),
+        spectrum_method=spectrum_method,
+        welch_overlap=float(sliding.get("welch_overlap", 0.0)),
+        multitaper_bandwidth_hz=(
+            None
+            if sliding.get("multitaper_bandwidth_hz") is None
+            else float(sliding.get("multitaper_bandwidth_hz"))
+        ),
+        multitaper_adaptive=bool(sliding.get("multitaper_adaptive", False)),
+        multitaper_low_bias=bool(sliding.get("multitaper_low_bias", True)),
         aperiodic_mode=str(sliding.get("aperiodic_mode", "fixed")).strip().lower(),
         peak_width_limits_hz=(float(peak_width_limits_hz[0]), float(peak_width_limits_hz[1])),
         max_n_peaks=int(sliding.get("max_n_peaks", 6)),
@@ -83,11 +97,9 @@ def write_subject_sliding_fooof_outputs(
 
     out_paths: list[Path] = []
     for run in runs:
-        import mne
-
         eeg_path = select_eeg_path(dataset_index, subject=subject, dyad_id=dyad_id, run=int(run))
         _configure_mne_logging()
-        raw = mne.io.read_raw(Path(eeg_path), preload=False, verbose="ERROR")
+        raw = read_raw_eeg(Path(eeg_path), preload=False, verbose="ERROR")
         if picks is not None:
             raw = raw.copy().pick(picks)
         aperiodic_df = compute_sliding_aperiodic(

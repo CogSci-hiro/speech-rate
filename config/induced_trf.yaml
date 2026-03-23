@@ -1,12 +1,13 @@
 # Phase 1 modular config duplicate from config/config.yaml
 induced_trf:
-  downsample_hz: 4.0
-  bands: ["theta"]
+  downsample_hz: 2.0
+  bands: ["theta", "alpha"]
   target_kinds: ["residual"]
-  residual_bands: ["theta"]
+  residual_bands: ["theta", "alpha"]
 
   bands_hz:
     theta: [4.0, 7.0]
+    alpha: [8.0, 12.0]
 
   regularization:
     type: "ridge"  # options: ridge | laplacian

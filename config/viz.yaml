@@ -29,11 +29,12 @@ reporting:
 # Keep induced band metadata local to viz config so figure rule expansion does not
 # depend on the tracked compute config.
 induced_trf:
-  bands: ["theta"]
-  target_kinds: ["raw", "residual"]
-  residual_bands: ["theta"]
+  bands: ["theta", "alpha"]
+  target_kinds: ["residual"]
+  residual_bands: ["theta", "alpha"]
   bands_hz:
     theta: [4.0, 7.0]
+    alpha: [8.0, 12.0]
 
 # Phase 1 modular duplicate from config/config.yaml.
 # Kept under a non-active key to avoid changing current pipeline behavior.

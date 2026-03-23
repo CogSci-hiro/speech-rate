@@ -20,6 +20,11 @@ class SlidingAperiodicConfig:
     step_s: float
     fit_range_hz: tuple[float, float]
     edge_drop: str  # "none" or "half_window"
+    spectrum_method: str = "welch"  # "welch" or "multitaper"
+    welch_overlap: float = 0.0
+    multitaper_bandwidth_hz: float | None = None
+    multitaper_adaptive: bool = False
+    multitaper_low_bias: bool = True
     aperiodic_mode: str = "fixed"  # "fixed" or "knee"
     peak_width_limits_hz: tuple[float, float] = (1.0, 12.0)
     max_n_peaks: int = 6
@@ -56,6 +61,45 @@ def _band_peak_power(peaks: np.ndarray, band_hz: tuple[float, float]) -> float:
     if not np.any(mask):
         return np.nan
     return float(np.nanmax(peaks[mask, 1]))
+
+
+def _compute_window_psd(*, x: np.ndarray, sfreq: float, cfg: SlidingAperiodicConfig, win_samples: int) -> tuple[np.ndarray, np.ndarray]:
+    method = str(cfg.spectrum_method).strip().lower()
+    if method == "welch":
+        noverlap = int(round(int(win_samples) * float(cfg.welch_overlap)))
+        noverlap = min(max(noverlap, 0), int(win_samples) - 1)
+        freqs_hz, psd = welch(
+            np.asarray(x, dtype=float),
+            fs=float(sfreq),
+            window="hann",
+            nperseg=int(win_samples),
+            noverlap=noverlap,
+            detrend="constant",
+            scaling="density",
+            return_onesided=True,
+        )
+        return np.asarray(freqs_hz, dtype=float), np.asarray(psd, dtype=float)
+
+    if method == "multitaper":
+        import mne
+
+        psd_mt, freqs_mt = mne.time_frequency.psd_array_multitaper(
+            np.asarray(x, dtype=float)[np.newaxis, :],
+            sfreq=float(sfreq),
+            fmin=float(cfg.fit_range_hz[0]),
+            fmax=float(cfg.fit_range_hz[1]),
+            bandwidth=(None if cfg.multitaper_bandwidth_hz is None else float(cfg.multitaper_bandwidth_hz)),
+            adaptive=bool(cfg.multitaper_adaptive),
+            low_bias=bool(cfg.multitaper_low_bias),
+            normalization="full",
+            verbose="ERROR",
+        )
+        psd_mt = np.asarray(psd_mt, dtype=float)
+        if psd_mt.ndim == 2 and psd_mt.shape[0] == 1:
+            psd_mt = psd_mt[0]
+        return np.asarray(freqs_mt, dtype=float), np.asarray(psd_mt, dtype=float)
+
+    raise ValueError(f"Unsupported sliding FOOOF spectrum_method: {cfg.spectrum_method!r}")
 
 
 def compute_sliding_aperiodic(
@@ -100,6 +144,10 @@ def compute_sliding_aperiodic(
         raise ValueError(f"window_s too short for PSD/FOOOF fitting: {cfg.window_s}")
     if step_samples <= 0:
         raise ValueError("step_s must correspond to >=1 sample")
+    if not (0.0 <= float(cfg.welch_overlap) < 1.0):
+        raise ValueError("welch_overlap must be in [0, 1).")
+    if (cfg.multitaper_bandwidth_hz is not None) and (float(cfg.multitaper_bandwidth_hz) <= 0.0):
+        raise ValueError("multitaper_bandwidth_hz must be > 0 when provided.")
 
     half_win = win_samples // 2
     if half_win <= 0 or (2 * half_win) >= x.shape[1]:
@@ -138,15 +186,11 @@ def compute_sliding_aperiodic(
 
         for ch_idx in range(n_channels):
             segment_ch = np.asarray(segment[ch_idx, :], dtype=float)
-            freqs_hz, psd = welch(
-                segment_ch,
-                fs=float(sfreq),
-                window="hann",
-                nperseg=int(win_samples),
-                noverlap=0,
-                detrend="constant",
-                scaling="density",
-                return_onesided=True,
+            freqs_hz, psd = _compute_window_psd(
+                x=segment_ch,
+                sfreq=float(sfreq),
+                cfg=cfg,
+                win_samples=int(win_samples),
             )
             freqs_hz = np.asarray(freqs_hz, dtype=float)
             psd = np.maximum(np.asarray(psd, dtype=float), np.finfo(float).tiny)

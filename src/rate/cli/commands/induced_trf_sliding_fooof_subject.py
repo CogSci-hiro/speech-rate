@@ -8,14 +8,15 @@ from pathlib import Path
 
 import pandas as pd
 
+from rate.config import ConfigValidationError, load_and_validate_config
 from rate.induced_trf.sliding_fooof import (
     done_marker_path,
-    load_sliding_fooof_config,
+    parse_sliding_fooof_config,
     write_subject_sliding_fooof_outputs,
 )
 
 LOGGER = logging.getLogger(__name__)
-REQUIRES_CONFIG = False
+REQUIRES_CONFIG = True
 
 
 def add_subparser(subparsers) -> ArgumentParser:
@@ -23,7 +24,8 @@ def add_subparser(subparsers) -> ArgumentParser:
         "induced-trf-sliding-fooof-subject",
         help="Precompute sliding-window FOOOF residual targets for one induced-TRF subject.",
     )
-    parser.add_argument("--config", default="config/fooof.yaml", help="Path to sliding FOOOF YAML config.")
+    parser.add_argument("--config", default="config/config.yaml", help="Path to compute YAML config file.")
+    parser.add_argument("--schema", default="config/schema.json", help="Path to JSON schema file.")
     parser.add_argument("--out-dir", required=True, help="Compute output directory.")
     parser.add_argument("--dyad-id", required=True, help="Dyad ID (e.g., dyad-001).")
     parser.add_argument("--subject", required=True, help="Subject ID (e.g., sub-001).")
@@ -40,13 +42,20 @@ def register_subparser(subparsers) -> ArgumentParser:
 
 
 def run(args: Namespace, config=None) -> int:
-    del config
+    if config is None:
+        try:
+            resolved = load_and_validate_config(Path(args.config), schema_path=Path(args.schema))
+        except ConfigValidationError as exc:
+            LOGGER.error("%s", exc)
+            return 1
+    else:
+        resolved = config
     out_dir = Path(args.out_dir)
     dataset_index_path = out_dir / "dataset" / "index.parquet"
     if not dataset_index_path.exists():
         raise FileNotFoundError(f"dataset index not found: {dataset_index_path}")
 
-    sliding_cfg = load_sliding_fooof_config(Path(args.config))
+    sliding_cfg = parse_sliding_fooof_config(resolved)
     dataset_index = pd.read_parquet(dataset_index_path)
     write_subject_sliding_fooof_outputs(
         sliding_cfg=sliding_cfg,

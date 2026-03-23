@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from rate.eeg.io import read_raw_eeg
 from rate.evoked_trf.fit import _configure_mne_logging
 from rate.induced_trf.aperiodic import SlidingAperiodicConfig, compute_sliding_aperiodic
 from rate.induced_trf.hilbert import HilbertConfig, compute_band_envelopes
@@ -150,8 +151,6 @@ def load_induced_band_run_target(
 
     Returns y with shape (n_samples, n_channels) to match the shared TRF engine.
     """
-    import mne
-
     eeg_path = Path(eeg_path)
     if not eeg_path.exists():
         raise FileNotFoundError(str(eeg_path))
@@ -164,7 +163,7 @@ def load_induced_band_run_target(
         raise ValueError(f"Unsupported target_kind '{target_kind}'. Expected one of: raw, residual")
 
     _configure_mne_logging()
-    raw = mne.io.read_raw(eeg_path, preload=True, verbose="ERROR")
+    raw = read_raw_eeg(eeg_path, preload=True, verbose="ERROR")
     if picks is not None:
         raw = raw.copy().pick(picks)
     channel_names = tuple(str(ch) for ch in raw.ch_names)
@@ -182,6 +181,8 @@ def load_induced_band_run_target(
         if data.ndim != 2:
             raise ValueError(f"Expected band envelope to be 2D, got {data.shape}")
         info = raw.info.copy()
+        import mne
+
         induced_raw = mne.io.RawArray(np.asarray(data, dtype=float), info, first_samp=raw.first_samp, verbose="ERROR")
         if not np.isclose(float(induced_raw.info["sfreq"]), float(downsample_hz), atol=1e-9):
             induced_raw.resample(float(downsample_hz), npad="auto", verbose="ERROR")
