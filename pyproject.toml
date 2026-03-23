@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Speech-rate analysis scaffolding package."
 requires-python = ">=3.10"
 dependencies = [
+  "fooof",
   "mne>=1.11.0",
   "numpy>=1.26",
   "PyYAML>=6.0",
