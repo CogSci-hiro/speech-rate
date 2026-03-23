@@ -188,27 +188,6 @@ def _active_evoked_models(branch_cfg):
     return out
 
 
-EVOKED_RECONSTRUCTION_R2_MODELS = [
-    model for model in _active_evoked_models(evoked_trf_config)
-    if str(model) != "baseline"
-]
-
-RECONSTRUCTION_ERP_R2_STAT_TARGETS = [
-    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/clusters.{_stats_table_ext()}"
-    for model in EVOKED_RECONSTRUCTION_R2_MODELS
-]
-RECONSTRUCTION_ERP_R2_MEAN_TARGETS = [
-    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/mean_delta_r2.npy"
-    for model in EVOKED_RECONSTRUCTION_R2_MODELS
-]
-RECONSTRUCTION_ERP_R2_LABEL_TARGETS = [
-    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/cluster_labels.npy"
-    for model in EVOKED_RECONSTRUCTION_R2_MODELS
-]
-RECONSTRUCTION_ERP_R2_CHNAME_TARGETS = [
-    f"{_stats_out_dir()}/stats/evoked_trf/{model}/reconstruction_erp_r2_vs_baseline/channel_names.npy"
-    for model in EVOKED_RECONSTRUCTION_R2_MODELS
-]
 EMG_ONSET_EVOKED_TARGET = (
     f"{_stats_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
 )
