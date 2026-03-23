@@ -45,8 +45,6 @@ _COMMANDS = {
     "induced-trf-subject-all": "rate.cli.commands.induced_trf_subject_all",
     "induced-trf-aggregate": "rate.cli.commands.induced_trf_aggregate",
     "stats-kernel0": "rate.cli.commands.stats_kernel0",
-    "stats-emg-onset-evoked": "rate.cli.commands.stats_emg_onset_evoked",
-    "stats-reconstruction-erp-r2": "rate.cli.commands.stats_reconstruction_erp_r2",
     "stats-export-subject-zmaps": "rate.cli.commands.stats_export_subject_zmaps",
     "clean": "rate.cli.commands.clean",
     "run-tests": "rate.cli.commands.run_tests",
