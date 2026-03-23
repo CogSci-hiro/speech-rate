@@ -690,63 +690,6 @@ def _load_group_evoked(*, mne, out_dir: Path, family: str, regressor: str):
     return evokeds[0]
 
 
-def _load_reconstruction_erp_r2_channel_names(*, stats_dir: Path) -> list[str]:
-    path = stats_dir / "channel_names.npy"
-    if not path.exists():
-        raise FileNotFoundError(f"Channel names not found: {path}")
-    arr = np.load(path)
-    vals = [str(x) for x in np.asarray(arr).reshape(-1)]
-    if not vals:
-        raise ValueError(f"No channel names found in {path}")
-    return vals
-
-
-def _make_reconstruction_topomap_info(*, config: Mapping[str, Any], mne, ch_names: Sequence[str]):
-    stats_root = config.get("stats", {})
-    stats_cfg = stats_root.get("kernel_cluster") or stats_root.get("kernel") or {}
-    adjacency_cfg = stats_cfg.get("adjacency", {}) if isinstance(stats_cfg, Mapping) else {}
-    montage_name = str(adjacency_cfg.get("montage_name", "biosemi64"))
-    info = mne.create_info(ch_names=list(ch_names), sfreq=1.0, ch_types="eeg")
-    montage = mne.channels.make_standard_montage(montage_name)
-    info.set_montage(montage, on_missing="ignore")
-    return info
-
-
-def _load_reconstruction_erp_r2_significance_mask(
-    *,
-    stats_dir: Path,
-    alpha: float,
-    n_channels: int,
-) -> np.ndarray | None:
-    if not (0.0 < float(alpha) < 1.0):
-        return None
-
-    labels_path = stats_dir / "cluster_labels.npy"
-    if not labels_path.exists():
-        return None
-    labels = np.asarray(np.load(labels_path), dtype=np.int32).reshape(-1)
-    if labels.size != int(n_channels):
-        return None
-
-    cluster_csv = stats_dir / "clusters.csv"
-    cluster_parquet = stats_dir / "clusters.parquet"
-    if cluster_csv.exists():
-        table = pd.read_csv(cluster_csv)
-    elif cluster_parquet.exists():
-        table = pd.read_parquet(cluster_parquet)
-    else:
-        return None
-    if "cluster_id" not in table.columns or "p_value" not in table.columns:
-        return None
-    sig_ids = (
-        table.loc[pd.to_numeric(table["p_value"], errors="coerce") <= float(alpha), "cluster_id"]
-        .astype(int)
-        .to_numpy()
-        + 1
-    )
-    if sig_ids.size == 0:
-        return np.zeros(int(n_channels), dtype=bool)
-    return np.isin(labels, sig_ids)
 
 
 def _global_axis_bounds(
