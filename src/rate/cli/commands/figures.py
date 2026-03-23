@@ -22,7 +22,6 @@ FIGURE_FOOOF_PSD_PANEL = "fooof_psd_panel"
 FIGURE_FOOOF_PSD_RAW_ROW = "fooof_psd_raw_row"
 FIGURE_RECON_ERP_LINEAR = "reconstruction_erp_linear"
 FIGURE_RECON_ERP_QUADRATIC = "reconstruction_erp_quadratic"
-FIGURE_RECON_ERP_R2_TOPO = "reconstruction_erp_r2_topo"
 FIGURE_CHOICES = (
     FIGURE_JOINT,
     FIGURE_TOPO,
@@ -31,7 +30,6 @@ FIGURE_CHOICES = (
     FIGURE_FOOOF_PSD_RAW_ROW,
     FIGURE_RECON_ERP_LINEAR,
     FIGURE_RECON_ERP_QUADRATIC,
-    FIGURE_RECON_ERP_R2_TOPO,
 )
 
 DEFAULT_ELECTRODES = ["Fz", "Pz"]
