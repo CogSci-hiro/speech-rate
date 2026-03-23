@@ -18,11 +18,10 @@ def add_subparser(subparsers) -> ArgumentParser:
     )
     parser.add_argument("--dyad-id", required=True, help="Dyad ID (e.g., dyad-001).")
     parser.add_argument("--subject", required=True, help="Subject ID (e.g., sub-001).")
-    parser.add_argument("--band", required=True, help="Band name (e.g., theta).")
+    parser.add_argument("--target", required=True, help="Induced TRF target (e.g., theta, alpha, offset, exponent).")
     parser.add_argument(
-        "--target-kind",
-        default="raw",
-        help="Induced target kind: raw (Hilbert power) or residual (sliding-window FOOOF residual).",
+        "--band",
+        help="Legacy alias for raw band targets. Prefer --target.",
     )
     parser.add_argument("--config", default="config/config.yaml", help="Path to YAML config file.")
     parser.add_argument("--schema", default="config/schema.json", help="Path to JSON schema file.")
@@ -50,21 +49,19 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     out_dir = Path(args.out_dir) if args.out_dir else Path(resolved["paths"]["out_dir"])
 
     try:
-        out_path = write_subject_output(
-            cfg=resolved,
-            out_dir=out_dir,
-            dyad_id=str(args.dyad_id),
-            subject=str(args.subject),
-            band=str(args.band),
-            target_kind=str(args.target_kind),
-        )
+            out_path = write_subject_output(
+                cfg=resolved,
+                out_dir=out_dir,
+                dyad_id=str(args.dyad_id),
+                subject=str(args.subject),
+                target=str(args.target),
+            )
     except Exception as exc:
         LOGGER.error(
-            "induced-trf-subject failed for dyad_id=%s subject=%s band=%s target_kind=%s: %s",
+            "induced-trf-subject failed for dyad_id=%s subject=%s target=%s: %s",
             args.dyad_id,
             args.subject,
-            args.band,
-            args.target_kind,
+            args.target,
             exc,
         )
         raise

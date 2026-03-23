@@ -29,16 +29,10 @@ def add_subparser(subparsers) -> ArgumentParser:
         help="Optional explicit dataset index parquet path. Defaults to <out_dir>/dataset/index.parquet.",
     )
     parser.add_argument(
-        "--band",
+        "--target",
         action="append",
-        dest="bands",
-        help="Optional induced-band filter (e.g., theta). Can be repeated.",
-    )
-    parser.add_argument(
-        "--target-kind",
-        action="append",
-        dest="target_kinds",
-        help="Optional target-kind filter (raw or residual). Can be repeated.",
+        dest="targets",
+        help="Optional induced-target filter (e.g., theta, alpha, offset, exponent). Can be repeated.",
     )
     parser.add_argument("--done-file", help="Optional marker file path to write on success.")
     parser.set_defaults(command_func=run)
@@ -91,40 +85,27 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         raise ValueError("No valid (dyad_id, subject_id) rows found in dataset index.")
 
     cfg_ind = parse_induced_trf_config(resolved)
-    enabled_bands = list(cfg_ind.bands)
-    enabled_target_kinds = list(cfg_ind.target_kinds)
-    requested_bands: set[str] | None = None
-    if args.bands:
-        requested = [str(b).strip() for b in args.bands if str(b).strip()]
-        bad = sorted(set(requested) - set(enabled_bands))
+    enabled_targets = list(cfg_ind.requested_targets)
+    requested_targets: set[str] | None = None
+    if args.targets:
+        requested = [str(target).strip().lower() for target in args.targets if str(target).strip()]
+        bad = sorted(set(requested) - set(enabled_targets))
         if bad:
-            raise ValueError(f"Requested bands not enabled in config induced_trf.bands: {bad}")
-        requested_bands = set(requested)
+            raise ValueError(f"Requested induced targets not enabled in config induced_trf.models[*].targets: {bad}")
+        requested_targets = set(requested)
 
-    if args.target_kinds:
-        requested_target_kinds = [str(v).strip().lower() for v in args.target_kinds if str(v).strip()]
-        bad_target_kinds = sorted(set(requested_target_kinds) - set(enabled_target_kinds))
-        if bad_target_kinds:
-            raise ValueError(f"Requested target kinds not enabled in config induced_trf.target_kinds: {bad_target_kinds}")
-        target_kinds = [k for k in enabled_target_kinds if k in set(requested_target_kinds)]
-    else:
-        target_kinds = enabled_target_kinds
+    targets = [target for target in enabled_targets if requested_targets is None or target in requested_targets]
 
-    for target_kind in target_kinds:
-        bands_for_kind = list(cfg_ind.bands_for_target_kind(target_kind))
-        if requested_bands is not None:
-            bands_for_kind = [b for b in bands_for_kind if b in requested_bands]
-        for band in bands_for_kind:
-            for dyad_id, subject in pairs:
-                out_path = write_subject_output(
-                    cfg=resolved,
-                    out_dir=out_dir,
-                    dyad_id=dyad_id,
-                    subject=subject,
-                    band=band,
-                    target_kind=target_kind,
-                )
-                LOGGER.info("Wrote induced TRF subject scores: %s", out_path)
+    for target in targets:
+        for dyad_id, subject in pairs:
+            out_path = write_subject_output(
+                cfg=resolved,
+                out_dir=out_dir,
+                dyad_id=dyad_id,
+                subject=subject,
+                target=target,
+            )
+            LOGGER.info("Wrote induced TRF subject scores: %s", out_path)
 
     if args.done_file:
         done = Path(args.done_file)
