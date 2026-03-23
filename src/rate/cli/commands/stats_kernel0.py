@@ -32,6 +32,7 @@ _MODEL_TEMPLATE_CANDIDATES = [
     "other_rate",
     "alignment",
     "convergence",
+    "mean_rate",
     "self_rate_sq",
     "other_rate_sq",
     "alignment_sq",
