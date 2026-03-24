@@ -1,4 +1,3 @@
-OUT_DIR = COMPUTE_OUT_DIR
 META_DIR = f"{OUT_DIR}/_meta"
 
 

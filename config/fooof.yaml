@@ -1,13 +1,9 @@
-fooof_sliding:
+fooof:
+  enabled: true
+  mode: "sliding_mass_univariate"
+  freq_range_hz: [1.0, 40.0]
   window_s: 1.0
-  fit_range_hz: [3.0, 30.0]
-  edge_drop: "half_window"
-  spectrum_method: "multitaper"  # welch | multitaper
-  welch_overlap: 0.5
-  multitaper_bandwidth_hz:
-  multitaper_adaptive: false
-  multitaper_low_bias: true
-  aperiodic_mode: "fixed"
-  max_n_peaks: 6
-  peak_width_limits_hz: [1.0, 8.0]
-  min_peak_height: 0.01
+  step_s: 0.25
+  features:
+    periodic: ["theta_power", "alpha_power"]
+    aperiodic: ["offset", "exponent"]

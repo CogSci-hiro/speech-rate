@@ -1,72 +1,11 @@
-# Visualization-only config (loaded manually in workflow/Snakefile)
-# Keeping this separate prevents figure-only edits from retriggering compute rules.
-paths:
-  out_dir: "/Volumes/work-4T/speech-rate-refactoring"
-
 viz:
-  significance:
-    p_value_threshold: 0.05
-
-reporting:
-  alpha: 0.01
-  tables_format: "csv"  # csv | parquet
-  trf:
-    regressors:
-      - "self_onset_impulse"
-      - "other_offset_impulse"
-      - "self_rate"
-      - "other_rate"
-      - "alignment"
-      - "convergence"
-      - "mean_rate"
-      - "mean_rate * alignment"
-      - "mean_rate * convergence"
-    electrodes: ["Fz", "Pz"]
-    # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
-    # Global for all regressors:
-    # joint_times_s: [-0.10, 0.00, 0.10]
-    # Per regressor ("default" optional fallback):
-    joint_times_s:
-       default: [-0.50, 0.00, 0.20]
-    #   self_rate: [-0.12, -0.02, 0.08]
-    #   other_rate: [-0.08, 0.04, 0.16]
-  fooof:
-    psd_quantiles: 5
-    psd_xlim_hz: [2.0, 30.0]
-    psd_log_y: true
-
-# Keep induced band metadata local to viz config so figure rule expansion does not
-# depend on the tracked compute config.
-induced_trf:
-  targets: ["theta", "alpha", "offset", "exponent"]
-  bands: ["theta", "alpha"]
-  target_kinds: ["residual"]
-  residual_bands: ["theta", "alpha"]
-  bands_hz:
-    theta: [4.0, 7.0]
-    alpha: [8.0, 12.0]
-
-# Phase 1 modular duplicate from config/config.yaml.
-# Kept under a non-active key to avoid changing current pipeline behavior.
-phase1_master_viz_copy:
-  reporting:
-    alpha: 0.05
-
-    trf:
-
-      regressors: ["self_rate", "other_rate", "alignment", "convergence"]
-      electrodes: ["Fz", "Pz"]
-      # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
-      # Global for all regressors:
-      # joint_times_s: [-0.10, 0.00, 0.10]
-      # Per regressor ("default" optional fallback):
-      # joint_times_s:
-      #   default: [-0.10, 0.00, 0.10]
-      #   self_rate: [-0.12, -0.02, 0.08]
-      #   other_rate: [-0.08, 0.04, 0.16]
-
-    tables_format: "csv"         # csv | parquet
-
-    figures:
-      formats: ["png", "tiff"]
-      dpi: 300
+  formats: ["png", "pdf"]
+  dpi: 300
+  style: "default"
+  qc:
+    enabled: true
+  figures:
+    glm:
+      contrasts: ["speech_rate"]
+    fooof:
+      features: ["offset", "exponent", "theta_power", "alpha_power"]

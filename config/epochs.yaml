@@ -1,0 +1,11 @@
+epochs:
+  event_column: "event_onset_s"
+  metadata_source: "Epochs.metadata"
+  tmin_s: -0.5
+  tmax_s: 1.0
+  baseline:
+    start_s: -0.2
+    end_s: 0.0
+  eligibility:
+    require_metadata: true
+    include_columns: ["trial_type", "speech_rate"]

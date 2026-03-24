@@ -1,20 +1,5 @@
-from .config import ClusterMethod, StatsConfig
+"""Thin wrappers around group-level statistics utilities."""
 
-__all__ = [
-    "ClusterMethod",
-    "StatsConfig",
-    "TwoLevelClusterResult",
-    "run_two_level_kernel0",
-]
+from rate.stats.mne_cluster import run_cluster_permutation
 
-
-def __getattr__(name: str):
-    if name in {"TwoLevelClusterResult", "run_two_level_kernel0"}:
-        from .two_level import TwoLevelClusterResult, run_two_level_kernel0
-
-        exports = {
-            "TwoLevelClusterResult": TwoLevelClusterResult,
-            "run_two_level_kernel0": run_two_level_kernel0,
-        }
-        return exports[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = ["run_cluster_permutation"]

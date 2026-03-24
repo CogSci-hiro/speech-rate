@@ -1,94 +1,23 @@
-# ============================================================
-# speech-rate — Master Configuration
-# ============================================================
-
 project:
   name: "speech-rate"
-  version: "v1"
+  version: "mass-univariate-scaffold"
   random_seed: 1234
 
-# ============================================================
-# Debug (optional developer throttle)
-# ============================================================
-# When enabled, bulk commands only process the first N file-like units
-# (typically unique dyad/subject/run rows from the dataset index).
 debug:
   enabled: false
   max_files: 2
 
-# ============================================================
-# PATHS
-# ============================================================
 paths:
-  out_dir: "/Volumes/work-4T/speech-rate-refactoring"
-  bids_dir: "/Volumes/work-4T/hyperscanning-bids"
-  eeg_dir: "/Volumes/work-4T/hyperscanning-testing/derived/eeg/filtered"
-  annotations_dir: "/Users/hiro/PycharmProjects/hyperscanning-working/data/annotations"
+  out_dir: "/Users/hiro/Datasets/working/speech-rate-refactoring"
+  bids_dir: "/Users/hiro/Datasets/hyperscanning-bids"
+  eeg_dir: "/Users/hiro/Datasets/Miscellaneous/hyperscanning-testing/derived/eeg/filtered"
+  annotations_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/annotations"
 
-# ============================================================
-# TRF SAMPLING
-# ============================================================
-# Sampling rates are configured independently in each compute branch:
-#   evoked_trf.downsample_hz
-#   induced_trf.downsample_hz
-
-
-# ============================================================
-# DATASET
-# ============================================================
-
-dataset:
-  tasks: ["conversation"]
-  runs: [1, 2, 3, 4, 5, 6, 7, 8]
-
-  # ---------------------------------------
-  # Explicit exclusions
-  # ---------------------------------------
-  exclude:
-
-    # A) Entire subject (all runs)
-    subjects:
-      - subject_id: "sub-003"
-        reason: "bad electrode placement"
-      - subject_id: "sub-032"
-        reason: "no signal (flat)"
-
-    # B) Specific run of a specific subject
-    subject_runs:
-      - subject_id: "sub-004"
-        run: 1
-        reason: "no audio"
-      - subject_id: "sub-004"
-        run: 2
-        reason: "no audio"
-      - subject_id: "sub-015"
-        run: 3
-        reason: "???"
-
-    # C) Entire dyad (all runs)
-    dyads:
-      - dyad_id: "dyad-001"
-        reason: "32 electrodes"
-
-    # D) Specific run of a dyad (both participants)
-    dyad_runs:
-      - dyad_id: "dyad-014"
-        run: 8
-        reason: "no EEG data"
-
-
-# ============================================================
-# EVENTS (Canonical Event Table)
-# ============================================================
-
-events:
-  ipu_min_duration_s: 0.30
-  ipu_min_syllables: 3
-
-  time_within_run:
-    normalize: true
-    method: "minmax_0_1"   # implemented as t_onset / T_run
-
-  matching:
-    absdiff_window_s: 1.0
-    time_lock: "onset"
+# Main entry-point config.
+# Analysis sections are merged from sibling modular files:
+#   dataset.yaml
+#   preprocessing.yaml
+#   epochs.yaml
+#   glm.yaml
+#   fooof.yaml
+#   lmeeeg.yaml

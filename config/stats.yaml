@@ -1,33 +1,10 @@
-# Stats-only config (loaded manually in workflow/Snakefile)
-# Keeping this separate prevents inference/reporting tweaks from retriggering compute rules.
-paths:
-  out_dir: "/Volumes/work-4T/speech-rate-refactoring"
-
-reporting:
-  tables_format: "csv"  # csv | parquet
-
-# Keep induced band metadata local to stats config so stats rule expansion does not
-# depend on the tracked compute config.
-induced_trf:
-  targets: ["theta", "alpha", "offset", "exponent"]
-  bands: ["theta", "alpha"]
-  target_kinds: ["residual"]
-  # Optional: restrict residual induced analyses to this subset; [] disables residual analyses.
-  residual_bands: ["theta", "alpha"]
-  bands_hz:
-    theta: [4.0, 7.0]
-    alpha: [8.0, 12.0]
-
 stats:
-  kernel_cluster:
-    method: "tfce"   # tfce | threshold
-    allow_placeholder_outputs: false  # debug-only; when true writes zero-filled fallback outputs on failure
-    n_permutations: 1000
-    seed: 42
-    threshold_p: 0.05  # Only used if method = threshold
-    tfce:
-      start: 0.0
-      step: 0.01
-    tail: 0
-    adjacency:
-      montage_name: "biosemi64"
+  method: "mne_cluster"
+  n_permutations: 1024
+  cluster_forming_alpha: 0.05
+  tail: 0
+  adjacency: "mne_default"
+  outputs:
+    glm: "stats/glm_group_stats.json"
+    fooof_mass: "stats/fooof_mass_group_stats.json"
+    lmeeeg: "stats/lmeeeg_group_stats.json"

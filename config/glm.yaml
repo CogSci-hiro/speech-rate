@@ -1,0 +1,10 @@
+glm:
+  family: "mass_univariate"
+  regressors:
+    - "speech_rate"
+    - "speaker_role"
+  formulas:
+    subject_level: "signal ~ speech_rate + speaker_role"
+  contrasts:
+    - name: "speech_rate"
+      vector: [0, 1, 0]

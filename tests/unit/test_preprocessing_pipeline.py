@@ -1,0 +1,138 @@
+import json
+import os
+from pathlib import Path
+
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+
+import mne
+import numpy as np
+import pandas as pd
+import pytest
+
+from rate.preprocessing.bad_channels import load_bad_channels_from_bids_tsv
+from rate.preprocessing.pipeline import preprocess_run
+
+
+def _make_raw() -> mne.io.RawArray:
+    sfreq = 200.0
+    channel_names = ["Fz", "Cz", "Pz", "Oz", "EMG1", "MISC1"]
+    channel_types = ["eeg", "eeg", "eeg", "eeg", "emg", "misc"]
+    info = mne.create_info(ch_names=channel_names, sfreq=sfreq, ch_types=channel_types)
+    rng = np.random.default_rng(7)
+    data = rng.normal(scale=1e-6, size=(len(channel_names), int(sfreq * 2.0)))
+    raw = mne.io.RawArray(data, info, verbose="ERROR")
+    raw.set_annotations(mne.Annotations(onset=[0.5], duration=[0.0], description=["stim/a"]))
+    return raw
+
+
+def _write_channels_tsv(path: Path, *, bad_names: list[str]) -> None:
+    table = pd.DataFrame(
+        {
+            "name": ["Fz", "Cz", "Pz", "Oz", "EMG1"],
+            "type": ["EEG", "EEG", "EEG", "EEG", "EMG"],
+            "status": ["bad" if name in bad_names else "good" for name in ["Fz", "Cz", "Pz", "Oz", "EMG1"]],
+        }
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(path, sep="\t", index=False)
+
+
+def _config(tmp_path: Path) -> dict:
+    return {
+        "paths": {
+            "out_dir": str(tmp_path / "out"),
+            "bids_dir": str(tmp_path / "bids"),
+            "eeg_dir": str(tmp_path / "eeg"),
+            "annotations_dir": str(tmp_path / "annotations"),
+        },
+        "preprocessing": {
+            "channels": {
+                "emg_names": ["EMG1"],
+                "emg_patterns": [],
+                "drop_names": ["MISC1"],
+            },
+            "montage": {"name": "standard_1020", "on_missing": "ignore"},
+            "events": {},
+            "downsample": {"sfreq_hz": 100.0},
+            "filter": {"l_freq_hz": 1.0, "h_freq_hz": 40.0},
+            "bad_channels": {},
+            "ica": {},
+            "output": {
+                "eeg_filename": "eeg_preprocessed_raw.fif",
+                "emg_filename": "emg.npz",
+                "events_filename": "events.tsv",
+                "summary_filename": "preprocessing_summary.json",
+            },
+        },
+    }
+
+
+def test_preprocess_run_writes_eeg_emg_events_and_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = _make_raw()
+    raw_path = tmp_path / "input_raw.fif"
+    raw.save(raw_path, overwrite=True, verbose="ERROR")
+
+    channels_tsv_path = tmp_path / "sub-001_task-conversation_run-01_channels.tsv"
+    _write_channels_tsv(channels_tsv_path, bad_names=["Fz"])
+
+    eeg_output_path = tmp_path / "out" / "eeg_preprocessed_raw.fif"
+    emg_output_path = tmp_path / "out" / "emg.npz"
+    events_output_path = tmp_path / "out" / "events.tsv"
+    summary_output_path = tmp_path / "out" / "preprocessing_summary.json"
+
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "eeg_path": str(raw_path),
+    }
+
+    monkeypatch.setattr("rate.preprocessing.pipeline.apply_precomputed_ica", lambda raw, path: None)
+
+    preprocess_run(
+        _config(tmp_path),
+        row,
+        raw_eeg_path=raw_path,
+        channels_tsv_path=channels_tsv_path,
+        ica_path=tmp_path / "precomputed-ica.fif",
+        eeg_output_path=eeg_output_path,
+        emg_output_path=emg_output_path,
+        events_output_path=events_output_path,
+        summary_output_path=summary_output_path,
+    )
+
+    eeg_raw = mne.io.read_raw_fif(eeg_output_path, preload=False, verbose="ERROR")
+    assert eeg_raw.ch_names == ["Fz", "Cz", "Pz", "Oz"]
+    assert eeg_raw.get_channel_types() == ["eeg", "eeg", "eeg", "eeg"]
+    assert eeg_raw.info["sfreq"] == pytest.approx(100.0)
+
+    emg_payload = np.load(emg_output_path, allow_pickle=False)
+    assert list(emg_payload["channel_names"]) == ["EMG1"]
+
+    events_df = pd.read_csv(events_output_path, sep="\t")
+    assert len(events_df) == 1
+    assert {"sample", "time_s", "previous", "event_id"}.issubset(events_df.columns)
+
+    summary = json.loads(summary_output_path.read_text(encoding="utf-8"))
+    assert summary["subject_id"] == "sub-001"
+    assert "MISC1" in summary["dropped_channels"]
+    assert summary["emg_channels"] == ["EMG1"]
+
+
+def test_load_bad_channels_from_bids_tsv_warns_on_partial_name_mismatch(tmp_path: Path) -> None:
+    raw = _make_raw().pick(["Fz", "Cz", "Pz", "Oz"])
+    channels_tsv_path = tmp_path / "channels.tsv"
+    table = pd.DataFrame(
+        {
+            "name": ["Fz", "NotAChannel"],
+            "status": ["bad", "bad"],
+        }
+    )
+    table.to_csv(channels_tsv_path, sep="\t", index=False)
+
+    with pytest.warns(RuntimeWarning):
+        bads = load_bad_channels_from_bids_tsv(channels_tsv_path, raw=raw)
+
+    assert bads == ["Fz"]
+    assert raw.info["bads"] == ["Fz"]

@@ -1,0 +1,8 @@
+lmeeeg:
+  enabled: false
+  random_effects:
+    - "(1 | subject_id)"
+    - "(1 | item_id)"
+  fixed_effects:
+    - "speech_rate"
+  trial_table_name: "lmeeeg_trials"

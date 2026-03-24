@@ -1,4 +1,6 @@
-"""Configuration loading, defaulting, and schema validation."""
+"""Configuration loading, modular merging, defaulting, and schema validation."""
+
+from __future__ import annotations
 
 import copy
 import json
@@ -12,20 +14,16 @@ from jsonschema import Draft202012Validator
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_LOGS_SUBDIR = "logs"
-DEFAULT_IPU_MIN_DURATION_S = 0.30
-DEFAULT_IPU_MIN_SYLLABLES = 3
-DEFAULT_TIME_WITHIN_RUN_NORMALIZE = True
-DEFAULT_TIME_WITHIN_RUN_METHOD = "run_duration"
-DEFAULT_MATCHING_ABSDIFF_WINDOW_S = 1.0
-DEFAULT_MATCHING_TIME_LOCK = "onset"
 DEFAULT_DEBUG_ENABLED = False
 DEFAULT_DEBUG_MAX_FILES: int | None = None
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config" / "schema.json"
 MODULAR_COMPUTE_FILES = {
-    "emg": "emg.yaml",
-    "evoked_trf": "evoked_trf.yaml",
-    "induced_trf": "induced_trf.yaml",
+    "dataset": "dataset.yaml",
+    "preprocessing": "preprocessing.yaml",
+    "epochs": "epochs.yaml",
+    "glm": "glm.yaml",
     "fooof": "fooof.yaml",
+    "lmeeeg": "lmeeeg.yaml",
 }
 
 
@@ -34,18 +32,7 @@ class ConfigValidationError(RuntimeError):
 
 
 def load_yaml_config(config_path: Path | str) -> dict[str, Any]:
-    """Load YAML config from disk.
-
-    Parameters
-    ----------
-    config_path
-        YAML config file path.
-
-    Returns
-    -------
-    dict[str, Any]
-        Parsed config dictionary.
-    """
+    """Load a YAML config mapping from disk."""
     path = Path(config_path)
     try:
         text = path.read_text(encoding="utf-8")
@@ -59,87 +46,49 @@ def load_yaml_config(config_path: Path | str) -> dict[str, Any]:
 
     if payload is None:
         payload = {}
-
     if not isinstance(payload, dict):
         raise ConfigValidationError(f"Config root must be a mapping: {path}")
-
     return payload
 
 
 def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
-    out: dict[str, Any] = dict(base)
+    merged: dict[str, Any] = dict(base)
     for key, value in override.items():
-        if key in out and isinstance(out[key], Mapping) and isinstance(value, Mapping):
-            out[key] = _deep_merge(out[key], value)
+        if key in merged and isinstance(merged[key], Mapping) and isinstance(value, Mapping):
+            merged[key] = _deep_merge(merged[key], value)
         else:
-            out[key] = value
-    return out
+            merged[key] = value
+    return merged
 
 
-def _maybe_attach_modular_compute_sections(
+def _maybe_attach_modular_sections(
     raw_config: Mapping[str, Any],
     *,
     config_path: Path | str,
 ) -> dict[str, Any]:
-    """Attach modular compute sections when loading the base `config/config.yaml`.
-
-    This keeps CLI commands schema-valid after the monolithic `compute.yaml` is retired.
-    Only compute-layer sections are attached here; stats/viz remain separate.
-    """
+    """Attach sibling modular sections when loading ``config/config.yaml``."""
     path = Path(config_path)
-    out: dict[str, Any] = dict(raw_config)
+    resolved = dict(raw_config)
     if path.name != "config.yaml":
-        return out
+        return resolved
 
-    parent = path.parent
-    for section_key, filename in MODULAR_COMPUTE_FILES.items():
-        modular_path = parent / filename
+    for section_name, filename in MODULAR_COMPUTE_FILES.items():
+        modular_path = path.parent / filename
         if not modular_path.exists():
             continue
         modular_payload = load_yaml_config(modular_path)
-        sibling_defaults = {key: value for key, value in modular_payload.items() if key != section_key}
-        if sibling_defaults:
-            # Let modular files contribute shared top-level defaults, while
-            # keeping any values already defined in config.yaml authoritative.
-            out = _deep_merge(sibling_defaults, out)
-        if section_key in out:
-            continue
-        if section_key in modular_payload:
-            out[section_key] = modular_payload[section_key]
-    return out
-
-
-def _require_section_downsample_hz(cfg: Mapping[str, Any], *, section_name: str) -> float:
-    section = cfg.get(str(section_name), {})
-    if isinstance(section, Mapping) and "downsample_hz" in section:
-        return float(section["downsample_hz"])
-    raise ConfigValidationError(f"Missing {section_name}.downsample_hz.")
-
-
-def get_evoked_downsample_hz(cfg: Mapping[str, Any]) -> float:
-    """Return the evoked-TRF sampling/downsample frequency in Hz."""
-    return _require_section_downsample_hz(cfg, section_name="evoked_trf")
-
-
-def get_induced_downsample_hz(cfg: Mapping[str, Any]) -> float:
-    """Return the induced-TRF sampling/downsample frequency in Hz."""
-    return _require_section_downsample_hz(cfg, section_name="induced_trf")
+        shared_defaults = {key: value for key, value in modular_payload.items() if key != section_name}
+        if shared_defaults:
+            resolved = _deep_merge(shared_defaults, resolved)
+        if section_name not in resolved and section_name in modular_payload:
+            resolved[section_name] = modular_payload[section_name]
+    return resolved
 
 
 def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
-    """Apply SG0 defaults to a config payload.
-
-    Parameters
-    ----------
-    config
-        Raw configuration dictionary.
-
-    Returns
-    -------
-    dict[str, Any]
-        Deep-copied resolved config.
-    """
+    """Apply repository defaults to a config payload."""
     resolved = copy.deepcopy(dict(config))
+
     paths_value = resolved.setdefault("paths", {})
     if not isinstance(paths_value, dict):
         raise ConfigValidationError("`paths` must be a mapping.")
@@ -161,24 +110,10 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
     exclude_value.setdefault("dyads", [])
     exclude_value.setdefault("dyad_runs", [])
 
-    events_value = resolved.setdefault("events", {})
-    if not isinstance(events_value, dict):
-        raise ConfigValidationError("`events` must be a mapping.")
-
-    events_value.setdefault("ipu_min_duration_s", DEFAULT_IPU_MIN_DURATION_S)
-    events_value.setdefault("ipu_min_syllables", DEFAULT_IPU_MIN_SYLLABLES)
-
-    time_value = events_value.setdefault("time_within_run", {})
-    if not isinstance(time_value, dict):
-        raise ConfigValidationError("`events.time_within_run` must be a mapping.")
-    time_value.setdefault("normalize", DEFAULT_TIME_WITHIN_RUN_NORMALIZE)
-    time_value.setdefault("method", DEFAULT_TIME_WITHIN_RUN_METHOD)
-
-    matching_value = events_value.setdefault("matching", {})
-    if not isinstance(matching_value, dict):
-        raise ConfigValidationError("`events.matching` must be a mapping.")
-    matching_value.setdefault("absdiff_window_s", DEFAULT_MATCHING_ABSDIFF_WINDOW_S)
-    matching_value.setdefault("time_lock", DEFAULT_MATCHING_TIME_LOCK)
+    for section_name in ("preprocessing", "epochs", "glm", "fooof", "lmeeeg"):
+        section_value = resolved.setdefault(section_name, {})
+        if not isinstance(section_value, dict):
+            raise ConfigValidationError(f"`{section_name}` must be a mapping.")
 
     debug_value = resolved.setdefault("debug", {})
     if debug_value is None:
@@ -188,6 +123,7 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
         raise ConfigValidationError("`debug` must be a mapping.")
     debug_value.setdefault("enabled", DEFAULT_DEBUG_ENABLED)
     debug_value.setdefault("max_files", DEFAULT_DEBUG_MAX_FILES)
+
     if not isinstance(debug_value.get("enabled"), bool):
         raise ConfigValidationError("`debug.enabled` must be a boolean.")
     max_files = debug_value.get("max_files")
@@ -204,7 +140,7 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _load_schema(schema_path: Path | str) -> dict[str, Any]:
-    """Load JSON schema from disk."""
+    """Load a JSON schema from disk."""
     path = Path(schema_path)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -215,20 +151,7 @@ def _load_schema(schema_path: Path | str) -> dict[str, Any]:
 
 
 def validate_config(config: Mapping[str, Any], schema_path: Path | str = DEFAULT_SCHEMA_PATH) -> None:
-    """Validate config against a Draft 2020-12 JSON schema.
-
-    Parameters
-    ----------
-    config
-        Resolved configuration mapping.
-    schema_path
-        Schema file path.
-
-    Returns
-    -------
-    None
-        Returns when validation succeeds.
-    """
+    """Validate a resolved config against the repository schema."""
     schema = _load_schema(schema_path)
     validator = Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(config), key=lambda err: list(err.path))
@@ -236,35 +159,19 @@ def validate_config(config: Mapping[str, Any], schema_path: Path | str = DEFAULT
         return
 
     details: list[str] = []
-    for err in errors:
-        path = ".".join(str(part) for part in err.path) or "<root>"
-        details.append(f"{path}: {err.message}")
-
-    message = "Config validation failed:\n" + "\n".join(details)
-    raise ConfigValidationError(message)
+    for error in errors:
+        path = ".".join(str(part) for part in error.path) or "<root>"
+        details.append(f"{path}: {error.message}")
+    raise ConfigValidationError("Config validation failed:\n" + "\n".join(details))
 
 
 def load_and_validate_config(
     config_path: Path | str,
     schema_path: Path | str = DEFAULT_SCHEMA_PATH,
 ) -> dict[str, Any]:
-    """Load YAML config, apply defaults, and validate it.
-
-    Parameters
-    ----------
-    config_path
-        YAML config path.
-    schema_path
-        JSON schema path.
-
-    Returns
-    -------
-    dict[str, Any]
-        Resolved and validated config dictionary.
-    """
+    """Load YAML config, merge modular sections, apply defaults, and validate."""
     raw_config = load_yaml_config(config_path)
-    raw_config = _maybe_attach_modular_compute_sections(raw_config, config_path=config_path)
-    resolved_config = apply_config_defaults(raw_config)
-    validate_config(resolved_config, schema_path=schema_path)
-    LOGGER.info("Validated config: %s", config_path)
-    return resolved_config
+    merged = _maybe_attach_modular_sections(raw_config, config_path=config_path)
+    resolved = apply_config_defaults(merged)
+    validate_config(resolved, schema_path=schema_path)
+    return resolved

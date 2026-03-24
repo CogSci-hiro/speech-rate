@@ -1,33 +1,31 @@
 # speech-rate
 
-## Configuration Lifecycle Separation
+This repository now uses Snakemake as the active pipeline core for a new mass-univariate EEG scaffold. The active workflow is organized around dataset indexing, preprocessing, epoching, subject-level modeling, thin group-level stats wrappers, and figure generation.
 
-This repository separates configuration into lifecycle layers so small edits do not
-trigger unnecessary recomputation.
+## Active Workflow
 
-### Layers
+- Main config entry point: `config/config.yaml`
+- Modular analysis configs: `config/dataset.yaml`, `config/preprocessing.yaml`, `config/epochs.yaml`, `config/glm.yaml`, `config/fooof.yaml`, `config/lmeeeg.yaml`, `config/stats.yaml`, `config/viz.yaml`
+- CLI entry point: `src/rate/cli/main.py`
+- Snakemake entry point: `workflow/Snakefile`
 
-- Compute layer (heavy rules): `config/config.yaml` plus compute-related modular configs
-  (`config/evoked_trf.yaml`, `config/induced_trf.yaml`, `config/fooof.yaml`).
-- Inference layer (stats rules): `config/stats.yaml`
-- Visualization layer (figure rules): `config/viz.yaml`
+The current scaffold is intentionally light. Commands and rules create valid placeholder outputs so the repository structure, import graph, and pipeline orchestration are ready for later implementation.
 
-### Edit Impact
+## Analysis Directions
 
-- Editing `config/viz.yaml` should affect figures only.
-- Editing `config/stats.yaml` should affect inference/stats outputs only.
-- Editing compute configs should affect compute outputs (and downstream stats/figures).
+- ERP/fMRI-style mass-univariate regression on eligible epochs
+- Sliding-window FOOOF feature extraction followed by subject-level regression
+- Optional `lmeEEG` trial preparation and group-level inference
 
-### Hard Boundary Rules
+## Legacy TRF Code
 
-- Compute rules must not depend on `config/stats.yaml` or `config/viz.yaml`.
-- Stats rules must not depend on `config/viz.yaml`.
-- Figure rules depend on `config/viz.yaml` plus frozen stats outputs.
-- Rule files must not read the global Snakemake `config` dict directly.
+TRF-era analysis code has been quarantined under `legacy/trf/`. It is preserved for reference, but it is no longer part of the active CLI registration or active Snakemake include path.
 
-### Why Full-Config Passing Is Forbidden
+## Pipeline Shape
 
-Passing a full config object (or routing unrelated config files into a rule) causes
-accidental cross-layer coupling. In Snakemake, that can make unrelated config edits
-appear as rule changes and trigger expensive recomputation. Rules should pass only
-the config file or parameters that are relevant to that rule's lifecycle layer.
+1. Build the dataset index.
+2. Run preprocessing placeholders for the active scaffold.
+3. Build epochs and mark eligibility through metadata-aware modules.
+4. Fit subject-level GLM or feature-extraction stages.
+5. Run thin group-level stats wrappers.
+6. Generate figure manifests for downstream visualization work.

@@ -1,17 +1,6 @@
-# =============================================================================
-#                                   CLI
-# =============================================================================
-#
-# Entry point for the `rate` command-line interface.
-#
-# Thin dispatcher:
-# - parse global + subcommand arguments
-# - load project config once when required
-# - call a single command module per subcommand
-#
-# Scientific logic should live in `rate.*`, not here.
-#
-# =============================================================================
+"""Entry point for the repository CLI."""
+
+from __future__ import annotations
 
 import argparse
 import importlib
@@ -28,27 +17,16 @@ _COMMANDS = {
     "validate-config": "rate.cli.commands.validate_config",
     "write-manifest": "rate.cli.commands.write_manifest",
     "dataset-index": "rate.cli.commands.dataset_index",
-    "dataset-subject-targets": "rate.cli.commands.dataset_subject_targets",
-    "events-table": "rate.cli.commands.events_table",
-    "resample-eeg": "rate.cli.commands.resample_eeg",
-    "compute-emg": "rate.cli.commands.compute_emg",
-    "compute-emg-all": "rate.cli.commands.compute_emg_all",
-    "fooof": "rate.cli.commands.fooof",
-    "evoked-trf-scores": "rate.cli.commands.evoked_trf_scores",
-    "evoked-trf-subject": "rate.cli.commands.evoked_trf_subject",
-    "evoked-trf-subject-all": "rate.cli.commands.evoked_trf_subject_all",
-    "evoked-trf-aggregate": "rate.cli.commands.evoked_trf_aggregate",
-    "evoked-trf-reconstruction-aggregate": "rate.cli.commands.evoked_trf_reconstruction_aggregate",
-    "evoked-trf-similarity-aggregate": "rate.cli.commands.evoked_trf_similarity_aggregate",
-    "induced-trf-subject": "rate.cli.commands.induced_trf_subject",
-    "induced-trf-sliding-fooof-subject": "rate.cli.commands.induced_trf_sliding_fooof_subject",
-    "induced-trf-subject-all": "rate.cli.commands.induced_trf_subject_all",
-    "induced-trf-aggregate": "rate.cli.commands.induced_trf_aggregate",
-    "stats-kernel0": "rate.cli.commands.stats_kernel0",
-    "stats-export-subject-zmaps": "rate.cli.commands.stats_export_subject_zmaps",
-    "clean": "rate.cli.commands.clean",
-    "run-tests": "rate.cli.commands.run_tests",
-    "figures": "rate.cli.commands.figures",
+    "preprocess-subject": "rate.cli.commands.preprocess_subject",
+    "epoch-subject": "rate.cli.commands.epoch_subject",
+    "glm-subject": "rate.cli.commands.glm_subject",
+    "glm-group-stats": "rate.cli.commands.glm_group_stats",
+    "fooof-mass-subject": "rate.cli.commands.fooof_mass_subject",
+    "fooof-mass-group-stats": "rate.cli.commands.fooof_mass_group_stats",
+    "lmeeeg-prepare-trials": "rate.cli.commands.lmeeeg_prepare_trials",
+    "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
+    "figures-glm": "rate.cli.commands.figures_glm",
+    "figures-fooof": "rate.cli.commands.figures_fooof",
 }
 
 
@@ -61,12 +39,8 @@ def _load_command_module(module_path: str) -> object | None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    """Build the top-level CLI parser with subcommands."""
-    parser = argparse.ArgumentParser(
-        prog="rate",
-        description="speech-rate SG0 CLI",
-    )
-
+    """Build the top-level parser with registered subcommands."""
+    parser = argparse.ArgumentParser(prog="rate", description="speech-rate mass-univariate scaffold")
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
     available_commands: dict[str, object] = {}
@@ -85,32 +59,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _load_command_config(args: argparse.Namespace, module: object) -> Mapping[str, Any] | None:
-    """Load validated config for commands that require it."""
+    """Load validated config for commands that require the main config."""
     if not bool(getattr(module, "REQUIRES_CONFIG", False)):
         return None
-
     if not hasattr(args, "config"):
         raise RuntimeError("Internal error: subcommand args missing --config.")
-
-    schema_path = Path(getattr(args, "schema", "config/schema.json"))
-    return load_and_validate_config(Path(args.config), schema_path=schema_path)
+    return load_and_validate_config(Path(args.config), schema_path=Path(getattr(args, "schema", "config/schema.json")))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """CLI entry point."""
+    """Run the CLI."""
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
-    command_name = str(args.command)
     available_commands = getattr(args, "_available_commands", {})
-    module = available_commands.get(command_name)
+    module = available_commands.get(str(args.command))
     if module is None:
-        raise RuntimeError(f"Unknown command: {command_name}")
+        raise RuntimeError(f"Unknown command: {args.command}")
 
     run = getattr(module, "run", None)
     if run is None:
-        raise RuntimeError(f"CLI command module for '{command_name}' is missing run().")
+        raise RuntimeError(f"CLI command module for '{args.command}' is missing run().")
 
     try:
         cfg = _load_command_config(args, module)
