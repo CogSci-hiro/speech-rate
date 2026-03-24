@@ -20,8 +20,13 @@ get_arg <- function(flag) {
   value
 }
 
-fooof_path  <- get_arg("--fooof")
-events_path <- get_arg("--events")
+has_arg <- function(flag) {
+  any(args == flag)
+}
+
+trial_data_path <- if (has_arg("--trial-data")) get_arg("--trial-data") else NA_character_
+fooof_path  <- if (has_arg("--fooof")) get_arg("--fooof") else NA_character_
+events_path <- if (has_arg("--events")) get_arg("--events") else NA_character_
 out_dir     <- get_arg("--out")
 
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -76,17 +81,25 @@ extract_summary_row <- function(test_name, fit_obj, coef_name = NULL) {
 }
 
 # ================================================================
-# Load and merge
+# Load data
 # ================================================================
 
-fooof  <- read.csv(fooof_path,  stringsAsFactors = FALSE)
-events <- read.csv(events_path, stringsAsFactors = FALSE)
+if (!is.na(trial_data_path) && nzchar(trial_data_path)) {
+  df_long <- read.csv(trial_data_path, stringsAsFactors = FALSE)
+} else {
+  if (is.na(fooof_path) || is.na(events_path)) {
+    stop("Provide either --trial-data or both --fooof and --events.")
+  }
 
-df_long <- merge(
-  fooof,
-  events,
-  by = c("dyad_id", "subject_id", "run", "event_id")
-)
+  fooof  <- read.csv(fooof_path,  stringsAsFactors = FALSE)
+  events <- read.csv(events_path, stringsAsFactors = FALSE)
+
+  df_long <- merge(
+    fooof,
+    events,
+    by = c("dyad_id", "subject_id", "run", "event_id")
+  )
+}
 
 df_long$subject_id <- as.factor(df_long$subject_id)
 df_long$run <- as.numeric(df_long$run)
@@ -97,13 +110,20 @@ df_long$duration_s <- as.numeric(df_long$duration_s)
 # A) Behavioural Test
 # ================================================================
 
+summary_rows <- list()
+model_objects <- list()
+
+required_behavior_cols <- c("latency", "other_rate", "run", "time_within_run", "duration_s", "subject_id")
+if (!all(required_behavior_cols %in% colnames(df_long))) {
+  missing_cols <- required_behavior_cols[!(required_behavior_cols %in% colnames(df_long))]
+  stop(paste("trial data missing required behavioral columns:", paste(missing_cols, collapse = ", ")))
+}
+
 fit_latency <- fit_lrt(
   latency ~ run + time_within_run + duration_s + (1 | subject_id),
   latency ~ other_rate + run + time_within_run + duration_s + (1 | subject_id),
   df_long
 )
-
-summary_rows <- list()
 
 summary_rows[[length(summary_rows)+1]] <-
   extract_summary_row(
@@ -111,106 +131,112 @@ summary_rows[[length(summary_rows)+1]] <-
     fit_latency,
     "other_rate"
   )
+model_objects$latency <- fit_latency
 
 # ================================================================
 # Prepare wide neural dataframe
 # ================================================================
 
-neural_vars <- c(
-  "offset", "exponent",
-  "theta_power", "alpha_power", "beta_power"
-)
+if (all(c("roi", "offset", "exponent", "theta_power", "alpha_power", "beta_power", "self_rate") %in% colnames(df_long))) {
+  neural_vars <- c(
+    "offset", "exponent",
+    "theta_power", "alpha_power", "beta_power"
+  )
 
-meta_vars <- c(
-  "subject_id", "run", "event_id",
-  "self_rate", "other_rate",
-  "time_within_run", "duration_s"
-)
+  meta_vars <- c(
+    "subject_id", "run", "event_id",
+    "self_rate", "other_rate",
+    "time_within_run", "duration_s"
+  )
 
-df_neural <- df_long[, c("subject_id","run","event_id","roi", neural_vars)]
-df_meta   <- unique(df_long[, meta_vars])
+  df_neural <- df_long[, c("subject_id","run","event_id","roi", neural_vars)]
+  df_meta   <- unique(df_long[, meta_vars])
 
-df_wide_neural <- reshape(
-  df_neural,
-  idvar = c("subject_id","run","event_id"),
-  timevar = "roi",
-  direction = "wide"
-)
+  df_wide_neural <- reshape(
+    df_neural,
+    idvar = c("subject_id","run","event_id"),
+    timevar = "roi",
+    direction = "wide"
+  )
 
-colnames(df_wide_neural) <- gsub("\\.", "_", colnames(df_wide_neural))
+  colnames(df_wide_neural) <- gsub("\\.", "_", colnames(df_wide_neural))
 
-df_wide <- merge(df_wide_neural, df_meta,
-                 by = c("subject_id","run","event_id"))
+  df_wide <- merge(df_wide_neural, df_meta,
+                   by = c("subject_id","run","event_id"))
 
-# replace missing power with 0
-power_cols <- grep("power_", colnames(df_wide), value = TRUE)
-for (v in power_cols) df_wide[[v]][is.na(df_wide[[v]])] <- 0
+  # replace missing power with 0
+  power_cols <- grep("power_", colnames(df_wide), value = TRUE)
+  for (v in power_cols) df_wide[[v]][is.na(df_wide[[v]])] <- 0
 
-# standardize predictors
-scale_vars <- grep("offset_|exponent_|power_", colnames(df_wide), value = TRUE)
-for (v in scale_vars)
-  df_wide[[v]] <- as.numeric(scale(df_wide[[v]]))
+  # standardize predictors
+  scale_vars <- grep("offset_|exponent_|power_", colnames(df_wide), value = TRUE)
+  for (v in scale_vars)
+    df_wide[[v]] <- as.numeric(scale(df_wide[[v]]))
 
-for (v in scale_vars)
-  df_wide[[paste0(v, "_sq")]] <- df_wide[[v]]^2
+  for (v in scale_vars)
+    df_wide[[paste0(v, "_sq")]] <- df_wide[[v]]^2
 
-df_wide$subject_id <- as.factor(df_wide$subject_id)
+  df_wide$subject_id <- as.factor(df_wide$subject_id)
 
-controls <- c("run","time_within_run","duration_s")
+  controls <- c("run","time_within_run","duration_s")
 
-# ================================================================
-# B) Block Tests
-# ================================================================
+  # ================================================================
+  # B) Block Tests
+  # ================================================================
 
-N_A <- c("offset_ANTERIOR","offset_POSTERIOR",
-         "exponent_ANTERIOR","exponent_POSTERIOR")
+  N_A <- c("offset_ANTERIOR","offset_POSTERIOR",
+           "exponent_ANTERIOR","exponent_POSTERIOR")
 
-N_P <- c("theta_power_ANTERIOR","theta_power_POSTERIOR",
-         "alpha_power_ANTERIOR","alpha_power_POSTERIOR",
-         "beta_power_ANTERIOR","beta_power_POSTERIOR")
+  N_P <- c("theta_power_ANTERIOR","theta_power_POSTERIOR",
+           "alpha_power_ANTERIOR","alpha_power_POSTERIOR",
+           "beta_power_ANTERIOR","beta_power_POSTERIOR")
 
-fit_block_A <- fit_lrt(
-  as.formula(paste("self_rate ~", paste(controls, collapse="+"),
-                   "+ (1|subject_id)")),
-  as.formula(paste("self_rate ~",
-                   paste(c(N_A, controls), collapse="+"),
-                   "+ (1|subject_id)")),
-  df_wide
-)
+  fit_block_A <- fit_lrt(
+    as.formula(paste("self_rate ~", paste(controls, collapse="+"),
+                     "+ (1|subject_id)")),
+    as.formula(paste("self_rate ~",
+                     paste(c(N_A, controls), collapse="+"),
+                     "+ (1|subject_id)")),
+    df_wide
+  )
 
-summary_rows[[length(summary_rows)+1]] <-
-  extract_summary_row("block_aperiodic", fit_block_A)
+  summary_rows[[length(summary_rows)+1]] <-
+    extract_summary_row("block_aperiodic", fit_block_A)
+  model_objects$block_A <- fit_block_A
 
-fit_block_P <- fit_lrt(
-  as.formula(paste("self_rate ~", paste(controls, collapse="+"),
-                   "+ (1|subject_id)")),
-  as.formula(paste("self_rate ~",
-                   paste(c(N_P, controls), collapse="+"),
-                   "+ (1|subject_id)")),
-  df_wide
-)
+  fit_block_P <- fit_lrt(
+    as.formula(paste("self_rate ~", paste(controls, collapse="+"),
+                     "+ (1|subject_id)")),
+    as.formula(paste("self_rate ~",
+                     paste(c(N_P, controls), collapse="+"),
+                     "+ (1|subject_id)")),
+    df_wide
+  )
 
-summary_rows[[length(summary_rows)+1]] <-
-  extract_summary_row("block_periodic", fit_block_P)
+  summary_rows[[length(summary_rows)+1]] <-
+    extract_summary_row("block_periodic", fit_block_P)
+  model_objects$block_P <- fit_block_P
 
-# ================================================================
-# C) Quadratic Test (Aperiodic only shown)
-# ================================================================
+  # ================================================================
+  # C) Quadratic Test (Aperiodic only shown)
+  # ================================================================
 
-N_A_sq <- paste0(N_A, "_sq")
+  N_A_sq <- paste0(N_A, "_sq")
 
-fit_quad_A <- fit_lrt(
-  as.formula(paste("self_rate ~",
-                   paste(c(N_A, controls), collapse="+"),
-                   "+ (1|subject_id)")),
-  as.formula(paste("self_rate ~",
-                   paste(c(N_A, N_A_sq, controls), collapse="+"),
-                   "+ (1|subject_id)")),
-  df_wide
-)
+  fit_quad_A <- fit_lrt(
+    as.formula(paste("self_rate ~",
+                     paste(c(N_A, controls), collapse="+"),
+                     "+ (1|subject_id)")),
+    as.formula(paste("self_rate ~",
+                     paste(c(N_A, N_A_sq, controls), collapse="+"),
+                     "+ (1|subject_id)")),
+    df_wide
+  )
 
-summary_rows[[length(summary_rows)+1]] <-
-  extract_summary_row("quad_aperiodic", fit_quad_A)
+  summary_rows[[length(summary_rows)+1]] <-
+    extract_summary_row("quad_aperiodic", fit_quad_A)
+  model_objects$quad_A <- fit_quad_A
+}
 
 # ================================================================
 # Save results
@@ -225,12 +251,7 @@ write.csv(
 )
 
 saveRDS(
-  list(
-    latency = fit_latency,
-    block_A = fit_block_A,
-    block_P = fit_block_P,
-    quad_A  = fit_quad_A
-  ),
+  model_objects,
   file = file.path(out_dir, "full_models.rds")
 )
 

@@ -202,6 +202,10 @@ def _active_evoked_models(branch_cfg):
 EMG_ONSET_EVOKED_TARGET = (
     f"{_stats_out_dir()}/features/emg/grand_average_emg_self_onset-ave.fif"
 )
+LMM_RESULTS_DIR = f"{_stats_out_dir()}/stats/lmm"
+LMM_SUMMARY_TARGET = f"{LMM_RESULTS_DIR}/summary.csv"
+LMM_MODELS_TARGET = f"{LMM_RESULTS_DIR}/full_models.rds"
+LMM_TRIAL_DATA_TARGET = f"{LMM_RESULTS_DIR}/trial_data.csv"
 
 rule stats_kernel0:
     input:
@@ -299,3 +303,37 @@ rule stats_evoked_emg_onset_by_subject_emg:
 rule stats_evoked_emg_onset:
     input:
         EMG_ONSET_EVOKED_TARGET
+
+
+rule lmm_trial_data:
+    input:
+        events_parquet=f"{COMPUTE_OUT_DIR}/events/events.parquet",
+    output:
+        trial_data=LMM_TRIAL_DATA_TARGET,
+    shell:
+        r"""
+        python -c "from pathlib import Path; import pandas as pd; in_path=Path(r'{input.events_parquet}'); out_path=Path(r'{output.trial_data}'); out_path.parent.mkdir(parents=True, exist_ok=True); cols=['dyad_id','subject_id','run','event_id','t_onset','t_offset','speaker','listener','self_rate','other_rate','latency','alignment','convergence','self_rate_sq','other_rate_sq','alignment_sq','convergence_sq','time_within_run','task','duration_s','syllables','annotations_path']; df=pd.read_parquet(in_path); keep=[c for c in cols if c in df.columns]; df.loc[:, keep].to_csv(out_path, index=False)"
+        """
+
+
+rule lmm_results:
+    input:
+        trial_data=LMM_TRIAL_DATA_TARGET,
+    output:
+        summary=LMM_SUMMARY_TARGET,
+        full_models=LMM_MODELS_TARGET,
+    shell:
+        r"""
+        if ! command -v Rscript >/dev/null 2>&1; then
+            echo "Rscript not found on PATH. Install R or add Rscript to PATH before running lmm_results_all." >&2
+            exit 127
+        fi
+        Rscript workflow/scripts/fit_lmm.R \
+            --trial-data {input.trial_data} \
+            --out {LMM_RESULTS_DIR}
+        """
+
+
+rule lmm_results_all:
+    input:
+        LMM_SUMMARY_TARGET

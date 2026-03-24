@@ -20,6 +20,7 @@ reporting:
       - "convergence"
       - "mean_rate"
       - "mean_rate * alignment"
+      - "mean_rate * convergence"
     electrodes: ["Fz", "Pz"]
     # Optional fixed topomap times (seconds) for joint plots; omit to use auto-selected times.
     # Global for all regressors:
