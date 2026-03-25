@@ -3,11 +3,11 @@ epochs:
   time_origin: "raw_start"
   event_id_column: "event_id"
   metadata_source: "Epochs.metadata"
-  tmin_s: -0.5
-  tmax_s: 1.0
+  tmin_s: -2.0
+  tmax_s: 0.5
   baseline:
-    start_s: -0.2
-    end_s: 0.0
+    start_s: -2.0
+    end_s: 0.5
   preload: true
   on_out_of_bounds: "drop"
   metadata_columns: []

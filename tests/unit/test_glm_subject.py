@@ -77,16 +77,24 @@ def test_fit_subject_glm_recovers_known_betas_with_design_row_filtering() -> Non
 def test_glm_subject_cli_writes_subject_level_outputs(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _glm_config(out_dir)
-    row = {
+    row_run_1 = {
         "dyad_id": "dyad-001",
         "subject_id": "sub-001",
         "task": "conversation",
         "run": "1",
         "status": "ok",
-        "eeg_path": str(tmp_path / "placeholder_raw.fif"),
+        "eeg_path": str(tmp_path / "placeholder_raw_1.fif"),
+    }
+    row_run_2 = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "2",
+        "status": "ok",
+        "eeg_path": str(tmp_path / "placeholder_raw_2.fif"),
     }
 
-    metadata = pd.DataFrame({"speech_rate": [0.0, 1.0, 2.0]})
+    metadata = pd.DataFrame({"speech_rate": [0.0, 1.0, 2.0, 3.0]})
     intercept_map = np.asarray([[1.0, 1.5, 2.0], [0.0, -0.5, -1.0]])
     slope_map = np.asarray([[0.5, 0.25, -0.25], [0.2, 0.1, 0.0]])
     data = np.stack([intercept_map + value * slope_map for value in metadata["speech_rate"]], axis=0)
@@ -97,15 +105,13 @@ def test_glm_subject_cli_writes_subject_level_outputs(tmp_path: Path) -> None:
     dataset_index_path = tmp_path / "index.parquet"
     epochs.save(epochs_path, overwrite=True, verbose="ERROR")
     metadata.to_csv(metadata_path, index=False)
-    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
+    write_parquet_dataframe(pd.DataFrame([row_run_1, row_run_2]), dataset_index_path)
 
     args = Namespace(
         config="config/config.yaml",
         schema="config/schema.json",
         dataset_index=str(dataset_index_path),
         subject_id="sub-001",
-        task="conversation",
-        run="1",
         model_name="subject_level",
         epochs_path=str(epochs_path),
         metadata_path=str(metadata_path),
@@ -116,7 +122,13 @@ def test_glm_subject_cli_writes_subject_level_outputs(tmp_path: Path) -> None:
     exit_code = glm_subject.run(args, config=config)
     assert exit_code == 0
 
-    output_paths = build_glm_output_paths(config, row, model_name="subject_level", epochs_path=epochs_path, metadata_path=metadata_path)
+    output_paths = build_glm_output_paths(
+        config,
+        row_run_1,
+        model_name="subject_level",
+        epochs_path=epochs_path,
+        metadata_path=metadata_path,
+    )
     assert output_paths.summary_output_path.exists()
     assert output_paths.betas_output_path.exists()
     assert output_paths.predictor_betas_output_path.exists()
@@ -127,9 +139,10 @@ def test_glm_subject_cli_writes_subject_level_outputs(tmp_path: Path) -> None:
     predictor_betas = np.load(output_paths.predictor_betas_output_path)
 
     assert summary["status"] == "ok"
-    assert summary["design_matrix_shape"] == [3, 2]
-    assert summary["target_matrix_shape"] == [3, 6]
+    assert summary["design_matrix_shape"] == [4, 2]
+    assert summary["target_matrix_shape"] == [4, 6]
     assert summary["test_predictors"] == ["speech_rate"]
     assert predictor_betas.files == ["speech_rate"]
     assert betas.shape == (2, 2, 3)
     assert np.allclose(betas[1], slope_map)
+    assert output_paths.summary_output_path == out_dir / "glm" / "sub-001" / "subject_level" / "summary.json"

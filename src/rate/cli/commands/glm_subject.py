@@ -23,8 +23,6 @@ def add_subparser(subparsers) -> ArgumentParser:
     add_common_config_arguments(parser)
     parser.add_argument("--dataset-index", help="Optional explicit dataset index parquet path.")
     parser.add_argument("--subject-id", help="Subject identifier.")
-    parser.add_argument("--task", help="Task label.")
-    parser.add_argument("--run", help="Run number.")
     parser.add_argument("--model-name", help="Optional GLM model name. Defaults to all configured models.")
     parser.add_argument("--epochs-path", help="Optional explicit epochs FIF input path.")
     parser.add_argument("--metadata-path", help="Optional explicit metadata CSV input path.")
@@ -46,34 +44,32 @@ def _load_dataset_rows(config: Mapping[str, Any], args: Namespace):
     return read_parquet_dataframe(dataset_index_path)
 
 
-def _select_single_row(config: Mapping[str, Any], args: Namespace) -> Mapping[str, Any]:
-    if not all([args.subject_id, args.task, args.run]):
-        raise ValueError("--subject-id, --task, and --run are required unless --all is used.")
+def _select_single_subject(config: Mapping[str, Any], args: Namespace) -> Mapping[str, Any]:
+    if not args.subject_id:
+        raise ValueError("--subject-id is required unless --all is used.")
 
     index_df = _load_dataset_rows(config, args)
-    mask = (
-        (index_df["subject_id"].astype(str) == str(args.subject_id))
-        & (index_df["task"].astype(str) == str(args.task))
-        & (index_df["run"].astype(str) == str(args.run))
-    )
+    mask = index_df["subject_id"].astype(str) == str(args.subject_id)
     rows = index_df.loc[mask].copy()
     if "status" in rows.columns:
         rows = rows.loc[rows["status"].astype(str).str.lower() == "ok"].copy()
     if rows.empty:
-        raise ValueError(
-            "No runnable dataset-index row found for "
-            f"subject_id={args.subject_id}, task={args.task}, run={args.run}"
-        )
+        raise ValueError(f"No runnable dataset-index rows found for subject_id={args.subject_id}")
+    rows = rows.sort_values(by=["task", "run"]).reset_index(drop=True)
     return rows.iloc[0].to_dict()
 
 
-def _iter_runnable_rows(config: Mapping[str, Any], args: Namespace) -> list[Mapping[str, Any]]:
+def _iter_runnable_subjects(config: Mapping[str, Any], args: Namespace) -> list[Mapping[str, Any]]:
     index_df = _load_dataset_rows(config, args)
     if "status" in index_df.columns:
         index_df = index_df.loc[index_df["status"].astype(str).str.lower() == "ok"].copy()
     required = ["subject_id", "task", "run", "eeg_path"]
     index_df = index_df.dropna(subset=required)
-    return [row._asdict() for row in index_df.itertuples(index=False, name="Row")]
+    index_df = index_df.sort_values(by=["subject_id", "task", "run"]).reset_index(drop=True)
+    unique_rows: dict[str, Mapping[str, Any]] = {}
+    for row in index_df.itertuples(index=False, name="Row"):
+        unique_rows.setdefault(str(row.subject_id), row._asdict())
+    return list(unique_rows.values())
 
 
 def _resolve_model_names(config: Mapping[str, Any], args: Namespace) -> list[str]:
@@ -102,17 +98,13 @@ def _fit_one_run(
     fit_result = fit_subject_glm(epochs, design_result)
     summary = save_glm_result(fit_result, output_paths)
     LOGGER.info(
-        "Wrote GLM outputs for %s task=%s run=%s model=%s -> %s",
+        "Wrote GLM outputs for %s model=%s -> %s",
         row["subject_id"],
-        row["task"],
-        row["run"],
         model_name,
         output_paths.summary_output_path,
     )
     return {
         "subject_id": str(row["subject_id"]),
-        "task": str(row["task"]),
-        "run": str(row["run"]),
         "model_name": model_name,
         "summary_output": str(output_paths.summary_output_path),
         "n_epochs_used": int(summary["n_epochs_used"]),
@@ -124,7 +116,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     try:
         model_names = _resolve_model_names(config, args)
         if args.run_all:
-            rows = _iter_runnable_rows(config, args)
+            rows = _iter_runnable_subjects(config, args)
             summaries = [
                 _fit_one_run(config, row, model_name=model_name)
                 for row in rows
@@ -136,7 +128,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
                 LOGGER.info("Wrote GLM stage marker: %s", args.output)
             return 0
 
-        row = _select_single_row(config, args)
+        row = _select_single_subject(config, args)
         for model_name in model_names:
             _fit_one_run(
                 config,

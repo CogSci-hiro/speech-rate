@@ -20,7 +20,7 @@ from rate.util import write_parquet_dataframe
 
 @dataclass(frozen=True)
 class GLMRunPaths:
-    """Resolved input and output paths for one subject-level GLM run."""
+    """Resolved input and output paths for one subject-level GLM fit."""
 
     epochs_input_path: Path
     metadata_input_path: Path
@@ -53,17 +53,10 @@ def build_glm_output_paths(
     epochs_path: Path | None = None,
     metadata_path: Path | None = None,
 ) -> GLMRunPaths:
-    """Build canonical input and output paths for one GLM run."""
+    """Build canonical input and output paths for one subject-level GLM fit."""
     out_dir = resolve_out_dir(config)
     epoch_paths = build_epoch_output_paths(config, row)
-    model_dir = (
-        out_dir
-        / "glm"
-        / str(row["subject_id"])
-        / f"task-{row['task']}"
-        / f"run-{row['run']}"
-        / _sanitize_model_name(model_name)
-    )
+    model_dir = out_dir / "glm" / str(row["subject_id"]) / _sanitize_model_name(model_name)
     return GLMRunPaths(
         epochs_input_path=epochs_path or epoch_paths.epochs_output_path,
         metadata_input_path=metadata_path or epoch_paths.metadata_output_path,

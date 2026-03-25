@@ -141,7 +141,8 @@ def epochs_stage_inputs(wildcards):
 
 
 def glm_row(wildcards):
-    return epochs_row(wildcards)
+    index_path = _dataset_index_checkpoint_path()
+    return _epochs_subject_map(index_path)[str(wildcards.subject_id)]
 
 
 def glm_paths(wildcards):
@@ -152,7 +153,7 @@ def glm_stage_inputs(wildcards):
     index_path = _dataset_index_checkpoint_path()
     return [
         str(build_glm_output_paths(RESOLVED_CONFIG, row, model_name=model_name).summary_output_path)
-        for row in _epochs_run_map(index_path).values()
+        for row in _epochs_subject_map(index_path).values()
         for model_name in GLM_MODEL_NAMES
     ]
 

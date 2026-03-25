@@ -29,7 +29,7 @@ class ModelSpec:
         Explicit outcome variable. When omitted in config it is inferred from
         the left-hand side of ``formula`` when possible.
     eligibility
-        Name of the inclusion rule to apply before formula evaluation.
+        Inclusion rule configuration to apply before formula evaluation.
     test_predictors
         Predictors or patsy term names that downstream code will test.
     standardize
@@ -46,7 +46,7 @@ class ModelSpec:
     name: str
     formula: str
     outcome: str | None = None
-    eligibility: str | None = None
+    eligibility: str | Mapping[str, Any] | None = None
     test_predictors: tuple[str, ...] = ()
     standardize: tuple[str, ...] = ()
     derived: Mapping[str, str] = field(default_factory=dict)
@@ -158,9 +158,11 @@ def _build_model_spec(*, section: str, model_name: str, model_config: Mapping[st
         raise ModelSpecError(f"Model `{section}.{model_name}` outcome must be a string when provided.")
     outcome = outcome or infer_outcome_from_formula(formula)
 
-    eligibility = model_config.get("eligibility")
-    if eligibility is not None and not isinstance(eligibility, str):
-        raise ModelSpecError(f"Model `{section}.{model_name}` eligibility must be a string when provided.")
+    eligibility = _normalize_eligibility(
+        model_config.get("eligibility"),
+        section=section,
+        model_name=model_name,
+    )
 
     contrast_names = None
     if isinstance(model_config.get("contrasts"), list):
@@ -202,6 +204,49 @@ def _build_model_spec(*, section: str, model_name: str, model_config: Mapping[st
         required_columns=tuple(required_columns),
         config=dict(model_config),
     )
+
+
+def _normalize_eligibility(
+    eligibility: Any,
+    *,
+    section: str,
+    model_name: str,
+) -> str | Mapping[str, Any] | None:
+    if eligibility is None:
+        return None
+    if isinstance(eligibility, str):
+        return eligibility
+    if not isinstance(eligibility, Mapping):
+        raise ModelSpecError(
+            f"Model `{section}.{model_name}` eligibility must be a string or mapping when provided."
+        )
+
+    normalized = dict(eligibility)
+    rule = normalized.get("rule")
+    if rule is not None and not isinstance(rule, str):
+        raise ModelSpecError(f"Model `{section}.{model_name}` eligibility.rule must be a string when provided.")
+
+    for field_name in ("not_null", "expressions"):
+        if field_name not in normalized:
+            continue
+        normalized[field_name] = _normalize_string_list(
+            normalized.get(field_name),
+            field_name=f"eligibility.{field_name}",
+            section=section,
+            model_name=model_name,
+        )
+
+    for field_name in ("min_values", "max_values", "equals"):
+        if field_name not in normalized:
+            continue
+        field_value = normalized.get(field_name)
+        if not isinstance(field_value, Mapping):
+            raise ModelSpecError(
+                f"Model `{section}.{model_name}` eligibility.{field_name} must be a mapping when provided."
+            )
+        normalized[field_name] = dict(field_value)
+
+    return normalized
 
 
 def _normalize_models(section_config: Mapping[str, Any], *, section: str) -> dict[str, Mapping[str, Any]]:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -33,11 +33,23 @@ _ELIGIBILITY_COLUMN_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
 }
 
 
+@dataclass(frozen=True)
+class ResolvedEligibility:
+    """Normalized eligibility configuration."""
+
+    rule_name: str | None
+    not_null: tuple[str, ...]
+    min_values: Mapping[str, float]
+    max_values: Mapping[str, float]
+    equals: Mapping[str, Any]
+    expressions: tuple[str, ...]
+
+
 def apply_eligibility(
     metadata_df: pd.DataFrame,
     model_spec: ModelSpec | None = None,
     *,
-    eligibility: str | None = None,
+    eligibility: str | Mapping[str, Any] | None = None,
     required_columns: Iterable[str] | None = None,
 ) -> EligibilityResult:
     """Apply explicit row-inclusion rules to metadata.
@@ -64,14 +76,14 @@ def apply_eligibility(
         return EligibilityResult(
             row_mask=empty_mask,
             applied_columns=(),
-            rule_name=eligibility or getattr(model_spec, "eligibility", None),
+            rule_name=_resolve_eligibility(model_spec=model_spec, eligibility=eligibility).rule_name,
             n_rows_input=0,
             n_rows_selected=0,
         )
 
-    resolved_rule = eligibility or getattr(model_spec, "eligibility", None)
-    rule_columns = _resolve_rule_columns(metadata_df, resolved_rule)
-    columns_to_check = tuple(dict.fromkeys([*rule_columns, *(required_columns or [])]))
+    resolved = _resolve_eligibility(model_spec=model_spec, eligibility=eligibility)
+    rule_columns = _resolve_rule_columns(metadata_df, resolved.rule_name)
+    columns_to_check = tuple(dict.fromkeys([*rule_columns, *resolved.not_null, *(required_columns or [])]))
     mask = np.ones((len(metadata_df),), dtype=bool)
     if columns_to_check:
         missing_columns = [column for column in columns_to_check if column not in metadata_df.columns]
@@ -80,10 +92,18 @@ def apply_eligibility(
             raise ValueError(f"Eligibility filtering requested missing metadata columns: {missing_text}")
         mask &= metadata_df.loc[:, list(columns_to_check)].notna().all(axis=1).to_numpy(dtype=bool)
 
+    mask &= _apply_numeric_thresholds(
+        metadata_df,
+        min_values=resolved.min_values,
+        max_values=resolved.max_values,
+    )
+    mask &= _apply_equals_filters(metadata_df, resolved.equals)
+    mask &= _apply_expressions(metadata_df, resolved.expressions)
+
     return EligibilityResult(
         row_mask=mask,
         applied_columns=columns_to_check,
-        rule_name=resolved_rule,
+        rule_name=resolved.rule_name,
         n_rows_input=len(metadata_df),
         n_rows_selected=int(mask.sum()),
     )
@@ -106,3 +126,119 @@ def _resolve_rule_columns(metadata_df: pd.DataFrame, rule_name: str | None) -> t
         if matched is not None:
             resolved_columns.append(matched)
     return tuple(resolved_columns)
+
+
+def _resolve_eligibility(
+    *,
+    model_spec: ModelSpec | None,
+    eligibility: str | Mapping[str, Any] | None,
+) -> ResolvedEligibility:
+    raw_value = eligibility if eligibility is not None else getattr(model_spec, "eligibility", None)
+    if raw_value is None:
+        return ResolvedEligibility(
+            rule_name=None,
+            not_null=(),
+            min_values={},
+            max_values={},
+            equals={},
+            expressions=(),
+        )
+    if isinstance(raw_value, str):
+        return ResolvedEligibility(
+            rule_name=raw_value,
+            not_null=(),
+            min_values={},
+            max_values={},
+            equals={},
+            expressions=(),
+        )
+    if not isinstance(raw_value, Mapping):
+        raise ValueError("Eligibility must be a string or mapping.")
+
+    return ResolvedEligibility(
+        rule_name=_coerce_optional_string(raw_value.get("rule"), field_name="eligibility.rule"),
+        not_null=tuple(_coerce_string_list(raw_value.get("not_null"), field_name="eligibility.not_null")),
+        min_values=_coerce_numeric_mapping(raw_value.get("min_values"), field_name="eligibility.min_values"),
+        max_values=_coerce_numeric_mapping(raw_value.get("max_values"), field_name="eligibility.max_values"),
+        equals=dict(raw_value.get("equals") or {}),
+        expressions=tuple(_coerce_string_list(raw_value.get("expressions"), field_name="eligibility.expressions")),
+    )
+
+
+def _apply_numeric_thresholds(
+    metadata_df: pd.DataFrame,
+    *,
+    min_values: Mapping[str, float],
+    max_values: Mapping[str, float],
+) -> np.ndarray:
+    mask = np.ones((len(metadata_df),), dtype=bool)
+    for field_name, threshold in min_values.items():
+        series = _coerce_numeric_series(metadata_df, field_name, filter_name="minimum threshold")
+        mask &= series.ge(threshold).to_numpy(dtype=bool)
+    for field_name, threshold in max_values.items():
+        series = _coerce_numeric_series(metadata_df, field_name, filter_name="maximum threshold")
+        mask &= series.le(threshold).to_numpy(dtype=bool)
+    return mask
+
+
+def _apply_equals_filters(metadata_df: pd.DataFrame, equals: Mapping[str, Any]) -> np.ndarray:
+    mask = np.ones((len(metadata_df),), dtype=bool)
+    for field_name, expected_value in equals.items():
+        if field_name not in metadata_df.columns:
+            raise ValueError(f"Eligibility filtering requested missing metadata column: {field_name}")
+        mask &= metadata_df.loc[:, field_name].eq(expected_value).to_numpy(dtype=bool)
+    return mask
+
+
+def _apply_expressions(metadata_df: pd.DataFrame, expressions: Iterable[str]) -> np.ndarray:
+    mask = np.ones((len(metadata_df),), dtype=bool)
+    for expression in expressions:
+        try:
+            result = metadata_df.eval(expression, engine="python")
+        except Exception as exc:
+            raise ValueError(f"Unable to evaluate eligibility expression `{expression}`.") from exc
+        if not isinstance(result, pd.Series):
+            raise ValueError(f"Eligibility expression `{expression}` did not produce a row-wise result.")
+        mask &= result.fillna(False).astype(bool).to_numpy(dtype=bool)
+    return mask
+
+
+def _coerce_optional_string(value: Any, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string when provided.")
+    return value
+
+
+def _coerce_string_list(value: Any, *, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field_name} must be a list of strings when provided.")
+    return list(value)
+
+
+def _coerce_numeric_mapping(value: Any, *, field_name: str) -> dict[str, float]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} must be a mapping when provided.")
+    coerced: dict[str, float] = {}
+    for key, raw_number in value.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{field_name} keys must be strings.")
+        try:
+            coerced[key] = float(raw_number)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name}.{key} must be numeric.") from exc
+    return coerced
+
+
+def _coerce_numeric_series(metadata_df: pd.DataFrame, field_name: str, *, filter_name: str) -> pd.Series:
+    if field_name not in metadata_df.columns:
+        raise ValueError(f"Eligibility {filter_name} requested missing metadata column: {field_name}")
+    series = metadata_df.loc[:, field_name]
+    if not pd.api.types.is_numeric_dtype(series):
+        raise ValueError(f"Eligibility {filter_name} requires numeric metadata column: {field_name}")
+    return series

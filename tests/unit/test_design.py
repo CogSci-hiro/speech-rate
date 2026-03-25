@@ -94,6 +94,57 @@ def test_build_design_matrix_reports_row_drops_and_standardizes_after_eligibilit
     assert result.test_predictors == ["other_rate", "run"]
 
 
+def test_build_design_matrix_supports_threshold_and_expression_eligibility_filters() -> None:
+    metadata = pd.DataFrame(
+        {
+            "self_rate": [1.0, 2.0, 3.0, 4.0],
+            "other_rate": [1.0, 2.0, 3.0, 4.0],
+            "self_syllable_count": [5, 2, 5, 6],
+            "other_syllable_count": [4, 4, 1, 7],
+            "self_ipu_duration": [0.50, 0.50, 0.50, 0.10],
+            "other_ipu_duration": [0.60, 0.10, 0.60, 0.60],
+            "latency": [0.1, 0.2, 0.3, 0.4],
+        },
+        index=pd.Index([100, 101, 102, 103], name="epoch_id"),
+    )
+    config = {
+        "glm": {
+            "models": {
+                "speech_rate_qc": {
+                    "formula": "self_rate ~ other_rate + latency",
+                    "eligibility": {
+                        "rule": "alignment",
+                        "min_values": {
+                            "self_syllable_count": 3,
+                            "other_syllable_count": 3,
+                            "self_ipu_duration": 0.2,
+                            "other_ipu_duration": 0.2,
+                        },
+                        "expressions": [
+                            "self_ipu_duration >= 0.2",
+                            "other_ipu_duration >= 0.2",
+                        ],
+                    },
+                    "test_predictors": ["other_rate"],
+                }
+            }
+        }
+    }
+
+    result = build_design_matrix(metadata, config=config, section="glm", model_name="speech_rate_qc")
+
+    assert list(result.row_index) == [100]
+    assert result.n_rows_input == 4
+    assert result.n_rows_after_eligibility == 1
+    assert result.n_rows_after_missing == 1
+    assert result.n_rows_final == 1
+    assert result.drop_report == {
+        "excluded_by_eligibility": 3,
+        "excluded_by_required_columns": 0,
+        "excluded_by_formula_construction": 0,
+    }
+
+
 def test_contrasts_use_term_slices_for_formula_expansions() -> None:
     metadata = pd.DataFrame(
         {
