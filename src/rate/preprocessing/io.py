@@ -19,7 +19,7 @@ class PreprocessingRunPaths:
 
     raw_eeg_path: Path
     channels_tsv_path: Path
-    ica_path: Path
+    ica_path: Path | None
     eeg_output_path: Path
     emg_output_path: Path
     events_output_path: Path
@@ -105,7 +105,7 @@ def resolve_precomputed_ica_path(
     row: Mapping[str, Any],
     *,
     override_path: Path | None = None,
-) -> Path:
+) -> Path | None:
     """Resolve the precomputed ICA path for one run."""
     if override_path is not None:
         return override_path
@@ -114,7 +114,10 @@ def resolve_precomputed_ica_path(
     ica_cfg = dict(preprocessing_cfg.get("ica") or {})
     context = _format_context(row, config)
 
-    pattern = str(ica_cfg.get("path_pattern", "{subject_id}/task-{task}/run-{run_padded}_ica.fif"))
+    pattern_value = ica_cfg.get("path_pattern", "{subject_id}/task-{task}/run-{run_padded}_ica.fif")
+    if not pattern_value:
+        return None
+    pattern = str(pattern_value)
     root_dir_value = ica_cfg.get("root_dir")
     root_dir = Path(str(root_dir_value)).expanduser() if root_dir_value else resolve_out_dir(config) / "ica"
     return _resolve_from_pattern(pattern, root_dir=root_dir, context=context)
@@ -139,7 +142,10 @@ def build_preprocessing_output_paths(config: Mapping[str, Any], row: Mapping[str
         / f"task-{row['task']}"
         / f"run-{row['run']}"
     )
-    raw_eeg_path = Path(str(row["eeg_path"])).expanduser()
+    raw_eeg_value = row.get("raw_eeg_path", row.get("eeg_path"))
+    if raw_eeg_value is None:
+        raise KeyError("Row is missing required raw EEG path field: raw_eeg_path")
+    raw_eeg_path = Path(str(raw_eeg_value)).expanduser()
     channels_tsv_path = resolve_channels_tsv_path(config, row)
     ica_path = resolve_precomputed_ica_path(config, row)
     return PreprocessingRunPaths(
@@ -150,6 +156,21 @@ def build_preprocessing_output_paths(config: Mapping[str, Any], row: Mapping[str
         emg_output_path=base_dir / filenames["emg"],
         events_output_path=base_dir / filenames["events"],
         summary_output_path=base_dir / filenames["summary"],
+    )
+
+
+def resolve_preprocessed_eeg_path(config: Mapping[str, Any], row: Mapping[str, Any]) -> Path:
+    """Resolve the canonical preprocessed EEG output path for one run."""
+    out_dir = resolve_out_dir(config)
+    output_cfg = dict((config.get("preprocessing") or {}).get("output") or {})
+    eeg_filename = str(output_cfg.get("eeg_filename", "eeg_preprocessed_raw.fif"))
+    return (
+        out_dir
+        / "preprocessing"
+        / str(row["subject_id"])
+        / f"task-{row['task']}"
+        / f"run-{row['run']}"
+        / eeg_filename
     )
 
 

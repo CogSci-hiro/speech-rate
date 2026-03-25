@@ -4,33 +4,155 @@ from __future__ import annotations
 
 import logging
 from argparse import ArgumentParser, Namespace
+from pathlib import Path
 from typing import Any, Mapping
 
-from rate.cli.commands._workflow_common import (
-    add_common_config_arguments,
-    add_subject_arguments,
-    build_stage_payload,
-    resolve_output_path,
-    write_placeholder_output,
-)
+from rate.cli.commands._workflow_common import add_common_config_arguments
+from rate.epochs import EpochBuildError, build_epoch_output_paths, build_epochs_for_run
+from rate.epochs.io import write_epoch_events_array, write_epoch_metadata, write_epoch_summary, write_epochs
+from rate.util import read_parquet_dataframe
 
 LOGGER = logging.getLogger(__name__)
 REQUIRES_CONFIG = True
 
 
 def add_subparser(subparsers) -> ArgumentParser:
-    parser = subparsers.add_parser("epoch-subject", help="Run or scaffold epoch construction.")
+    parser = subparsers.add_parser("epoch-subject", help="Run subject-level epoch construction.")
     add_common_config_arguments(parser)
-    add_subject_arguments(parser)
-    parser.add_argument("--output", help="Optional explicit output path.")
+    parser.add_argument("--dataset-index", help="Optional explicit dataset index parquet path.")
+    parser.add_argument("--dyad-id", help="Dyad identifier.")
+    parser.add_argument("--subject-id", help="Subject identifier.")
+    parser.add_argument("--task", help="Task label.")
+    parser.add_argument("--run", help="Run number.")
+    parser.add_argument("--raw-path", help="Optional explicit preprocessed raw path.")
+    parser.add_argument("--events-table", help="Optional explicit events.csv path.")
+    parser.add_argument("--epochs-output", help="Optional explicit epochs FIF output path.")
+    parser.add_argument("--metadata-output", help="Optional explicit metadata CSV output path.")
+    parser.add_argument("--events-array-output", help="Optional explicit epoch events-array output path.")
+    parser.add_argument("--summary-output", help="Optional explicit JSON summary output path.")
+    parser.add_argument("--all", action="store_true", dest="run_all", help="Process all runnable rows in the dataset index.")
+    parser.add_argument("--output", help="Optional stage marker path when using --all.")
     return parser
+
+
+def _dataset_index_path(config: Mapping[str, Any], args: Namespace) -> Path:
+    if args.dataset_index:
+        return Path(args.dataset_index)
+    return Path(str(config["paths"]["out_dir"])) / "dataset" / "index.parquet"
+
+
+def _load_dataset_rows(config: Mapping[str, Any], args: Namespace):
+    dataset_index_path = _dataset_index_path(config, args)
+    if not dataset_index_path.exists():
+        raise FileNotFoundError(f"Dataset index not found: {dataset_index_path}")
+    return read_parquet_dataframe(dataset_index_path)
+
+
+def _select_single_row(config: Mapping[str, Any], args: Namespace) -> Mapping[str, Any]:
+    if not all([args.dyad_id, args.subject_id, args.task, args.run]):
+        raise ValueError("--dyad-id, --subject-id, --task, and --run are required unless --all is used.")
+
+    index_df = _load_dataset_rows(config, args)
+    mask = (
+        (index_df["dyad_id"].astype(str) == str(args.dyad_id))
+        & (index_df["subject_id"].astype(str) == str(args.subject_id))
+        & (index_df["task"].astype(str) == str(args.task))
+        & (index_df["run"].astype(str) == str(args.run))
+    )
+    rows = index_df.loc[mask].copy()
+    if "status" in rows.columns:
+        rows = rows.loc[rows["status"].astype(str).str.lower() == "ok"].copy()
+    if rows.empty:
+        raise ValueError(
+            "No runnable dataset-index row found for "
+            f"dyad_id={args.dyad_id}, subject_id={args.subject_id}, task={args.task}, run={args.run}"
+        )
+    return rows.iloc[0].to_dict()
+
+
+def _iter_runnable_rows(config: Mapping[str, Any], args: Namespace) -> list[Mapping[str, Any]]:
+    index_df = _load_dataset_rows(config, args)
+    if "status" in index_df.columns:
+        index_df = index_df.loc[index_df["status"].astype(str).str.lower() == "ok"].copy()
+    required = ["dyad_id", "subject_id", "task", "run", "eeg_path"]
+    index_df = index_df.dropna(subset=required)
+    return [row._asdict() for row in index_df.itertuples(index=False, name="Row")]
+
+
+def _write_run_outputs(
+    config: Mapping[str, Any],
+    row: Mapping[str, Any],
+    *,
+    raw_path: Path | None = None,
+    events_table_path: Path | None = None,
+    epochs_output_path: Path | None = None,
+    metadata_output_path: Path | None = None,
+    events_array_output_path: Path | None = None,
+    summary_output_path: Path | None = None,
+) -> dict[str, Any]:
+    resolved_raw_path = raw_path
+    if resolved_raw_path is None and row.get("eeg_path"):
+        resolved_raw_path = Path(str(row["eeg_path"]))
+
+    output_paths = build_epoch_output_paths(
+        config,
+        row,
+        raw_eeg_path=resolved_raw_path,
+        events_table_path=events_table_path,
+    )
+    result = build_epochs_for_run(
+        config,
+        row,
+        raw_path=resolved_raw_path or output_paths.raw_eeg_path,
+        events_table_path=events_table_path or output_paths.events_table_path,
+    )
+
+    written_epochs = write_epochs(result.epochs, epochs_output_path or output_paths.epochs_output_path)
+    written_metadata = write_epoch_metadata(result.metadata, metadata_output_path or output_paths.metadata_output_path)
+    written_events_array = write_epoch_events_array(result.events_array, events_array_output_path or output_paths.events_array_output_path)
+    written_summary = write_epoch_summary(result.summary, summary_output_path or output_paths.summary_output_path)
+    LOGGER.info(
+        "Wrote epochs for %s task=%s run=%s -> %s",
+        row["subject_id"],
+        row["task"],
+        row["run"],
+        written_epochs,
+    )
+    return {
+        "subject_id": row["subject_id"],
+        "task": row["task"],
+        "run": row["run"],
+        "epochs_output": str(written_epochs),
+        "metadata_output": str(written_metadata),
+        "events_array_output": str(written_events_array),
+        "summary_output": str(written_summary),
+        "epochs_count": int(result.summary["epochs_count"]),
+    }
 
 
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     assert config is not None
-    default_name = "_stage/epochs_all.done.json" if args.run_all else f"epochs/{args.subject_id or 'unknown'}_epochs.json"
-    output_path = resolve_output_path(args, config, default_relative_path=default_name)
-    payload = build_stage_payload(stage="epochs", args=args, config=config)
-    write_placeholder_output(output_path, payload)
-    LOGGER.info("Wrote epoch scaffold output: %s", output_path)
+    try:
+        if args.run_all:
+            rows = _iter_runnable_rows(config, args)
+            summaries = [_write_run_outputs(config, row) for row in rows]
+            if args.output:
+                write_epoch_summary({"status": "ok", "processed_runs": summaries}, Path(args.output))
+                LOGGER.info("Wrote epoching stage marker: %s", args.output)
+            return 0
+
+        row = _select_single_row(config, args)
+        _write_run_outputs(
+            config,
+            row,
+            raw_path=Path(args.raw_path) if args.raw_path else None,
+            events_table_path=Path(args.events_table) if args.events_table else None,
+            epochs_output_path=Path(args.epochs_output) if args.epochs_output else None,
+            metadata_output_path=Path(args.metadata_output) if args.metadata_output else None,
+            events_array_output_path=Path(args.events_array_output) if args.events_array_output else None,
+            summary_output_path=Path(args.summary_output) if args.summary_output else None,
+        )
+    except (EpochBuildError, FileNotFoundError, ValueError) as exc:
+        LOGGER.error("%s", exc)
+        return 1
     return 0

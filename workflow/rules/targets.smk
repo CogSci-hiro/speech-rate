@@ -3,6 +3,11 @@ rule preprocessing_all:
         PREPROCESSING_STAGE
 
 
+rule events_all:
+    input:
+        EVENTS_STAGE
+
+
 rule epochs_all:
     input:
         EPOCHS_STAGE
@@ -35,6 +40,7 @@ rule figures_all:
 rule all:
     input:
         PREPROCESSING_STAGE,
+        EVENTS_STAGE,
         EPOCHS_STAGE,
         GLM_STATS_OUTPUT,
         FOOOF_MASS_STATS_OUTPUT,

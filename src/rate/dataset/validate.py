@@ -10,6 +10,7 @@ REQUIRED_INDEX_COLUMNS = [
     "role",
     "task",
     "run",
+    "raw_eeg_path",
     "eeg_path",
     "audio_path",
     "annotations_path",

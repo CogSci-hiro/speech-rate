@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from rate.cli.commands._workflow_common import add_common_config_arguments, build_stage_payload, write_placeholder_output
+from rate.design import list_model_names, load_model_spec
 from rate.paths import resolve_out_dir
 
 LOGGER = logging.getLogger(__name__)
@@ -23,6 +24,21 @@ def _normalize_regressors(regressors: Sequence[str]) -> list[str]:
     return normalized
 
 
+def _resolve_glm_regressors(config: Mapping[str, Any]) -> list[str]:
+    glm_config = config.get("glm") or {}
+    direct = list(glm_config.get("regressors", []))
+    if direct:
+        return _normalize_regressors(direct)
+
+    regressors: list[str] = []
+    for model_name in list_model_names(config, section="glm"):
+        model_spec = load_model_spec(config, section="glm", model_name=model_name)
+        for predictor in model_spec.test_predictors:
+            if predictor not in regressors:
+                regressors.append(predictor)
+    return _normalize_regressors(regressors)
+
+
 def add_subparser(subparsers) -> ArgumentParser:
     parser = subparsers.add_parser("figures-glm", help="Run or scaffold GLM figure generation.")
     add_common_config_arguments(parser)
@@ -34,7 +50,7 @@ def add_subparser(subparsers) -> ArgumentParser:
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     assert config is not None
     output_path = Path(args.output) if args.output else resolve_out_dir(config) / "figures" / "glm" / "figure_manifest.json"
-    regressors = _normalize_regressors((config.get("glm") or {}).get("regressors", []))
+    regressors = _resolve_glm_regressors(config)
     payload = build_stage_payload(
         stage="figures_glm",
         args=args,

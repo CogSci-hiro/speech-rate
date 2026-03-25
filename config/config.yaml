@@ -10,8 +10,8 @@ debug:
 paths:
   out_dir: "/Users/hiro/Datasets/working/speech-rate-refactoring"
   bids_dir: "/Users/hiro/Datasets/hyperscanning-bids"
-  eeg_dir: "/Users/hiro/Datasets/Miscellaneous/hyperscanning-testing/derived/eeg/filtered"
   annotations_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/annotations"
+  questionnaire_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/questionnaire"
 
 # Main entry-point config.
 # Analysis sections are merged from sibling modular files:

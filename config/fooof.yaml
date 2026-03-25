@@ -1,9 +1,49 @@
 fooof:
   enabled: true
   mode: "sliding_mass_univariate"
-  freq_range_hz: [1.0, 40.0]
-  window_s: 1.0
-  step_s: 0.25
-  features:
-    periodic: ["theta_power", "alpha_power"]
-    aperiodic: ["offset", "exponent"]
+
+  windows:
+    start_s: -2.0
+    stop_s: 0.0
+    length_s: 1.0
+    step_s: 0.1
+
+  spectrum:
+    method: "welch"
+    fit_range_hz: [3.0, 30.0]
+    welch_n_per_seg_s: 1.0
+    welch_overlap: 0.5
+    multitaper_bandwidth_hz: null
+    multitaper_adaptive: false
+    multitaper_low_bias: true
+
+  fooof:
+    aperiodic_mode: "fixed"
+    max_n_peaks: 6
+    peak_width_limits_hz: [1.0, 8.0]
+    min_peak_height: 0.01
+    peak_threshold: 2.0
+
+  bands:
+    theta: [4.0, 7.0]
+    alpha: [8.0, 12.0]
+    beta: [13.0, 30.0]
+
+  models:
+    theta_cf_other_rate:
+      outcome: "theta_cf"
+      formula: "theta_cf ~ other_rate + latency + duration_s + run"
+      eligibility: "self_rate"
+      test_predictors:
+        - "other_rate"
+      standardize:
+        - other_rate
+        - latency
+        - duration_s
+
+    offset_other_rate:
+      outcome: "offset"
+      formula: "offset ~ other_rate + latency + duration_s + run"
+      eligibility: "self_rate"
+      test_predictors:
+        - "other_rate"

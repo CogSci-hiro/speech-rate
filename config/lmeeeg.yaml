@@ -1,8 +1,21 @@
 lmeeeg:
   enabled: false
+  backend: "python"
   random_effects:
-    - "(1 | subject_id)"
-    - "(1 | item_id)"
-  fixed_effects:
-    - "speech_rate"
-  trial_table_name: "lmeeeg_trials"
+    group: "subject_id"
+    structure: "random_intercept"
+
+  models:
+    convergence_subject_intercept:
+      formula: "convergence ~ self_rate + other_rate + latency + duration_s + run"
+      eligibility: "convergence"
+      test_predictors:
+        - "self_rate"
+        - "other_rate"
+      standardize:
+        - self_rate
+        - other_rate
+        - latency
+        - duration_s
+      random_effect_group: "subject_id"
+      random_effect_structure: "random_intercept"

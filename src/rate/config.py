@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -150,9 +151,15 @@ def _load_schema(schema_path: Path | str) -> dict[str, Any]:
         raise ConfigValidationError(f"Invalid JSON in schema file: {path}") from exc
 
 
+@lru_cache(maxsize=None)
+def _load_schema_cached(schema_path: str) -> dict[str, Any]:
+    """Cache parsed schemas by resolved absolute path."""
+    return _load_schema(Path(schema_path))
+
+
 def validate_config(config: Mapping[str, Any], schema_path: Path | str = DEFAULT_SCHEMA_PATH) -> None:
     """Validate a resolved config against the repository schema."""
-    schema = _load_schema(schema_path)
+    schema = _load_schema_cached(str(Path(schema_path).expanduser().resolve()))
     validator = Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(config), key=lambda err: list(err.path))
     if not errors:
@@ -170,6 +177,20 @@ def load_and_validate_config(
     schema_path: Path | str = DEFAULT_SCHEMA_PATH,
 ) -> dict[str, Any]:
     """Load YAML config, merge modular sections, apply defaults, and validate."""
+    return copy.deepcopy(
+        _load_and_validate_config_cached(
+            str(Path(config_path).expanduser().resolve()),
+            str(Path(schema_path).expanduser().resolve()),
+        )
+    )
+
+
+@lru_cache(maxsize=None)
+def _load_and_validate_config_cached(
+    config_path: str,
+    schema_path: str,
+) -> dict[str, Any]:
+    """Cached implementation backing ``load_and_validate_config``."""
     raw_config = load_yaml_config(config_path)
     merged = _maybe_attach_modular_sections(raw_config, config_path=config_path)
     resolved = apply_config_defaults(merged)

@@ -12,6 +12,7 @@ from rate.debug import limit_dataframe_by_debug_max_files
 from rate.dataset.discover import (
     AUDIO_SUFFIXES,
     EEG_SUFFIXES,
+    scan_directory,
     discover_dyads,
     discover_subjects,
     dyad_from_subject_id,
@@ -25,6 +26,7 @@ from rate.dataset.discover import (
 )
 from rate.dataset.validate import REQUIRED_INDEX_COLUMNS, validate_dataset_index
 from rate.paths import ensure_parent_dir
+from rate.preprocessing.io import resolve_preprocessed_eeg_path
 from rate.util import write_parquet_dataframe
 
 LOGGER = logging.getLogger(__name__)
@@ -209,7 +211,7 @@ def _resolve_exclusion_reason(
     return " | ".join(unique_preserve(reasons))
 
 
-def _extract_paths_config(config: Mapping[str, Any]) -> tuple[Path, Path, Path]:
+def _extract_paths_config(config: Mapping[str, Any]) -> tuple[Path, Path]:
     """Read required path locations from config."""
     paths_cfg = config.get("paths")
     if not isinstance(paths_cfg, Mapping):
@@ -217,21 +219,20 @@ def _extract_paths_config(config: Mapping[str, Any]) -> tuple[Path, Path, Path]:
 
     try:
         bids_dir = Path(str(paths_cfg["bids_dir"]))
-        eeg_dir = Path(str(paths_cfg["eeg_dir"]))
         annotations_dir = Path(str(paths_cfg["annotations_dir"]))
     except KeyError as exc:
         raise ConfigValidationError(
-            "Config paths must include bids_dir, eeg_dir, and annotations_dir for dataset indexing."
+            "Config paths must include bids_dir and annotations_dir for dataset indexing."
         ) from exc
 
-    return bids_dir, eeg_dir, annotations_dir
+    return bids_dir, annotations_dir
 
 
 def _collect_missing_reasons(row: Mapping[str, Any]) -> str:
     """Compose a reason string for missing files in one row."""
     missing_fields = [
         field
-        for field in ("eeg_path", "audio_path", "annotations_path")
+        for field in ("raw_eeg_path", "audio_path", "annotations_path")
         if not row.get(field)
     ]
     return f"missing files: {', '.join(missing_fields)}"
@@ -277,7 +278,9 @@ def _resolve_dataset_axes(
 
 def build_dataset_index(config: Mapping[str, Any]) -> pd.DataFrame:
     """Build canonical dataset index table."""
-    bids_dir, eeg_dir, annotations_dir = _extract_paths_config(config)
+    bids_dir, annotations_dir = _extract_paths_config(config)
+    bids_snapshot = scan_directory(bids_dir)
+    annotations_snapshot = scan_directory(annotations_dir)
     dataset_cfg = config.get("dataset")
     if not isinstance(dataset_cfg, Mapping):
         raise DatasetIndexError("Config missing required object: dataset")
@@ -312,22 +315,24 @@ def build_dataset_index(config: Mapping[str, Any]) -> pd.DataFrame:
         for task in tasks:
             for run in runs:
                 for subject_id, role in subject_roles:
+                    raw_eeg_path = find_unit_path(
+                        bids_snapshot,
+                        dyad_id=dyad_id,
+                        task=task,
+                        run=run,
+                        suffixes=EEG_SUFFIXES,
+                        subject_id=subject_id,
+                    )
                     row: dict[str, Any] = {
                         "dyad_id": dyad_id,
                         "subject_id": subject_id,
                         "role": role,
                         "task": task,
                         "run": run,
-                        "eeg_path": find_unit_path(
-                            eeg_dir,
-                            dyad_id=dyad_id,
-                            task=task,
-                            run=run,
-                            suffixes=EEG_SUFFIXES,
-                            subject_id=subject_id,
-                        ),
+                        "raw_eeg_path": raw_eeg_path,
+                        "eeg_path": "",
                         "audio_path": find_unit_path(
-                            bids_dir,
+                            bids_snapshot,
                             dyad_id=dyad_id,
                             task=task,
                             run=run,
@@ -335,7 +340,7 @@ def build_dataset_index(config: Mapping[str, Any]) -> pd.DataFrame:
                             subject_id=subject_id,
                         ),
                         "annotations_path": find_annotation_path(
-                            annotations_dir,
+                            annotations_snapshot,
                             dyad_id=dyad_id,
                             task=task,
                             run=run,
@@ -344,9 +349,10 @@ def build_dataset_index(config: Mapping[str, Any]) -> pd.DataFrame:
                         "status": "ok",
                         "reason": "",
                     }
+                    row["eeg_path"] = str(resolve_preprocessed_eeg_path(config, row))
 
                     key = (dyad_id, run)
-                    if not (row["eeg_path"] and row["audio_path"] and row["annotations_path"]):
+                    if not (row["raw_eeg_path"] and row["audio_path"] and row["annotations_path"]):
                         row["status"] = "missing"
                         row["reason"] = _collect_missing_reasons(row)
                     if key in missing_map:

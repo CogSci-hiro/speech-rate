@@ -22,7 +22,6 @@ def _base_config(tmp_path: Path) -> dict:
         "paths": {
             "out_dir": str(tmp_path / "outputs"),
             "bids_dir": str(in_root / "bids"),
-            "eeg_dir": str(in_root / "eeg"),
             "annotations_dir": str(in_root / "annotations"),
         },
         "dataset": {
@@ -50,7 +49,7 @@ def _make_present_triplet(cfg: dict, dyad_id: str, task: str, run: int) -> None:
         subj_stem = f"{subject_id}_task-{task}_{run_label}"
         _touch(Path(cfg["paths"]["annotations_dir"]) / f"{subj_stem}.csv")
         _touch(Path(cfg["paths"]["bids_dir"]) / "audio" / f"{subj_stem}.wav")
-        _touch(Path(cfg["paths"]["eeg_dir"]) / f"{subj_stem}.fif")
+        _touch(Path(cfg["paths"]["bids_dir"]) / "eeg" / f"{subj_stem}.fif")
 
 
 def test_no_duplicate_dyad_run_task_rows(tmp_path: Path) -> None:
@@ -111,6 +110,7 @@ def test_writeable_parquet_index_shape(tmp_path: Path) -> None:
         "role",
         "task",
         "run",
+        "raw_eeg_path",
         "eeg_path",
         "audio_path",
         "annotations_path",
@@ -197,7 +197,7 @@ def test_dataset_index_ignores_macos_sidecar_files(tmp_path: Path) -> None:
     cfg = _base_config(tmp_path)
     _make_present_triplet(cfg, dyad_id="dyad-001", task="chat", run=1)
 
-    _touch(Path(cfg["paths"]["eeg_dir"]) / "._dyad-001_task-chat_run-1.fif")
+    _touch(Path(cfg["paths"]["bids_dir"]) / "eeg" / "._dyad-001_task-chat_run-1.fif")
     _touch(Path(cfg["paths"]["bids_dir"]) / "audio" / "._dyad-001_task-chat_run-1.wav")
     _touch(Path(cfg["paths"]["annotations_dir"]) / "._sub-001_task-chat_run-1.csv")
     _touch(Path(cfg["paths"]["annotations_dir"]) / "._sub-002_task-chat_run-1.csv")
@@ -206,7 +206,8 @@ def test_dataset_index_ignores_macos_sidecar_files(tmp_path: Path) -> None:
     row = index_df[(index_df["subject_id"] == "sub-001") & (index_df["run"] == "1")].iloc[0]
 
     assert row["status"] == "ok"
-    assert "/._" not in str(row["eeg_path"])
+    assert "/._" not in str(row["raw_eeg_path"])
+    assert str(row["eeg_path"]).endswith("/preprocessing/sub-001/task-chat/run-1/eeg_preprocessed_raw.fif")
     assert "/._" not in str(row["audio_path"])
     assert "/._" not in str(row["annotations_path"])
 
@@ -217,8 +218,8 @@ def test_dataset_index_does_not_confuse_sub01_with_sub010(tmp_path: Path) -> Non
     _touch(Path(cfg["paths"]["annotations_dir"]) / "sub-001_task-chat_run-1.csv")
     _touch(Path(cfg["paths"]["annotations_dir"]) / "sub-002_task-chat_run-1.csv")
 
-    _touch(Path(cfg["paths"]["eeg_dir"]) / "sub-001_task-chat_run-1_raw_filt.fif")
-    _touch(Path(cfg["paths"]["eeg_dir"]) / "sub-010_task-chat_run-1_raw_filt.fif")
+    _touch(Path(cfg["paths"]["bids_dir"]) / "eeg" / "sub-001_task-chat_run-1_raw_filt.fif")
+    _touch(Path(cfg["paths"]["bids_dir"]) / "eeg" / "sub-010_task-chat_run-1_raw_filt.fif")
 
     _touch(Path(cfg["paths"]["bids_dir"]) / "audio" / "sub-001_task-chat_run-1.wav")
     _touch(Path(cfg["paths"]["bids_dir"]) / "audio" / "sub-010_task-chat_run-1.wav")
@@ -226,8 +227,9 @@ def test_dataset_index_does_not_confuse_sub01_with_sub010(tmp_path: Path) -> Non
     index_df = build_dataset_index(cfg)
     row = index_df[(index_df["subject_id"] == "sub-001") & (index_df["run"] == "1")].iloc[0]
 
-    assert "sub-001_task-chat_run-1_raw_filt.fif" in str(row["eeg_path"])
-    assert "sub-010_task-chat_run-1_raw_filt.fif" not in str(row["eeg_path"])
+    assert "sub-001_task-chat_run-1_raw_filt.fif" in str(row["raw_eeg_path"])
+    assert "sub-010_task-chat_run-1_raw_filt.fif" not in str(row["raw_eeg_path"])
+    assert str(row["eeg_path"]).endswith("/preprocessing/sub-001/task-chat/run-1/eeg_preprocessed_raw.fif")
     assert "sub-001_task-chat_run-1.wav" in str(row["audio_path"])
     assert "sub-010_task-chat_run-1.wav" not in str(row["audio_path"])
 
@@ -237,8 +239,8 @@ def test_dataset_index_prefers_subject_specific_paths(tmp_path: Path) -> None:
 
     _touch(Path(cfg["paths"]["annotations_dir"]) / "sub-003_task-chat_run-1.csv")
     _touch(Path(cfg["paths"]["annotations_dir"]) / "sub-004_task-chat_run-1.csv")
-    _touch(Path(cfg["paths"]["eeg_dir"]) / "sub-003_task-chat_run-1_raw_filt.fif")
-    _touch(Path(cfg["paths"]["eeg_dir"]) / "sub-004_task-chat_run-1_raw_filt.fif")
+    _touch(Path(cfg["paths"]["bids_dir"]) / "eeg" / "sub-003_task-chat_run-1_raw_filt.fif")
+    _touch(Path(cfg["paths"]["bids_dir"]) / "eeg" / "sub-004_task-chat_run-1_raw_filt.fif")
     _touch(Path(cfg["paths"]["bids_dir"]) / "audio" / "sub-003_task-chat_run-1.wav")
     _touch(Path(cfg["paths"]["bids_dir"]) / "audio" / "sub-004_task-chat_run-1.wav")
 
@@ -247,7 +249,9 @@ def test_dataset_index_prefers_subject_specific_paths(tmp_path: Path) -> None:
     row3 = index_df[(index_df["subject_id"] == "sub-003") & (index_df["run"] == "1")].iloc[0]
     row4 = index_df[(index_df["subject_id"] == "sub-004") & (index_df["run"] == "1")].iloc[0]
 
-    assert "sub-003_task-chat_run-1_raw_filt.fif" in str(row3["eeg_path"])
-    assert "sub-004_task-chat_run-1_raw_filt.fif" in str(row4["eeg_path"])
+    assert "sub-003_task-chat_run-1_raw_filt.fif" in str(row3["raw_eeg_path"])
+    assert "sub-004_task-chat_run-1_raw_filt.fif" in str(row4["raw_eeg_path"])
+    assert str(row3["eeg_path"]).endswith("/preprocessing/sub-003/task-chat/run-1/eeg_preprocessed_raw.fif")
+    assert str(row4["eeg_path"]).endswith("/preprocessing/sub-004/task-chat/run-1/eeg_preprocessed_raw.fif")
     assert "sub-003_task-chat_run-1.wav" in str(row3["audio_path"])
     assert "sub-004_task-chat_run-1.wav" in str(row4["audio_path"])

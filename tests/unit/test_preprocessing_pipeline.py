@@ -42,7 +42,6 @@ def _config(tmp_path: Path) -> dict:
         "paths": {
             "out_dir": str(tmp_path / "out"),
             "bids_dir": str(tmp_path / "bids"),
-            "eeg_dir": str(tmp_path / "eeg"),
             "annotations_dir": str(tmp_path / "annotations"),
         },
         "preprocessing": {
@@ -85,7 +84,8 @@ def test_preprocess_run_writes_eeg_emg_events_and_summary(tmp_path: Path, monkey
         "subject_id": "sub-001",
         "task": "conversation",
         "run": "1",
-        "eeg_path": str(raw_path),
+        "raw_eeg_path": str(raw_path),
+        "eeg_path": str(tmp_path / "out" / "preprocessing" / "sub-001" / "task-conversation" / "run-1" / "eeg_preprocessed_raw.fif"),
     }
 
     monkeypatch.setattr("rate.preprocessing.pipeline.apply_precomputed_ica", lambda raw, path: None)
@@ -136,3 +136,54 @@ def test_load_bad_channels_from_bids_tsv_warns_on_partial_name_mismatch(tmp_path
 
     assert bads == ["Fz"]
     assert raw.info["bads"] == ["Fz"]
+
+
+def test_interpolate_bad_channels_skips_eeg_channels_without_positions() -> None:
+    raw = mne.io.RawArray(
+        np.random.default_rng(11).normal(scale=1e-6, size=(5, 400)),
+        mne.create_info(
+            ch_names=["Fz", "Cz", "Pz", "Oz", "rEAR"],
+            sfreq=200.0,
+            ch_types=["eeg", "eeg", "eeg", "eeg", "eeg"],
+        ),
+        verbose="ERROR",
+    )
+    raw.set_montage(mne.channels.make_standard_montage("standard_1020"), on_missing="ignore")
+    raw.info["bads"] = ["Fz"]
+
+    with pytest.warns(RuntimeWarning, match="without finite sensor positions"):
+        from rate.preprocessing.bad_channels import interpolate_bad_channels
+
+        interpolate_bad_channels(raw)
+
+    assert raw.info["bads"] == ["Fz", "rEAR"]
+
+
+def test_preprocess_run_skips_missing_ica_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = _make_raw()
+    raw_path = tmp_path / "input_raw.fif"
+    raw.save(raw_path, overwrite=True, verbose="ERROR")
+
+    channels_tsv_path = tmp_path / "sub-001_task-conversation_run-01_channels.tsv"
+    _write_channels_tsv(channels_tsv_path, bad_names=[])
+
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "raw_eeg_path": str(raw_path),
+        "eeg_path": str(tmp_path / "out" / "preprocessing" / "sub-001" / "task-conversation" / "run-1" / "eeg_preprocessed_raw.fif"),
+    }
+
+    preprocess_run(
+        _config(tmp_path),
+        row,
+        raw_eeg_path=raw_path,
+        channels_tsv_path=channels_tsv_path,
+        ica_path=tmp_path / "missing-ica.fif",
+        eeg_output_path=tmp_path / "out" / "eeg_preprocessed_raw.fif",
+        emg_output_path=tmp_path / "out" / "emg.npz",
+        events_output_path=tmp_path / "out" / "events.tsv",
+        summary_output_path=tmp_path / "out" / "preprocessing_summary.json",
+    )

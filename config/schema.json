@@ -10,8 +10,8 @@
       "properties": {
         "out_dir": {"type": "string", "minLength": 1},
         "bids_dir": {"type": "string", "minLength": 1},
-        "eeg_dir": {"type": "string", "minLength": 1},
         "annotations_dir": {"type": "string", "minLength": 1},
+        "questionnaire_dir": {"type": "string", "minLength": 1},
         "logs_dir": {"type": "string", "minLength": 1}
       },
       "additionalProperties": true
@@ -30,7 +30,15 @@
           }
         },
         "missing_runs": {"type": "array"},
-        "exclude": {"type": "object"}
+        "exclude": {"type": "object"},
+        "questionnaires": {
+          "type": "object",
+          "properties": {
+            "likeability_filename": {"type": "string", "minLength": 1},
+            "personality_filename": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": true
     },

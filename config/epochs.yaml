@@ -1,11 +1,21 @@
 epochs:
-  event_column: "event_onset_s"
+  event_column: "t_onset"
+  time_origin: "raw_start"
+  event_id_column: "event_id"
   metadata_source: "Epochs.metadata"
   tmin_s: -0.5
   tmax_s: 1.0
   baseline:
     start_s: -0.2
     end_s: 0.0
+  preload: true
+  on_out_of_bounds: "drop"
+  metadata_columns: []
+  output:
+    epochs_filename: "epochs-{lock_name}.fif"
+    metadata_filename: "metadata-{lock_name}.csv"
+    events_array_filename: "events-{lock_name}.npy"
+    summary_filename: "epoching_summary-{lock_name}.json"
   eligibility:
     require_metadata: true
-    include_columns: ["trial_type", "speech_rate"]
+    include_columns: []

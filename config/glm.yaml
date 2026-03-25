@@ -1,10 +1,30 @@
 glm:
   family: "mass_univariate"
-  regressors:
-    - "speech_rate"
-    - "speaker_role"
-  formulas:
-    subject_level: "signal ~ speech_rate + speaker_role"
-  contrasts:
-    - name: "speech_rate"
-      vector: [0, 1, 0]
+  models:
+    self_rate:
+      formula: "~ other_rate + latency + duration_s + run"
+      eligibility: "self_rate"
+      test_predictors:
+        - "other_rate"
+      standardize:
+        - other_rate
+        - latency
+        - duration_s
+
+    alignment:
+      formula: "~ self_rate + other_rate + latency + duration_s + run"
+      eligibility: "alignment"
+      test_predictors:
+        - "self_rate"
+        - "other_rate"
+
+    convergence_run:
+      formula: "~ convergence + self_rate + other_rate + run + convergence:run + latency"
+      eligibility: "convergence"
+      test_predictors:
+        - "convergence"
+        - "convergence:run"
+      standardize:
+        - self_rate
+        - other_rate
+        - latency

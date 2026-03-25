@@ -53,7 +53,7 @@ def preprocess_run(
         Resolved repository config.
     row
         Dataset-index row with at least ``dyad_id``, ``subject_id``, ``task``,
-        ``run``, and ``eeg_path``.
+        ``run``, and ``raw_eeg_path``.
 
     Returns
     -------

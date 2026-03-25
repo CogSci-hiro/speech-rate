@@ -75,7 +75,7 @@ def _iter_runnable_rows(config: Mapping[str, Any], args: Namespace) -> list[Mapp
     index_df = _load_dataset_rows(config, args)
     if "status" in index_df.columns:
         index_df = index_df.loc[index_df["status"].astype(str).str.lower() == "ok"].copy()
-    required = ["dyad_id", "subject_id", "task", "run", "eeg_path"]
+    required = ["dyad_id", "subject_id", "task", "run", "raw_eeg_path"]
     index_df = index_df.dropna(subset=required)
     return [row._asdict() for row in index_df.itertuples(index=False, name="Row")]
 

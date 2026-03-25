@@ -2,7 +2,7 @@ DATASET_DIR = f"{OUT_DIR}/dataset"
 META_DIR = f"{OUT_DIR}/_meta"
 
 
-rule dataset_index:
+checkpoint dataset_index:
     input:
         config_path="config/config.yaml",
         schema_path="config/schema.json",

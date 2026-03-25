@@ -1,5 +1,7 @@
 """Dataset discovery utilities (dyads/runs/tasks/file location)."""
 
+from dataclasses import dataclass
+from functools import lru_cache
 import logging
 import re
 from pathlib import Path
@@ -10,12 +12,38 @@ LOGGER = logging.getLogger(__name__)
 DYAD_PATTERN = re.compile(r"dyad[-_]?(\d+)", re.IGNORECASE)
 SUBJECT_PATTERN = re.compile(r"sub[-_]?(\d+)", re.IGNORECASE)
 RUN_PATTERN = re.compile(r"run[-_]?(\d+)", re.IGNORECASE)
+TASK_PATTERN = re.compile(r"task[-_]?([a-z0-9]+)", re.IGNORECASE)
 
 AUDIO_SUFFIXES = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
 EEG_SUFFIXES = {".fif", ".edf", ".bdf", ".set", ".vhdr"}
 ANNOTATION_SUFFIXES = {".csv", ".tsv", ".json", ".txt", ".yaml", ".yml", ".textgrid"}
 ANNOTATION_PREFER_TOKENS = ("ipu",)
 ANNOTATION_EXCLUDE_TOKENS = ("channels",)
+
+
+@dataclass(frozen=True)
+class IndexedFile:
+    """Cached metadata for one filesystem entry."""
+
+    path: Path
+    path_text: str
+    suffix: str
+    subjects: frozenset[str]
+    dyads: frozenset[str]
+    runs: frozenset[str]
+    tasks: frozenset[str]
+
+
+@dataclass(frozen=True)
+class DirectorySnapshot:
+    """Cached scan results for one root directory."""
+
+    root_dir: Path
+    files: tuple[IndexedFile, ...]
+    files_by_suffix: dict[str, tuple[IndexedFile, ...]]
+    files_by_run: dict[str, tuple[IndexedFile, ...]]
+    discovered_subjects: tuple[str, ...]
+    explicit_dyads: tuple[str, ...]
 
 
 def _is_ignored_artifact(path: Path) -> bool:
@@ -127,20 +155,93 @@ def parse_dyad_from_path(path: Path) -> str | None:
     return f"dyad-{int(dyad_match.group(1)):03d}"
 
 
+def _extract_subject_ids(path_text: str) -> frozenset[str]:
+    return frozenset(f"sub-{int(match.group(1)):03d}" for match in SUBJECT_PATTERN.finditer(path_text))
+
+
+def _extract_dyad_ids(path_text: str) -> frozenset[str]:
+    return frozenset(f"dyad-{int(match.group(1)):03d}" for match in DYAD_PATTERN.finditer(path_text))
+
+
+def _extract_runs(path_text: str) -> frozenset[str]:
+    return frozenset(str(int(match.group(1))) for match in RUN_PATTERN.finditer(path_text))
+
+
+def _extract_tasks(path_text: str) -> frozenset[str]:
+    return frozenset(match.group(1).lower() for match in TASK_PATTERN.finditer(path_text))
+
+
+@lru_cache(maxsize=None)
+def scan_directory(root_dir: Path | str) -> DirectorySnapshot:
+    """Scan a directory tree once and cache file metadata plus discovered ids."""
+    path = Path(root_dir).expanduser()
+    if not path.exists():
+        return DirectorySnapshot(
+            root_dir=path,
+            files=(),
+            files_by_suffix={},
+            files_by_run={},
+            discovered_subjects=(),
+            explicit_dyads=(),
+        )
+
+    files: list[IndexedFile] = []
+    files_by_suffix: dict[str, list[IndexedFile]] = {}
+    files_by_run: dict[str, list[IndexedFile]] = {}
+    discovered_subjects: set[str] = set()
+    explicit_dyads: set[str] = set()
+
+    for child in sorted(path.rglob("*")):
+        if _is_ignored_artifact(child):
+            continue
+
+        child_text = child.as_posix().lower()
+        for match in SUBJECT_PATTERN.finditer(child_text):
+            discovered_subjects.add(f"sub-{int(match.group(1)):03d}")
+
+        dyad_id = parse_dyad_from_path(child)
+        if dyad_id:
+            explicit_dyads.add(dyad_id)
+
+        if not child.is_file():
+            continue
+
+        subjects = _extract_subject_ids(child_text)
+        dyads = _extract_dyad_ids(child_text)
+        runs = _extract_runs(child_text)
+        tasks = _extract_tasks(child_text)
+        entry = IndexedFile(
+            path=child,
+            path_text=child_text,
+            suffix=child.suffix.lower(),
+            subjects=subjects,
+            dyads=dyads,
+            runs=runs,
+            tasks=tasks,
+        )
+        files.append(entry)
+        files_by_suffix.setdefault(entry.suffix, []).append(entry)
+        for run in entry.runs:
+            files_by_run.setdefault(run, []).append(entry)
+
+    return DirectorySnapshot(
+        root_dir=path,
+        files=tuple(files),
+        files_by_suffix={suffix: tuple(entries) for suffix, entries in files_by_suffix.items()},
+        files_by_run={run: tuple(entries) for run, entries in files_by_run.items()},
+        discovered_subjects=tuple(sorted(discovered_subjects)),
+        explicit_dyads=tuple(sorted(explicit_dyads)),
+    )
+
+
 def discover_subjects_from_annotations(annotations_dir: Path) -> list[str]:
     """Discover subject ids from annotation file/directory names."""
-    if not annotations_dir.exists():
+    snapshot = scan_directory(annotations_dir)
+    if not snapshot.root_dir.exists():
         LOGGER.warning("annotations_dir does not exist: %s", annotations_dir)
         return []
 
-    discovered: set[str] = set()
-    for path in sorted(annotations_dir.rglob("*")):
-        if _is_ignored_artifact(path):
-            continue
-        for match in SUBJECT_PATTERN.finditer(path.as_posix()):
-            discovered.add(f"sub-{int(match.group(1)):03d}")
-
-    ordered = sorted(discovered)
+    ordered = list(snapshot.discovered_subjects)
     LOGGER.info("Discovered %d subjects from annotations.", len(ordered))
     return ordered
 
@@ -153,18 +254,12 @@ def _dyad_from_subject(subject_id: int) -> str:
 
 def discover_subjects_from_bids(bids_dir: Path) -> list[str]:
     """Discover subject ids from a BIDS tree."""
-    if not bids_dir.exists():
+    snapshot = scan_directory(bids_dir)
+    if not snapshot.root_dir.exists():
         LOGGER.warning("bids_dir does not exist: %s", bids_dir)
         return []
 
-    discovered: set[str] = set()
-    for path in sorted(bids_dir.rglob("*")):
-        if _is_ignored_artifact(path):
-            continue
-        for match in SUBJECT_PATTERN.finditer(path.as_posix()):
-            discovered.add(f"sub-{int(match.group(1)):03d}")
-
-    ordered = sorted(discovered)
+    ordered = list(snapshot.discovered_subjects)
     LOGGER.info("Discovered %d subjects from BIDS.", len(ordered))
     return ordered
 
@@ -180,40 +275,24 @@ def _infer_dyads(explicit_dyads: set[str], subject_ids: Iterable[str]) -> list[s
 
 def discover_dyads_from_annotations(annotations_dir: Path) -> list[str]:
     """Discover dyad ids from annotation file/directory names."""
-    if not annotations_dir.exists():
+    snapshot = scan_directory(annotations_dir)
+    if not snapshot.root_dir.exists():
         LOGGER.warning("annotations_dir does not exist: %s", annotations_dir)
         return []
 
-    explicit: set[str] = set()
-    for path in sorted(annotations_dir.rglob("*")):
-        if _is_ignored_artifact(path):
-            continue
-        dyad_id = parse_dyad_from_path(path)
-        if dyad_id:
-            explicit.add(dyad_id)
-
-    subjects = discover_subjects_from_annotations(annotations_dir)
-    ordered = _infer_dyads(explicit, subjects)
+    ordered = _infer_dyads(set(snapshot.explicit_dyads), snapshot.discovered_subjects)
     LOGGER.info("Discovered %d dyads from annotations.", len(ordered))
     return ordered
 
 
 def discover_dyads_from_bids(bids_dir: Path) -> list[str]:
     """Discover dyad ids from a BIDS tree."""
-    if not bids_dir.exists():
+    snapshot = scan_directory(bids_dir)
+    if not snapshot.root_dir.exists():
         LOGGER.warning("bids_dir does not exist: %s", bids_dir)
         return []
 
-    explicit: set[str] = set()
-    for path in sorted(bids_dir.rglob("*")):
-        if _is_ignored_artifact(path):
-            continue
-        dyad_id = parse_dyad_from_path(path)
-        if dyad_id:
-            explicit.add(dyad_id)
-
-    subjects = discover_subjects_from_bids(bids_dir)
-    ordered = _infer_dyads(explicit, subjects)
+    ordered = _infer_dyads(set(snapshot.explicit_dyads), snapshot.discovered_subjects)
     LOGGER.info("Discovered %d dyads from BIDS.", len(ordered))
     return ordered
 
@@ -260,8 +339,26 @@ def subject_tokens_for_dyad(dyad_id: str) -> list[str]:
     return tokens
 
 
+def _files_for_query(snapshot: DirectorySnapshot, *, suffixes: set[str], run: str) -> Iterable[IndexedFile]:
+    run_key = normalize_run(run)
+    if run_key in snapshot.files_by_run:
+        base_entries = snapshot.files_by_run[run_key]
+    else:
+        base_entries = snapshot.files
+
+    if not suffixes:
+        return base_entries
+
+    allowed_entries = {
+        id(entry)
+        for suffix in {suffix.lower() for suffix in suffixes}
+        for entry in snapshot.files_by_suffix.get(suffix, ())
+    }
+    return [entry for entry in base_entries if id(entry) in allowed_entries]
+
+
 def find_unit_path(
-    root_dir: Path,
+    root_dir: Path | DirectorySnapshot,
     dyad_id: str,
     task: str,
     run: str,
@@ -269,52 +366,37 @@ def find_unit_path(
     subject_id: str | None = None,
 ) -> str | None:
     """Find best-matching file path for one dyad/task/run unit."""
-    if not root_dir.exists():
+    snapshot = root_dir if isinstance(root_dir, DirectorySnapshot) else scan_directory(root_dir)
+    if not snapshot.root_dir.exists():
         return None
 
-    dyad_tokens = unique_preserve([dyad_id.lower(), dyad_id.replace("-", "").lower(), *subject_tokens_for_dyad(dyad_id)])
-    subject_tokens: list[str] = []
+    dyad_subjects = frozenset(subject_tokens_for_dyad(dyad_id))
+    subject_id_norm: str | None = None
     if subject_id:
-        subj_norm = normalize_subject_id(subject_id)
-        subject_tokens = unique_preserve([subj_norm.lower(), subj_norm.replace("-", "").lower()])
-    run_tokens = [f"run-{run}".lower(), f"run_{run}".lower(), f"run{run}".lower()]
-    if run.isdigit():
-        run_tokens.extend([f"run-{int(run):02d}", f"run_{int(run):02d}", f"run{int(run):02d}"])
-    run_tokens = unique_preserve(run_tokens)
-    task_tokens = unique_preserve([task.lower(), f"task-{task}".lower(), f"task_{task}".lower()])
+        subject_id_norm = normalize_subject_id(subject_id)
+    run_norm = normalize_run(run)
+    task_norm = normalize_task(task).lower()
 
     candidates: list[tuple[int, int, str]] = []
 
-    def _score(tokens: list[str], path_text: str) -> int | None:
-        id_match = any(_contains_token(path_text, token) for token in tokens)
-        run_match = any(_contains_token(path_text, token) for token in run_tokens)
-        task_match = any(_contains_token(path_text, token) for token in task_tokens)
-        if not (id_match and run_match):
-            return None
-        return 2 if task_match else 1
-
-    for path in sorted(root_dir.rglob("*")):
-        if _is_ignored_artifact(path):
-            continue
-        if not path.is_file():
-            continue
-        if suffixes and path.suffix.lower() not in suffixes:
+    for entry in _files_for_query(snapshot, suffixes=suffixes, run=run_norm):
+        if run_norm not in entry.runs:
             continue
 
-        path_text = path.as_posix().lower()
-        if subject_tokens:
-            subject_score = _score(subject_tokens, path_text)
-            if subject_score is not None:
-                # priority=0: subject match; priority=1: fallback dyad match
-                candidates.append((0, subject_score, str(path)))
+        task_match = task_norm in entry.tasks or _contains_token(entry.path_text, task_norm)
+        dyad_match = dyad_id in entry.dyads or bool(entry.subjects & dyad_subjects)
+
+        if subject_id_norm is not None:
+            subject_match = subject_id_norm in entry.subjects
+            if subject_match:
+                candidates.append((0, 2 if task_match else 1, str(entry.path)))
                 continue
-            dyad_score = _score(dyad_tokens, path_text)
-            if dyad_score is not None:
-                candidates.append((1, dyad_score, str(path)))
-        else:
-            dyad_score = _score(dyad_tokens, path_text)
-            if dyad_score is not None:
-                candidates.append((0, dyad_score, str(path)))
+            if dyad_match:
+                candidates.append((1, 2 if task_match else 1, str(entry.path)))
+            continue
+
+        if dyad_match:
+            candidates.append((0, 2 if task_match else 1, str(entry.path)))
 
     if not candidates:
         return None
@@ -324,59 +406,44 @@ def find_unit_path(
 
 
 def find_annotation_path(
-    root_dir: Path,
+    root_dir: Path | DirectorySnapshot,
     dyad_id: str,
     task: str,
     run: str,
     subject_id: str | None = None,
 ) -> str | None:
     """Find best-matching annotation path, preferring IPU files over channel metadata."""
-    if not root_dir.exists():
+    snapshot = root_dir if isinstance(root_dir, DirectorySnapshot) else scan_directory(root_dir)
+    if not snapshot.root_dir.exists():
         return None
 
-    if subject_id:
-        subj_norm = normalize_subject_id(subject_id)
-        dyad_tokens = unique_preserve(
-            [
-                subj_norm.lower(),
-                subj_norm.replace("-", "").lower(),
-            ]
-        )
-    else:
-        dyad_tokens = unique_preserve(
-            [dyad_id.lower(), dyad_id.replace("-", "").lower(), *subject_tokens_for_dyad(dyad_id)]
-        )
-    run_tokens = [f"run-{run}".lower(), f"run_{run}".lower(), f"run{run}".lower()]
-    if run.isdigit():
-        run_tokens.extend([f"run-{int(run):02d}", f"run_{int(run):02d}", f"run{int(run):02d}"])
-    run_tokens = unique_preserve(run_tokens)
-    task_tokens = unique_preserve([task.lower(), f"task-{task}".lower(), f"task_{task}".lower()])
+    subject_id_norm = normalize_subject_id(subject_id) if subject_id else None
+    dyad_subjects = frozenset(subject_tokens_for_dyad(dyad_id))
+    run_norm = normalize_run(run)
+    task_norm = normalize_task(task).lower()
 
     candidates: list[tuple[int, str]] = []
-    for path in sorted(root_dir.rglob("*")):
-        if _is_ignored_artifact(path):
-            continue
-        if not path.is_file():
-            continue
-        if path.suffix.lower() not in ANNOTATION_SUFFIXES:
-            continue
-
-        path_text = path.as_posix().lower()
+    for entry in _files_for_query(snapshot, suffixes=ANNOTATION_SUFFIXES, run=run_norm):
+        path_text = entry.path_text
         if any(token in path_text for token in ANNOTATION_EXCLUDE_TOKENS):
             continue
-        dyad_match = any(_contains_token(path_text, token) for token in dyad_tokens)
-        run_match = any(_contains_token(path_text, token) for token in run_tokens)
-        if not (dyad_match and run_match):
+        if run_norm not in entry.runs:
+            continue
+        if subject_id_norm is not None:
+            dyad_match = subject_id_norm in entry.subjects
+        else:
+            dyad_match = dyad_id in entry.dyads or bool(entry.subjects & dyad_subjects)
+        if not dyad_match:
             continue
 
         score = 1
         if "ipu" in path_text or "/ipu_" in path_text or "/ipu/" in path_text:
             score += 2
-        if any(_contains_token(path_text, token) for token in task_tokens):
+        if task_norm in entry.tasks or _contains_token(path_text, task_norm):
             score += 1
         if any(token in path_text for token in ANNOTATION_PREFER_TOKENS):
             score += 3
-        candidates.append((score, str(path)))
+        candidates.append((score, str(entry.path)))
 
     if not candidates:
         return None
