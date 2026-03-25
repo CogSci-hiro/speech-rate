@@ -33,7 +33,9 @@ fooof:
     theta_cf_other_rate:
       outcome: "theta_cf"
       formula: "theta_cf ~ other_rate + latency + duration_s + run"
-      eligibility: "self_rate"
+      eligibility:
+        not_null:
+          - self_rate
       test_predictors:
         - "other_rate"
       standardize:
@@ -44,6 +46,8 @@ fooof:
     offset_other_rate:
       outcome: "offset"
       formula: "offset ~ other_rate + latency + duration_s + run"
-      eligibility: "self_rate"
+      eligibility:
+        not_null:
+          - self_rate
       test_predictors:
         - "other_rate"

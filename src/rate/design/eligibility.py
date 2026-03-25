@@ -22,22 +22,10 @@ class EligibilityResult:
     n_rows_selected: int
 
 
-_ELIGIBILITY_COLUMN_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
-    "self_rate": (("self_rate", "speech_rate"),),
-    "alignment": (("self_rate", "speech_rate"), ("other_rate",),),
-    "convergence": (
-        ("convergence",),
-        ("baseline_self_rate",),
-        ("baseline_other_rate",),
-    ),
-}
-
-
 @dataclass(frozen=True)
 class ResolvedEligibility:
     """Normalized eligibility configuration."""
 
-    rule_name: str | None
     not_null: tuple[str, ...]
     min_values: Mapping[str, float]
     max_values: Mapping[str, float]
@@ -49,7 +37,7 @@ def apply_eligibility(
     metadata_df: pd.DataFrame,
     model_spec: ModelSpec | None = None,
     *,
-    eligibility: str | Mapping[str, Any] | None = None,
+    eligibility: Mapping[str, Any] | None = None,
     required_columns: Iterable[str] | None = None,
 ) -> EligibilityResult:
     """Apply explicit row-inclusion rules to metadata.
@@ -76,14 +64,13 @@ def apply_eligibility(
         return EligibilityResult(
             row_mask=empty_mask,
             applied_columns=(),
-            rule_name=_resolve_eligibility(model_spec=model_spec, eligibility=eligibility).rule_name,
+            rule_name=None,
             n_rows_input=0,
             n_rows_selected=0,
         )
 
     resolved = _resolve_eligibility(model_spec=model_spec, eligibility=eligibility)
-    rule_columns = _resolve_rule_columns(metadata_df, resolved.rule_name)
-    columns_to_check = tuple(dict.fromkeys([*rule_columns, *resolved.not_null, *(required_columns or [])]))
+    columns_to_check = tuple(dict.fromkeys([*resolved.not_null, *(required_columns or [])]))
     mask = np.ones((len(metadata_df),), dtype=bool)
     if columns_to_check:
         missing_columns = [column for column in columns_to_check if column not in metadata_df.columns]
@@ -103,7 +90,7 @@ def apply_eligibility(
     return EligibilityResult(
         row_mask=mask,
         applied_columns=columns_to_check,
-        rule_name=resolved.rule_name,
+        rule_name=None,
         n_rows_input=len(metadata_df),
         n_rows_selected=int(mask.sum()),
     )
@@ -114,38 +101,14 @@ def apply_trial_eligibility(*args, **kwargs) -> EligibilityResult:
     return apply_eligibility(*args, **kwargs)
 
 
-def _resolve_rule_columns(metadata_df: pd.DataFrame, rule_name: str | None) -> tuple[str, ...]:
-    if not rule_name:
-        return ()
-    if rule_name not in _ELIGIBILITY_COLUMN_GROUPS:
-        raise ValueError(f"Unsupported eligibility rule `{rule_name}`.")
-
-    resolved_columns: list[str] = []
-    for alternatives in _ELIGIBILITY_COLUMN_GROUPS[rule_name]:
-        matched = next((column for column in alternatives if column in metadata_df.columns), None)
-        if matched is not None:
-            resolved_columns.append(matched)
-    return tuple(resolved_columns)
-
-
 def _resolve_eligibility(
     *,
     model_spec: ModelSpec | None,
-    eligibility: str | Mapping[str, Any] | None,
+    eligibility: Mapping[str, Any] | None,
 ) -> ResolvedEligibility:
     raw_value = eligibility if eligibility is not None else getattr(model_spec, "eligibility", None)
     if raw_value is None:
         return ResolvedEligibility(
-            rule_name=None,
-            not_null=(),
-            min_values={},
-            max_values={},
-            equals={},
-            expressions=(),
-        )
-    if isinstance(raw_value, str):
-        return ResolvedEligibility(
-            rule_name=raw_value,
             not_null=(),
             min_values={},
             max_values={},
@@ -153,10 +116,9 @@ def _resolve_eligibility(
             expressions=(),
         )
     if not isinstance(raw_value, Mapping):
-        raise ValueError("Eligibility must be a string or mapping.")
+        raise ValueError("Eligibility must be a mapping.")
 
     return ResolvedEligibility(
-        rule_name=_coerce_optional_string(raw_value.get("rule"), field_name="eligibility.rule"),
         not_null=tuple(_coerce_string_list(raw_value.get("not_null"), field_name="eligibility.not_null")),
         min_values=_coerce_numeric_mapping(raw_value.get("min_values"), field_name="eligibility.min_values"),
         max_values=_coerce_numeric_mapping(raw_value.get("max_values"), field_name="eligibility.max_values"),
@@ -201,14 +163,6 @@ def _apply_expressions(metadata_df: pd.DataFrame, expressions: Iterable[str]) ->
             raise ValueError(f"Eligibility expression `{expression}` did not produce a row-wise result.")
         mask &= result.fillna(False).astype(bool).to_numpy(dtype=bool)
     return mask
-
-
-def _coerce_optional_string(value: Any, *, field_name: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError(f"{field_name} must be a string when provided.")
-    return value
 
 
 def _coerce_string_list(value: Any, *, field_name: str) -> list[str]:

@@ -29,7 +29,7 @@ class ModelSpec:
         Explicit outcome variable. When omitted in config it is inferred from
         the left-hand side of ``formula`` when possible.
     eligibility
-        Inclusion rule configuration to apply before formula evaluation.
+        Explicit inclusion-rule configuration to apply before formula evaluation.
     test_predictors
         Predictors or patsy term names that downstream code will test.
     standardize
@@ -46,7 +46,7 @@ class ModelSpec:
     name: str
     formula: str
     outcome: str | None = None
-    eligibility: str | Mapping[str, Any] | None = None
+    eligibility: Mapping[str, Any] | None = None
     test_predictors: tuple[str, ...] = ()
     standardize: tuple[str, ...] = ()
     derived: Mapping[str, str] = field(default_factory=dict)
@@ -211,21 +211,15 @@ def _normalize_eligibility(
     *,
     section: str,
     model_name: str,
-) -> str | Mapping[str, Any] | None:
+) -> Mapping[str, Any] | None:
     if eligibility is None:
         return None
-    if isinstance(eligibility, str):
-        return eligibility
     if not isinstance(eligibility, Mapping):
         raise ModelSpecError(
-            f"Model `{section}.{model_name}` eligibility must be a string or mapping when provided."
+            f"Model `{section}.{model_name}` eligibility must be a mapping when provided."
         )
 
     normalized = dict(eligibility)
-    rule = normalized.get("rule")
-    if rule is not None and not isinstance(rule, str):
-        raise ModelSpecError(f"Model `{section}.{model_name}` eligibility.rule must be a string when provided.")
-
     for field_name in ("not_null", "expressions"):
         if field_name not in normalized:
             continue

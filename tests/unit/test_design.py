@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from rate.design import (
     build_contrast_vector,
@@ -11,6 +12,7 @@ from rate.design import (
     get_predictor_column_indices,
     list_model_names,
     load_model_spec,
+    ModelSpecError,
 )
 from rate.fooof_mass.glm import prepare_fooof_mass_design
 from rate.glm.fit import prepare_glm_design
@@ -23,7 +25,7 @@ def test_load_model_spec_supports_models_and_legacy_formulas() -> None:
             "models": {
                 "self_rate": {
                     "formula": "self_rate ~ other_rate + latency + run",
-                    "eligibility": "self_rate",
+                    "eligibility": {"not_null": ["self_rate"]},
                     "test_predictors": ["other_rate"],
                     "standardize": ["other_rate", "latency"],
                     "derived": {"latency_sq": "latency ** 2"},
@@ -52,6 +54,22 @@ def test_load_model_spec_supports_models_and_legacy_formulas() -> None:
     assert list_model_names(legacy_config, section="glm") == ["subject_level"]
 
 
+def test_load_model_spec_rejects_string_eligibility() -> None:
+    config = {
+        "glm": {
+            "models": {
+                "self_rate": {
+                    "formula": "self_rate ~ other_rate",
+                    "eligibility": "self_rate",
+                }
+            }
+        }
+    }
+
+    with pytest.raises(ModelSpecError, match="eligibility must be a mapping"):
+        load_model_spec(config, section="glm", model_name="self_rate")
+
+
 def test_build_design_matrix_reports_row_drops_and_standardizes_after_eligibility() -> None:
     metadata = pd.DataFrame(
         {
@@ -67,7 +85,7 @@ def test_build_design_matrix_reports_row_drops_and_standardizes_after_eligibilit
             "models": {
                 "self_rate": {
                     "formula": "self_rate ~ other_rate + latency + run",
-                    "eligibility": "self_rate",
+                    "eligibility": {"not_null": ["self_rate"]},
                     "test_predictors": ["other_rate", "run"],
                     "standardize": ["other_rate", "latency"],
                 }
@@ -113,7 +131,7 @@ def test_build_design_matrix_supports_threshold_and_expression_eligibility_filte
                 "speech_rate_qc": {
                     "formula": "self_rate ~ other_rate + latency",
                     "eligibility": {
-                        "rule": "alignment",
+                        "not_null": ["self_rate", "other_rate"],
                         "min_values": {
                             "self_syllable_count": 3,
                             "other_syllable_count": 3,

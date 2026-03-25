@@ -8,7 +8,11 @@ lmeeeg:
   models:
     convergence_subject_intercept:
       formula: "convergence ~ self_rate + other_rate + latency + duration_s + run"
-      eligibility: "convergence"
+      eligibility:
+        not_null:
+          - convergence
+          - baseline_self_rate
+          - baseline_other_rate
       test_predictors:
         - "self_rate"
         - "other_rate"

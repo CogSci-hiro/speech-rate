@@ -1,12 +1,21 @@
 glm:
-  family: "mass_univariate"
   models:
-    self_rate:
-      formula: "~ other_rate + latency + duration_s + run"
-      eligibility: "self_rate"
+    other_rate_model:
+      formula: "~ other_rate + latency + run"
+      eligibility:
+        not_null:
+          - self_rate
+          - other_rate
+        min_values:
+          self_syllable_count: 3
+          other_syllable_count: 3
+          self_ipu_duration: 0.20
+          other_ipu_duration: 0.20
+        max_values:
+          self_ipu_duration: 8.0
+          other_ipu_duration: 8.0
+        expressions:  # you can add other kinds of selection expressions like "other_rate > self_rate"
+          - "self_ipu_duration >= 0.20"
+          - "other_ipu_duration >= 0.20"
       test_predictors:
         - "other_rate"
-      standardize:
-        - other_rate
-        - latency
-        - duration_s

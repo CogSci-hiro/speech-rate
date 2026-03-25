@@ -10,7 +10,7 @@ rule events_all:
 
 rule epochs_all:
     input:
-        EPOCHS_STAGE
+        epochs_stage_inputs
 
 
 rule glm_all:
