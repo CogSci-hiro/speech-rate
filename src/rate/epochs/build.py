@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from rate.eeg.io import read_raw_eeg
-from rate.epochs.metadata import build_epoch_metadata
+from rate.epochs.metadata import build_epoch_metadata, prepare_epoch_event_rows
 from rate.epochs.io import read_events_table
 
 LOGGER = logging.getLogger(__name__)
@@ -218,6 +218,7 @@ def build_epochs_for_run(
     raw = read_raw_eeg(raw_path, preload=bool((config.get("epochs") or {}).get("preload", True)), verbose="ERROR")
     events_df = read_events_table(events_table_path)
     selected_events = select_run_events(events_df, row)
+    selected_events = prepare_epoch_event_rows(selected_events)
 
     epochs_cfg = dict(config.get("epochs") or {})
     event_column = str(epochs_cfg.get("event_column", "time_s"))
@@ -298,5 +299,80 @@ def build_epochs_for_run(
         metadata=metadata_df,
         events_array=events_array,
         selected_events=kept_events,
+        summary=summary,
+    )
+
+
+def build_epochs_for_subject(
+    config: Mapping[str, Any],
+    rows: list[Mapping[str, Any]],
+    *,
+    events_table_path: Path,
+) -> EpochBuildResult:
+    """Build one concatenated epochs object for a subject across all runs."""
+    import mne
+
+    if not rows:
+        raise EpochBuildError("No runnable rows were provided for subject-level epoching.")
+
+    run_results: list[EpochBuildResult] = []
+    for row in rows:
+        raw_path_value = row.get("eeg_path")
+        if raw_path_value is None:
+            raise EpochBuildError(
+                "Dataset row is missing required preprocessed EEG path for "
+                f"subject_id={row.get('subject_id')}, task={row.get('task')}, run={row.get('run')}"
+            )
+        run_results.append(
+            build_epochs_for_run(
+                config,
+                row,
+                raw_path=Path(str(raw_path_value)),
+                events_table_path=events_table_path,
+            )
+        )
+
+    normalized_epochs = []
+    merged_bads: list[str] = []
+    for result in run_results:
+        for channel_name in result.epochs.info["bads"]:
+            if channel_name not in merged_bads:
+                merged_bads.append(channel_name)
+
+    for result in run_results:
+        epochs_copy = result.epochs.copy()
+        epochs_copy.info["bads"] = list(merged_bads)
+        normalized_epochs.append(epochs_copy)
+
+    concatenated_epochs = mne.concatenate_epochs(
+        normalized_epochs,
+        add_offset=True,
+        on_mismatch="raise",
+        verbose="ERROR",
+    )
+    metadata_df = pd.concat([result.metadata for result in run_results], ignore_index=True)
+    concatenated_epochs.metadata = metadata_df.copy()
+    events_array = concatenated_epochs.events.copy()
+    selected_events = pd.concat([result.selected_events for result in run_results], ignore_index=True)
+
+    summary = {
+        "status": "ok",
+        "dyad_id": str(rows[0]["dyad_id"]),
+        "subject_id": str(rows[0]["subject_id"]),
+        "events_table_path": str(events_table_path),
+        "n_runs": int(len(run_results)),
+        "merged_bads": list(merged_bads),
+        "processed_runs": [result.summary for result in run_results],
+        "selected_event_count": int(sum(int(result.summary["selected_event_count"]) for result in run_results)),
+        "dropped_out_of_bounds_count": int(sum(int(result.summary["dropped_out_of_bounds_count"]) for result in run_results)),
+        "kept_event_count": int(sum(int(result.summary["kept_event_count"]) for result in run_results)),
+        "epochs_count": int(len(concatenated_epochs)),
+    }
+
+    return EpochBuildResult(
+        epochs=concatenated_epochs,
+        metadata=metadata_df.reset_index(drop=True),
+        events_array=events_array,
+        selected_events=selected_events.reset_index(drop=True),
         summary=summary,
     )

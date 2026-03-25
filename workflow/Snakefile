@@ -95,6 +95,15 @@ def _epochs_run_map(index_path: str) -> dict[tuple[str, str, str], dict]:
     }
 
 
+@lru_cache(maxsize=None)
+def _epochs_subject_map(index_path: str) -> dict[str, dict]:
+    subject_rows: dict[str, dict] = {}
+    for row in _epochs_run_map(index_path).values():
+        subject_id = str(row["subject_id"])
+        subject_rows.setdefault(subject_id, row)
+    return subject_rows
+
+
 def preprocessing_row(wildcards):
     index_path = _dataset_index_checkpoint_path()
     key = (str(wildcards.subject_id), str(wildcards.task), str(wildcards.run))
@@ -127,7 +136,7 @@ def epochs_stage_inputs(wildcards):
     index_path = _dataset_index_checkpoint_path()
     return [
         str(build_epoch_output_paths(RESOLVED_CONFIG, row).summary_output_path)
-        for row in _epochs_run_map(index_path).values()
+        for row in _epochs_subject_map(index_path).values()
     ]
 
 

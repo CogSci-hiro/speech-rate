@@ -1,5 +1,5 @@
 epochs:
-  event_column: "t_onset"
+  event_column: "self_ipu_onset"
   time_origin: "raw_start"
   event_id_column: "event_id"
   metadata_source: "Epochs.metadata"

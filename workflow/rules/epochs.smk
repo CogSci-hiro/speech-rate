@@ -22,26 +22,23 @@ EPOCHS_STAGE = f"{OUT_DIR}/_stage/epochs_all.done.json"
 
 rule epoch_subject:
     input:
-        raw_eeg=lambda wildcards: str(epoch_paths(wildcards).raw_eeg_path),
+        preprocessing_stage=PREPROCESSING_STAGE,
         events_table=f"{OUT_DIR}/events/events.csv",
         dataset_index=f"{OUT_DIR}/dataset/index.parquet",
         config_path="config/config.yaml",
         schema_path="config/schema.json",
     output:
-        epochs=f"{OUT_DIR}/epochs/{{subject_id}}/task-{{task}}/run-{{run}}/{_EPOCHS_FILENAME}",
-        metadata=f"{OUT_DIR}/epochs/{{subject_id}}/task-{{task}}/run-{{run}}/{_METADATA_FILENAME}",
-        events_array=f"{OUT_DIR}/epochs/{{subject_id}}/task-{{task}}/run-{{run}}/{_EVENTS_ARRAY_FILENAME}",
-        summary=f"{OUT_DIR}/epochs/{{subject_id}}/task-{{task}}/run-{{run}}/{_SUMMARY_FILENAME}",
+        epochs=f"{OUT_DIR}/epochs/{{subject_id}}/{_EPOCHS_FILENAME}",
+        metadata=f"{OUT_DIR}/epochs/{{subject_id}}/{_METADATA_FILENAME}",
+        events_array=f"{OUT_DIR}/epochs/{{subject_id}}/{_EVENTS_ARRAY_FILENAME}",
+        summary=f"{OUT_DIR}/epochs/{{subject_id}}/{_SUMMARY_FILENAME}",
     params:
-        dyad_id=lambda wildcards: str(epochs_row(wildcards)["dyad_id"]),
+        dyad_id=lambda wildcards: str(_epochs_subject_map(_dataset_index_checkpoint_path())[str(wildcards.subject_id)]["dyad_id"]),
         subject_id=lambda wildcards: str(wildcards.subject_id),
-        task=lambda wildcards: str(wildcards.task),
-        run=lambda wildcards: str(wildcards.run),
     shell:
         "PYTHONPATH=src python -m rate.cli.main epoch-subject "
         "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
-        "--dyad-id {params.dyad_id} --subject-id {params.subject_id} --task {params.task} --run {params.run} "
-        "--raw-path {input.raw_eeg} --events-table {input.events_table} "
+        "--dyad-id {params.dyad_id} --subject-id {params.subject_id} --events-table {input.events_table} "
         "--epochs-output {output.epochs} --metadata-output {output.metadata} "
         "--events-array-output {output.events_array} --summary-output {output.summary}"
 

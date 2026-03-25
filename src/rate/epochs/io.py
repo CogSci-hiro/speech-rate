@@ -61,13 +61,7 @@ def build_epoch_output_paths(
     events_array_filename = _render_filename(str(output_cfg.get("events_array_filename", "events-{lock_name}.npy")), lock_name=lock_name)
     summary_filename = _render_filename(str(output_cfg.get("summary_filename", "epoching_summary-{lock_name}.json")), lock_name=lock_name)
 
-    base_dir = (
-        out_dir
-        / "epochs"
-        / str(row["subject_id"])
-        / f"task-{row['task']}"
-        / f"run-{row['run']}"
-    )
+    base_dir = out_dir / "epochs" / str(row["subject_id"])
     return EpochRunPaths(
         raw_eeg_path=raw_eeg_path or resolve_preprocessed_eeg_path(config, row),
         events_table_path=resolve_events_table_path(config, override_path=events_table_path),

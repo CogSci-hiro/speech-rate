@@ -13,7 +13,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rate.epochs.build import build_epochs_for_run, convert_event_rows_to_samples, select_run_events
+from rate.epochs.build import build_epochs_for_run, build_epochs_for_subject, convert_event_rows_to_samples, select_run_events
+from rate.epochs.io import build_epoch_output_paths
+from rate.epochs.metadata import build_epoch_metadata
 
 
 def _config(out_dir: Path) -> dict:
@@ -133,3 +135,94 @@ def test_build_epochs_for_run_uses_time_s_on_downsampled_raw_and_drops_out_of_bo
     assert result.summary["selected_event_count"] == 2
     assert result.summary["dropped_out_of_bounds_count"] == 1
     assert result.summary["epochs_count"] == 1
+
+
+def test_build_epoch_metadata_renames_confusing_timing_columns() -> None:
+    metadata = build_epoch_metadata(
+        pd.DataFrame(
+            [
+                {
+                    "event_id": "ev-1",
+                    "t_onset": 1.25,
+                    "t_offset": 1.75,
+                    "latency": 0.4,
+                    "subject_id": "sub-001",
+                }
+            ]
+        ),
+        {"epochs": {}},
+        epoch_samples=[125],
+    )
+
+    assert "t_onset" not in metadata.columns
+    assert "t_offset" not in metadata.columns
+    assert metadata["self_ipu_onset"].tolist() == [pytest.approx(1.25)]
+    assert metadata["other_ipu_offset"].tolist() == [pytest.approx(0.85)]
+    assert metadata["epoch_sample"].tolist() == [125]
+
+
+def test_build_epochs_for_subject_concatenates_runs_and_uses_flat_subject_output(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _config(out_dir)
+    config["epochs"]["event_column"] = "self_ipu_onset"
+    config["epochs"]["time_origin"] = "raw_start"
+
+    row_run_1 = {"dyad_id": "dyad-001", "subject_id": "sub-001", "role": "odd", "task": "conversation", "run": "1"}
+    row_run_2 = {"dyad_id": "dyad-001", "subject_id": "sub-001", "role": "odd", "task": "conversation", "run": "2"}
+
+    raw_1 = _make_raw(sfreq=100.0, first_samp=100, n_samples=400)
+    raw_2 = _make_raw(sfreq=100.0, first_samp=200, n_samples=400)
+    raw_1.info["bads"] = ["Fz"]
+    raw_2.info["bads"] = ["Cz"]
+    raw_path_1 = tmp_path / "sub-001_run-1_raw.fif"
+    raw_path_2 = tmp_path / "sub-001_run-2_raw.fif"
+    raw_1.save(raw_path_1, overwrite=True, verbose="ERROR")
+    raw_2.save(raw_path_2, overwrite=True, verbose="ERROR")
+
+    events_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "task": "conversation",
+                "run": "1",
+                "event_id": "ev-1",
+                "t_onset": 0.5,
+                "t_offset": 0.8,
+                "latency": 0.2,
+            },
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "task": "conversation",
+                "run": "2",
+                "event_id": "ev-2",
+                "t_onset": 0.6,
+                "t_offset": 0.9,
+                "latency": 0.1,
+            },
+        ]
+    )
+    events_table_path = tmp_path / "events.csv"
+    events_df.to_csv(events_table_path, index=False)
+
+    result = build_epochs_for_subject(
+        config,
+        [
+            {**row_run_1, "eeg_path": str(raw_path_1)},
+            {**row_run_2, "eeg_path": str(raw_path_2)},
+        ],
+        events_table_path=events_table_path,
+    )
+
+    output_paths = build_epoch_output_paths(config, row_run_1)
+
+    assert len(result.epochs) == 2
+    assert result.metadata["self_ipu_onset"].tolist() == pytest.approx([0.5, 0.6])
+    assert result.metadata["other_ipu_offset"].tolist() == pytest.approx([0.3, 0.5])
+    assert "t_onset" not in result.metadata.columns
+    assert "t_offset" not in result.metadata.columns
+    assert len(np.unique(result.events_array[:, 0])) == len(result.events_array)
+    assert result.summary["merged_bads"] == ["Fz", "Cz"]
+    assert output_paths.epochs_output_path == out_dir / "epochs" / "sub-001" / "epochs-self_ipu_onset.fif"
+    assert output_paths.metadata_output_path == out_dir / "epochs" / "sub-001" / "metadata-self_ipu_onset.csv"

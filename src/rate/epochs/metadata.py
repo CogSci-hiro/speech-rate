@@ -7,6 +7,19 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 
 
+def prepare_epoch_event_rows(event_rows: pd.DataFrame) -> pd.DataFrame:
+    """Add epoch-facing timing aliases derived from the canonical events table."""
+    prepared = event_rows.copy()
+    if "t_onset" in prepared.columns:
+        prepared["self_ipu_onset"] = pd.to_numeric(prepared["t_onset"], errors="coerce")
+        if "latency" in prepared.columns:
+            prepared["other_ipu_offset"] = pd.to_numeric(prepared["t_onset"], errors="coerce") - pd.to_numeric(
+                prepared["latency"],
+                errors="coerce",
+            )
+    return prepared
+
+
 def build_epoch_metadata(
     event_rows: pd.DataFrame,
     config: Mapping[str, Any],
@@ -29,14 +42,17 @@ def build_epoch_metadata(
     pandas.DataFrame
         Metadata rows aligned 1:1 with the final epochs order.
     """
+    prepared_rows = prepare_epoch_event_rows(event_rows)
     epochs_cfg = dict(config.get("epochs") or {})
     selected_columns = epochs_cfg.get("metadata_columns")
 
     if selected_columns:
-        keep_columns = [column for column in selected_columns if column in event_rows.columns]
-        metadata_df = event_rows.loc[:, keep_columns].copy()
+        keep_columns = [column for column in selected_columns if column in prepared_rows.columns]
+        metadata_df = prepared_rows.loc[:, keep_columns].copy()
     else:
-        metadata_df = event_rows.copy()
+        metadata_df = prepared_rows.copy()
+
+    metadata_df = metadata_df.drop(columns=["t_onset", "t_offset"], errors="ignore")
 
     if epoch_samples is not None:
         metadata_df["epoch_sample"] = list(epoch_samples)
