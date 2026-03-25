@@ -50,6 +50,10 @@ BASE_EVENTS_COLUMNS = [
     "task",
     "duration_s",
     "syllables",
+    "self_n_syllables",
+    "other_n_syllables",
+    "self_ipu_duration",
+    "other_ipu_duration",
     "annotations_path",
 ]
 QUESTIONNAIRE_COLUMNS = [column for column in QUESTIONNAIRE_OUTPUT_COLUMNS if column != "subject_id"]
@@ -141,6 +145,10 @@ def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[s
     unit_df["alignment_sq"] = pd.NA
     unit_df["convergence_sq"] = pd.NA
     unit_df["time_within_run"] = pd.NA
+    unit_df["self_n_syllables"] = pd.NA
+    unit_df["other_n_syllables"] = pd.NA
+    unit_df["self_ipu_duration"] = pd.NA
+    unit_df["other_ipu_duration"] = pd.NA
 
     return unit_df[BASE_EVENTS_COLUMNS]
 

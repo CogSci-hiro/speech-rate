@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,59 @@ def _compile_patterns(patterns: Sequence[str]) -> list[re.Pattern[str]]:
 
 def _match_any(name: str, patterns: Sequence[re.Pattern[str]]) -> bool:
     return any(pattern.search(name) for pattern in patterns)
+
+
+def _normalize_bids_channel_type(value: str) -> str:
+    token = str(value).strip().lower()
+    type_map = {
+        "eeg": "eeg",
+        "emg": "emg",
+        "ecg": "ecg",
+        "eog": "eog",
+        "stim": "stim",
+        "misc": "misc",
+        "bio": "bio",
+        "ref": "misc",
+        "reference": "misc",
+    }
+    return type_map.get(token, "misc")
+
+
+def apply_bids_channel_types(raw, channels_tsv_path: Path | str) -> dict[str, str]:
+    """Apply BIDS channel types from ``channels.tsv`` onto an MNE raw object.
+
+    Any recognized non-EEG type is propagated into ``raw`` so later EEG-only
+    selection does not accidentally retain reference, EOG, ECG, or misc
+    channels that were originally loaded as EEG by the reader.
+    """
+    path = Path(channels_tsv_path)
+    if not path.exists():
+        raise FileNotFoundError(f"BIDS channels.tsv file does not exist: {path}")
+
+    table = pd.read_csv(path, sep="\t")
+    if table.empty or "type" not in table.columns:
+        return {}
+
+    name_column = "name" if "name" in table.columns else "channel_name" if "channel_name" in table.columns else None
+    if name_column is None:
+        raise ValueError(f"{path} is missing a channel-name column ('name' or 'channel_name').")
+
+    raw_lookup = {name: name for name in raw.ch_names}
+    raw_lookup_lower = {name.lower(): name for name in raw.ch_names}
+    channel_type_map: dict[str, str] = {}
+
+    for row in table.itertuples(index=False):
+        channel_name = str(getattr(row, name_column)).strip()
+        if not channel_name:
+            continue
+        raw_name = raw_lookup.get(channel_name) or raw_lookup_lower.get(channel_name.lower())
+        if raw_name is None:
+            continue
+        channel_type_map[raw_name] = _normalize_bids_channel_type(getattr(row, "type"))
+
+    if channel_type_map:
+        raw.set_channel_types(channel_type_map, on_unit_change="ignore")
+    return channel_type_map
 
 
 def split_eeg_and_emg_channels(raw, config: Mapping[str, Any]) -> ChannelSplit:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,8 +78,19 @@ def read_events_table(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def _configure_mne_runtime() -> None:
+    """Set conservative runtime defaults before importing MNE.
+
+    This mirrors the test environment and avoids Numba cache issues in some
+    local Python/MNE installations.
+    """
+    os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+    os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
+
+
 def read_epochs(path: Path, *, preload: bool = False):
     """Read an MNE epochs file."""
+    _configure_mne_runtime()
     import mne
 
     return mne.read_epochs(path, preload=preload, verbose="ERROR")
@@ -86,6 +98,7 @@ def read_epochs(path: Path, *, preload: bool = False):
 
 def write_epochs(epochs, output_path: Path) -> Path:
     """Write epochs to FIF."""
+    _configure_mne_runtime()
     ensure_parent_dir(output_path)
     epochs.save(output_path, overwrite=True, verbose="ERROR")
     return output_path

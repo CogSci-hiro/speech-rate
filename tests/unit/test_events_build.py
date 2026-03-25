@@ -178,6 +178,10 @@ def test_build_events_table_restores_old_columns_and_appends_questionnaires(
         "task",
         "duration_s",
         "syllables",
+        "self_n_syllables",
+        "other_n_syllables",
+        "self_ipu_duration",
+        "other_ipu_duration",
         "annotations_path",
     }
     assert required_old_columns.issubset(set(events_df.columns))
@@ -187,6 +191,10 @@ def test_build_events_table_restores_old_columns_and_appends_questionnaires(
     assert len(events_df) == 4
     assert events_df["event_id"].str.startswith("dyad-001_1_dialogue_ev").all()
     assert events_df["self_rate"].notna().all()
+    assert events_df["self_n_syllables"].eq(events_df["syllables"]).all()
+    assert events_df["self_ipu_duration"].eq(events_df["duration_s"]).all()
+    assert events_df["other_n_syllables"].notna().sum() >= 3
+    assert events_df["other_ipu_duration"].notna().sum() >= 3
     assert events_df["time_within_run"].between(0.0, 1.0).all()
     assert events_df.loc[events_df["subject_id"] == "sub-001", "likeability"].eq(15).all()
     assert events_df.loc[events_df["subject_id"] == "sub-002", "likeability"].isna().all()

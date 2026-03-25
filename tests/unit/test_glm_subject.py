@@ -146,3 +146,70 @@ def test_glm_subject_cli_writes_subject_level_outputs(tmp_path: Path) -> None:
     assert betas.shape == (2, 2, 3)
     assert np.allclose(betas[1], slope_map)
     assert output_paths.summary_output_path == out_dir / "glm" / "sub-001" / "subject_level" / "summary.json"
+
+
+def test_glm_subject_cli_writes_skipped_outputs_when_no_epochs_survive_filtering(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = {
+        "paths": {"out_dir": str(out_dir)},
+        "epochs": {},
+        "glm": {
+            "models": {
+                "subject_level": {
+                    "formula": "~ other_rate",
+                    "eligibility": {"not_null": ["other_rate"]},
+                    "test_predictors": ["other_rate"],
+                }
+            }
+        },
+    }
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "status": "ok",
+        "eeg_path": str(tmp_path / "placeholder_raw_1.fif"),
+    }
+
+    metadata = pd.DataFrame({"other_rate": [np.nan, np.nan, np.nan]})
+    data = np.zeros((3, 2, 3), dtype=float)
+    epochs = _make_epochs(data, metadata.fillna({"other_rate": -99.0}))
+
+    epochs_path = tmp_path / "epochs.fif"
+    metadata_path = tmp_path / "metadata.csv"
+    dataset_index_path = tmp_path / "index.parquet"
+    epochs.save(epochs_path, overwrite=True, verbose="ERROR")
+    metadata.to_csv(metadata_path, index=False)
+    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        dataset_index=str(dataset_index_path),
+        subject_id="sub-001",
+        model_name="subject_level",
+        epochs_path=str(epochs_path),
+        metadata_path=str(metadata_path),
+        run_all=False,
+        output=None,
+    )
+
+    exit_code = glm_subject.run(args, config=config)
+    assert exit_code == 0
+
+    output_paths = build_glm_output_paths(
+        config,
+        row,
+        model_name="subject_level",
+        epochs_path=epochs_path,
+        metadata_path=metadata_path,
+    )
+    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
+    betas = np.load(output_paths.betas_output_path)
+
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "No epochs remain after design filtering."
+    assert summary["n_epochs_used"] == 0
+    assert betas.shape == (2, 2, 3)
+    assert np.isnan(betas).all()

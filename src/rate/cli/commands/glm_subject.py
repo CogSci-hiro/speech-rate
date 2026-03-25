@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from rate.cli.commands._workflow_common import add_common_config_arguments
 from rate.design import list_model_names
 from rate.glm.fit import fit_subject_glm, prepare_glm_design
-from rate.glm.io import build_glm_output_paths, load_glm_inputs, save_glm_result
+from rate.glm.io import build_glm_output_paths, load_glm_inputs, save_glm_result, save_glm_skip_result
 from rate.util import read_parquet_dataframe
 
 LOGGER = logging.getLogger(__name__)
@@ -95,6 +95,24 @@ def _fit_one_run(
     )
     epochs, metadata_df = load_glm_inputs(output_paths.epochs_input_path, output_paths.metadata_input_path)
     design_result = prepare_glm_design(metadata_df, config, model_name=model_name)
+    if design_result.n_rows_final == 0:
+        summary = save_glm_skip_result(
+            epochs,
+            design_result,
+            output_paths,
+            reason="No epochs remain after design filtering.",
+        )
+        LOGGER.warning(
+            "Skipping GLM fit for %s model=%s because no epochs survived filtering.",
+            row["subject_id"],
+            model_name,
+        )
+        return {
+            "subject_id": str(row["subject_id"]),
+            "model_name": model_name,
+            "summary_output": str(output_paths.summary_output_path),
+            "n_epochs_used": int(summary["n_epochs_used"]),
+        }
     fit_result = fit_subject_glm(epochs, design_result)
     summary = save_glm_result(fit_result, output_paths)
     LOGGER.info(

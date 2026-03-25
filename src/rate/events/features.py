@@ -13,7 +13,7 @@ def compute_other_rate(
     events_df: pd.DataFrame,
     window_s: float,
     time_lock: str = "onset",
-) -> tuple[pd.Series, pd.Series, pd.Series]:
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
     """Compute nearest-other-speaker features per event."""
     if time_lock not in SUPPORTED_MATCHING_TIME_LOCKS:
         raise ValueError(f"Unsupported matching time_lock: {time_lock!r}")
@@ -24,6 +24,8 @@ def compute_other_rate(
     other_rates: list[float] = []
     listeners: list[str | None] = []
     latencies: list[float] = []
+    other_syllables: list[float] = []
+    other_durations: list[float] = []
 
     for row in events_df.itertuples(index=False):
         candidate_df = events_df[events_df["speaker"] != row.speaker].copy()
@@ -31,6 +33,8 @@ def compute_other_rate(
             other_rates.append(np.nan)
             listeners.append(None)
             latencies.append(np.nan)
+            other_syllables.append(np.nan)
+            other_durations.append(np.nan)
             continue
 
         origin = float(getattr(row, origin_col))
@@ -41,6 +45,8 @@ def compute_other_rate(
             other_rates.append(np.nan)
             listeners.append(None)
             latencies.append(np.nan)
+            other_syllables.append(np.nan)
+            other_durations.append(np.nan)
             continue
 
         deltas = (within_window[target_col] - origin).abs().to_numpy(dtype=float)
@@ -48,11 +54,15 @@ def compute_other_rate(
         other_rates.append(float(winner["self_rate"]))
         listeners.append(str(winner["speaker"]))
         latencies.append(origin - float(winner[target_col]))
+        other_syllables.append(float(winner["syllables"]))
+        other_durations.append(float(winner["duration_s"]))
 
     return (
         pd.Series(other_rates, dtype="float64"),
         pd.Series(listeners, dtype="object"),
         pd.Series(latencies, dtype="float64"),
+        pd.Series(other_syllables, dtype="float64"),
+        pd.Series(other_durations, dtype="float64"),
     )
 
 
@@ -101,8 +111,16 @@ def add_event_rate_features(
 ) -> pd.DataFrame:
     """Add rate, derived behavioral, squared-rate, and time-within-run features."""
     enriched = unit_df.copy()
+    enriched["self_n_syllables"] = enriched["syllables"].astype(float)
+    enriched["self_ipu_duration"] = enriched["duration_s"].astype(float)
     enriched["self_rate"] = enriched["syllables"] / enriched["duration_s"]
-    enriched["other_rate"], enriched["listener"], enriched["latency"] = compute_other_rate(
+    (
+        enriched["other_rate"],
+        enriched["listener"],
+        enriched["latency"],
+        enriched["other_n_syllables"],
+        enriched["other_ipu_duration"],
+    ) = compute_other_rate(
         enriched,
         window_s=absdiff_window_s,
         time_lock=matching_time_lock,
@@ -120,4 +138,3 @@ def add_event_rate_features(
         method=method,
     )
     return enriched
-

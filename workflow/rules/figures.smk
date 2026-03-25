@@ -1,4 +1,5 @@
 GLM_FIGURES_OUTPUT = f"{OUT_DIR}/figures/glm/figure_manifest.json"
+MODEL_WEIGHTS_OUTPUT_DIR = f"{OUT_DIR}/figures/glm/model_weights"
 FOOOF_FIGURES_OUTPUT = f"{OUT_DIR}/figures/fooof/figure_manifest.json"
 
 
@@ -24,3 +25,15 @@ rule figures_fooof:
         "PYTHONPATH=src python -m rate.cli.main figures-fooof "
         "--config config/config.yaml --schema config/schema.json "
         "--viz-config {input.viz_config} --output {output}"
+
+
+rule model_weights_glm:
+    input:
+        glm_outputs=glm_model_weights_inputs,
+        viz_config="config/viz.yaml",
+    output:
+        directory(MODEL_WEIGHTS_OUTPUT_DIR),
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main model-weights-glm "
+        "--config config/config.yaml --schema config/schema.json "
+        "--viz-config {input.viz_config} --output {output}/manifest.json"

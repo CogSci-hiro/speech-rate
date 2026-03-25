@@ -5,7 +5,9 @@ rule preprocessing_all:
 
 rule events_all:
     input:
-        EVENTS_STAGE
+        EVENTS_OUTPUT,
+        EVENTS_QC_OUTPUT,
+        EVENTS_VALIDATION_OUTPUT
 
 
 rule epochs_all:
@@ -29,6 +31,11 @@ rule lmeeeg_all:
     input:
         LMEEEG_STAGE,
         LMEEEG_STATS_OUTPUT
+
+
+rule model_weights_all:
+    input:
+        MODEL_WEIGHTS_OUTPUT_DIR
 
 
 rule figures_all:

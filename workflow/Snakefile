@@ -158,6 +158,23 @@ def glm_stage_inputs(wildcards):
     ]
 
 
+def glm_model_weights_inputs(wildcards):
+    index_path = _dataset_index_checkpoint_path()
+    inputs: list[str] = []
+    for row in _epochs_subject_map(index_path).values():
+        for model_name in GLM_MODEL_NAMES:
+            paths = build_glm_output_paths(RESOLVED_CONFIG, row, model_name=model_name)
+            inputs.extend(
+                [
+                    str(paths.summary_output_path),
+                    str(paths.predictor_betas_output_path),
+                    str(paths.times_output_path),
+                    str(paths.channel_names_output_path),
+                ]
+            )
+    return inputs
+
+
 def fooof_model_spec(model_name):
     return RESOLVED_CONFIG["fooof"]["models"][str(model_name)]
 

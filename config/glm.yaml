@@ -6,16 +6,17 @@ glm:
         not_null:
           - self_rate
           - other_rate
+          - self_n_syllables
+          - other_n_syllables
+          - self_ipu_duration
+          - other_ipu_duration
         min_values:
-          self_syllable_count: 3
-          other_syllable_count: 3
+          self_n_syllables: 3
+          other_n_syllables: 3
           self_ipu_duration: 0.20
           other_ipu_duration: 0.20
         max_values:
           self_ipu_duration: 8.0
           other_ipu_duration: 8.0
-        expressions:  # you can add other kinds of selection expressions like "other_rate > self_rate"
-          - "self_ipu_duration >= 0.20"
-          - "other_ipu_duration >= 0.20"
       test_predictors:
         - "other_rate"

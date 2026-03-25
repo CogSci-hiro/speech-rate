@@ -11,6 +11,7 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from rate.design import get_predictor_column_indices
 from rate.epochs.io import build_epoch_output_paths, read_epochs
 from rate.glm.beta import build_predictor_column_map, extract_beta_maps
 from rate.glm.fit import GLMFitResult
@@ -152,6 +153,96 @@ def save_glm_result(result: GLMFitResult, output_paths: GLMRunPaths) -> dict[str
         "degrees_of_freedom": result.degrees_of_freedom,
         "rank": result.rank,
         "drop_report": dict(result.design_result.drop_report),
+        "paths": {
+            "betas": str(output_paths.betas_output_path),
+            "standard_errors": str(output_paths.standard_errors_output_path),
+            "t_values": str(output_paths.t_values_output_path),
+            "residual_variance": str(output_paths.residual_variance_output_path),
+            "design_matrix": str(output_paths.design_matrix_output_path),
+            "selection": str(output_paths.selection_output_path),
+            "predictor_betas": str(output_paths.predictor_betas_output_path),
+        },
+    }
+    output_paths.summary_output_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return summary
+
+
+def save_glm_skip_result(
+    epochs,
+    design_result,
+    output_paths: GLMRunPaths,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    """Write placeholder GLM outputs for a subject with zero usable epochs."""
+    ensure_parent_dir(output_paths.betas_output_path)
+
+    channel_names = list(epochs.ch_names)
+    times = np.asarray(epochs.times, dtype=float)
+    column_names = list(design_result.column_names)
+    n_columns = len(column_names)
+    n_channels = len(channel_names)
+    n_times = int(times.shape[0])
+
+    empty_betas = np.full((n_columns, n_channels, n_times), np.nan, dtype=float)
+    empty_residuals = np.full((n_channels, n_times), np.nan, dtype=float)
+    np.save(output_paths.betas_output_path, empty_betas)
+    np.save(output_paths.standard_errors_output_path, empty_betas)
+    np.save(output_paths.t_values_output_path, empty_betas)
+    np.save(output_paths.residual_variance_output_path, empty_residuals)
+    np.save(output_paths.design_matrix_output_path, np.asarray(design_result.design_matrix, dtype=float))
+    np.save(output_paths.row_index_output_path, np.asarray([], dtype=int))
+    np.save(output_paths.times_output_path, times)
+
+    output_paths.channel_names_output_path.write_text(json.dumps(channel_names, indent=2) + "\n", encoding="utf-8")
+    output_paths.column_names_output_path.write_text(json.dumps(column_names, indent=2) + "\n", encoding="utf-8")
+    output_paths.test_predictors_output_path.write_text(
+        json.dumps(list(design_result.test_predictors), indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    predictor_columns = {
+        predictor: [
+            column_names[index]
+            for index in get_predictor_column_indices(
+                predictor,
+                column_names=column_names,
+                term_name_slices=design_result.term_name_slices,
+            )
+        ]
+        for predictor in design_result.test_predictors
+    }
+    output_paths.predictor_columns_output_path.write_text(
+        json.dumps(predictor_columns, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    predictor_betas = {
+        column_name: np.full((n_channels, n_times), np.nan, dtype=float)
+        for columns in predictor_columns.values()
+        for column_name in columns
+    }
+    np.savez(output_paths.predictor_betas_output_path, **predictor_betas)
+
+    selection_df = design_result.filtered_metadata.copy()
+    selection_df.insert(0, "row_index", [])
+    write_parquet_dataframe(selection_df.reset_index(drop=True), output_paths.selection_output_path)
+
+    summary = {
+        "status": "skipped",
+        "reason": reason,
+        "n_epochs_input": int(len(epochs)),
+        "n_epochs_used": 0,
+        "n_channels": n_channels,
+        "n_times": n_times,
+        "design_matrix_shape": list(np.asarray(design_result.design_matrix).shape),
+        "target_matrix_shape": [0, int(n_channels * n_times)],
+        "column_names": column_names,
+        "test_predictors": list(design_result.test_predictors),
+        "predictor_columns": predictor_columns,
+        "degrees_of_freedom": 0,
+        "rank": 0,
+        "drop_report": dict(design_result.drop_report),
         "paths": {
             "betas": str(output_paths.betas_output_path),
             "standard_errors": str(output_paths.standard_errors_output_path),

@@ -28,6 +28,7 @@ _COMMANDS = {
     "lmeeeg-prepare-trials": "rate.cli.commands.lmeeeg_prepare_trials",
     "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
     "figures-glm": "rate.cli.commands.figures_glm",
+    "model-weights-glm": "rate.cli.commands.model_weights_glm",
     "figures-fooof": "rate.cli.commands.figures_fooof",
 }
 

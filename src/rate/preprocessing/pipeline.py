@@ -10,7 +10,7 @@ import pandas as pd
 
 from rate.eeg.io import read_raw_eeg
 from rate.preprocessing.bad_channels import interpolate_bad_channels, load_bad_channels_from_bids_tsv
-from rate.preprocessing.channels import apply_montage, split_eeg_and_emg_channels
+from rate.preprocessing.channels import apply_bids_channel_types, apply_montage, split_eeg_and_emg_channels
 from rate.preprocessing.downsample import downsample_raw
 from rate.preprocessing.events import extract_events_table
 from rate.preprocessing.filter import apply_bandpass_filter
@@ -83,6 +83,7 @@ def preprocess_run(
 
     # 1. Separate/drop channels, extract events, and add montage.
     events_df, event_id_map = extract_events_table(raw, config)
+    apply_bids_channel_types(raw, run_paths.channels_tsv_path)
     channel_split = split_eeg_and_emg_channels(raw, config)
     eeg_raw = raw.copy().pick(channel_split.eeg_names)
     emg_raw = raw.copy().pick(channel_split.emg_names) if channel_split.emg_names else None

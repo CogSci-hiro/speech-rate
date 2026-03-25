@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
 
 import mne
 import numpy as np
@@ -10,6 +11,7 @@ import pandas as pd
 import pytest
 
 from rate.preprocessing.bad_channels import load_bad_channels_from_bids_tsv
+from rate.preprocessing.channels import apply_bids_channel_types
 from rate.preprocessing.pipeline import preprocess_run
 
 
@@ -35,6 +37,10 @@ def _write_channels_tsv(path: Path, *, bad_names: list[str]) -> None:
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(path, sep="\t", index=False)
+
+
+def _write_channels_tsv_with_types(path: Path, rows: list[dict[str, str]]) -> None:
+    pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
 
 
 def _config(tmp_path: Path) -> dict:
@@ -136,6 +142,86 @@ def test_load_bad_channels_from_bids_tsv_warns_on_partial_name_mismatch(tmp_path
 
     assert bads == ["Fz"]
     assert raw.info["bads"] == ["Fz"]
+
+
+def test_apply_bids_channel_types_overrides_raw_types(tmp_path: Path) -> None:
+    raw = mne.io.RawArray(
+        np.random.default_rng(5).normal(scale=1e-6, size=(4, 400)),
+        mne.create_info(
+            ch_names=["Fz", "Cz", "rEAR", "lEAR"],
+            sfreq=200.0,
+            ch_types=["eeg", "eeg", "eeg", "eeg"],
+        ),
+        verbose="ERROR",
+    )
+    channels_tsv_path = tmp_path / "channels.tsv"
+    _write_channels_tsv_with_types(
+        channels_tsv_path,
+        rows=[
+            {"name": "Fz", "type": "EEG", "status": "good"},
+            {"name": "Cz", "type": "EEG", "status": "good"},
+            {"name": "rEAR", "type": "REF", "status": "good"},
+            {"name": "lEAR", "type": "REF", "status": "good"},
+        ],
+    )
+
+    apply_bids_channel_types(raw, channels_tsv_path)
+
+    assert raw.get_channel_types() == ["eeg", "eeg", "misc", "misc"]
+
+
+def test_preprocess_run_drops_non_eeg_channels_from_bids_types(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = mne.io.RawArray(
+        np.random.default_rng(9).normal(scale=1e-6, size=(6, 400)),
+        mne.create_info(
+            ch_names=["Fz", "Cz", "Pz", "Oz", "rEAR", "lEAR"],
+            sfreq=200.0,
+            ch_types=["eeg", "eeg", "eeg", "eeg", "eeg", "eeg"],
+        ),
+        verbose="ERROR",
+    )
+    raw.set_annotations(mne.Annotations(onset=[0.5], duration=[0.0], description=["stim/a"]))
+    raw_path = tmp_path / "input_raw.fif"
+    raw.save(raw_path, overwrite=True, verbose="ERROR")
+
+    channels_tsv_path = tmp_path / "sub-001_task-conversation_run-01_channels.tsv"
+    _write_channels_tsv_with_types(
+        channels_tsv_path,
+        rows=[
+            {"name": "Fz", "type": "EEG", "status": "good"},
+            {"name": "Cz", "type": "EEG", "status": "good"},
+            {"name": "Pz", "type": "EEG", "status": "good"},
+            {"name": "Oz", "type": "EEG", "status": "good"},
+            {"name": "rEAR", "type": "REF", "status": "good"},
+            {"name": "lEAR", "type": "REF", "status": "good"},
+        ],
+    )
+
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "raw_eeg_path": str(raw_path),
+        "eeg_path": str(tmp_path / "out" / "preprocessing" / "sub-001" / "task-conversation" / "run-1" / "eeg_preprocessed_raw.fif"),
+    }
+
+    monkeypatch.setattr("rate.preprocessing.pipeline.apply_precomputed_ica", lambda raw, path: None)
+
+    preprocess_run(
+        _config(tmp_path),
+        row,
+        raw_eeg_path=raw_path,
+        channels_tsv_path=channels_tsv_path,
+        ica_path=tmp_path / "precomputed-ica.fif",
+        eeg_output_path=tmp_path / "out" / "eeg_preprocessed_raw.fif",
+        emg_output_path=tmp_path / "out" / "emg.npz",
+        events_output_path=tmp_path / "out" / "events.tsv",
+        summary_output_path=tmp_path / "out" / "preprocessing_summary.json",
+    )
+
+    eeg_raw = mne.io.read_raw_fif(tmp_path / "out" / "eeg_preprocessed_raw.fif", preload=False, verbose="ERROR")
+    assert eeg_raw.ch_names == ["Fz", "Cz", "Pz", "Oz"]
 
 
 def test_interpolate_bad_channels_skips_eeg_channels_without_positions() -> None:
