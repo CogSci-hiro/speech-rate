@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .snakemake/
 .tmp
+.vent
 .snakemake-tmp
 .snakemake-cache
 *.egg-info/

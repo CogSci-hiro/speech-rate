@@ -1,11 +1,18 @@
-from pathlib import Path
-from functools import lru_cache
 import sys
+from functools import lru_cache
+from pathlib import Path
 
 import pandas as pd
 import yaml
 
-sys.path.insert(0, str(Path.cwd() / "src"))
+_workflow = globals().get("workflow")
+if _workflow is not None and getattr(_workflow, "basedir", None):
+    WORKFLOW_DIR = Path(_workflow.basedir).resolve()
+else:
+    WORKFLOW_DIR = (Path.cwd() / "workflow").resolve()
+PROJECT_ROOT = WORKFLOW_DIR.parent
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from rate.config import load_and_validate_config
 from rate.design import list_model_names
@@ -16,7 +23,7 @@ from rate.lmeeeg.io import build_lmeeeg_output_paths
 from rate.preprocessing.io import build_preprocessing_output_paths
 from rate.util import read_parquet_dataframe
 
-configfile: "config/config.yaml"
+configfile: str(PROJECT_ROOT / "config" / "config.yaml")
 
 
 def _load_yaml(path: str) -> dict:
@@ -27,14 +34,17 @@ def _load_yaml(path: str) -> dict:
     return payload
 
 
-stats_config = _load_yaml("config/stats.yaml")
-viz_config = _load_yaml("config/viz.yaml")
-RESOLVED_CONFIG = load_and_validate_config(Path("config/config.yaml"), schema_path=Path("config/schema.json"))
+stats_config = _load_yaml(str(PROJECT_ROOT / "config" / "stats.yaml"))
+viz_config = _load_yaml(str(PROJECT_ROOT / "config" / "viz.yaml"))
+RESOLVED_CONFIG = load_and_validate_config(
+    PROJECT_ROOT / "config" / "config.yaml",
+    schema_path=PROJECT_ROOT / "config" / "schema.json",
+)
 
-if "paths" not in config or "out_dir" not in (config.get("paths") or {}):
+if "paths" not in RESOLVED_CONFIG or "out_dir" not in (RESOLVED_CONFIG.get("paths") or {}):
     raise RuntimeError("config/config.yaml must define paths.out_dir")
 
-OUT_DIR = str((config.get("paths") or {})["out_dir"])
+OUT_DIR = str((RESOLVED_CONFIG.get("paths") or {})["out_dir"])
 GLM_MODEL_NAMES = tuple(list_model_names(RESOLVED_CONFIG, section="glm"))
 FOOOF_MODEL_NAMES = tuple(list_model_names(RESOLVED_CONFIG, section="fooof"))
 LMEEEG_MODEL_NAMES = tuple(list_model_names(RESOLVED_CONFIG, section="lmeeeg"))
