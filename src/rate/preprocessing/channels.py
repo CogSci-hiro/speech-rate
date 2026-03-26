@@ -19,6 +19,9 @@ class ChannelSplit:
     dropped_names: list[str]
 
 
+REFERENCE_NAME_PATTERN = re.compile(r"^(?:[lr]ear|[lr]pa|[am][12]|mastoids?)$", flags=re.IGNORECASE)
+
+
 def _as_string_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -51,6 +54,12 @@ def _normalize_bids_channel_type(value: str) -> str:
     return type_map.get(token, "misc")
 
 
+def _coerce_reference_like_channel_type(name: str, normalized_type: str) -> str:
+    if normalized_type == "eeg" and REFERENCE_NAME_PATTERN.match(str(name).strip()):
+        return "misc"
+    return normalized_type
+
+
 def apply_bids_channel_types(raw, channels_tsv_path: Path | str) -> dict[str, str]:
     """Apply BIDS channel types from ``channels.tsv`` onto an MNE raw object.
 
@@ -81,7 +90,8 @@ def apply_bids_channel_types(raw, channels_tsv_path: Path | str) -> dict[str, st
         raw_name = raw_lookup.get(channel_name) or raw_lookup_lower.get(channel_name.lower())
         if raw_name is None:
             continue
-        channel_type_map[raw_name] = _normalize_bids_channel_type(getattr(row, "type"))
+        normalized_type = _normalize_bids_channel_type(getattr(row, "type"))
+        channel_type_map[raw_name] = _coerce_reference_like_channel_type(raw_name, normalized_type)
 
     if channel_type_map:
         raw.set_channel_types(channel_type_map, on_unit_change="ignore")

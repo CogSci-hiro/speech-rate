@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +32,7 @@ def load_bad_channels_from_bids_tsv(channels_tsv_path: Path | str, *, raw) -> li
 
     table = pd.read_csv(path, sep="\t")
     if table.empty:
-        return []
+        raise ValueError(f"{path} is empty; expected BIDS channel rows with bad-channel annotations.")
 
     name_column = "name" if "name" in table.columns else "channel_name" if "channel_name" in table.columns else None
     if name_column is None:
@@ -43,6 +42,8 @@ def load_bad_channels_from_bids_tsv(channels_tsv_path: Path | str, *, raw) -> li
 
     bad_rows = table.loc[table["status"].astype(str).str.strip().str.lower() == "bad"].copy()
     if bad_rows.empty:
+        LOGGER.info("No bad channels declared in BIDS channels.tsv: %s", path)
+        raw.info["bads"] = []
         return []
 
     raw_lookup = {name: name for name in raw.ch_names}
@@ -65,10 +66,7 @@ def load_bad_channels_from_bids_tsv(channels_tsv_path: Path | str, *, raw) -> li
 
     if missing_names:
         message = f"Bad channels in {path} were not found in raw data: {sorted(missing_names)}"
-        if not matched_names:
-            raise ValueError(message)
-        warnings.warn(message, RuntimeWarning)
-        LOGGER.warning(message)
+        raise ValueError(message)
 
     matched_unique = list(dict.fromkeys(matched_names))
     raw.info["bads"] = matched_unique
@@ -78,8 +76,10 @@ def load_bad_channels_from_bids_tsv(channels_tsv_path: Path | str, *, raw) -> li
 def interpolate_bad_channels(raw) -> None:
     """Interpolate channels currently listed in ``raw.info['bads']``."""
     if not raw.info["bads"]:
+        LOGGER.info("No bad channels are marked on raw.info['bads']; skipping interpolation.")
         return
     invalid_position_names: list[str] = []
+    bad_name_set = set(raw.info["bads"])
     channel_types = raw.get_channel_types()
     for channel_name, channel_type, channel_info in zip(raw.ch_names, channel_types, raw.info["chs"], strict=False):
         if channel_type != "eeg":
@@ -88,19 +88,18 @@ def interpolate_bad_channels(raw) -> None:
         if not np.isfinite(position).all():
             invalid_position_names.append(channel_name)
 
-    if invalid_position_names:
-        invalid_position_names = list(dict.fromkeys(invalid_position_names))
-        merged_bads = list(dict.fromkeys([*raw.info["bads"], *invalid_position_names]))
-        raw.info["bads"] = merged_bads
+    invalid_position_names = list(dict.fromkeys(invalid_position_names))
+    invalid_bad_position_names = [name for name in invalid_position_names if name in bad_name_set]
+
+    if invalid_bad_position_names:
         message = (
-            "Skipping bad-channel interpolation for EEG channels without finite sensor positions: "
-            f"{invalid_position_names}"
+            "Cannot interpolate bad EEG channels without finite sensor positions: "
+            f"{invalid_bad_position_names}"
         )
-        warnings.warn(message, RuntimeWarning)
-        LOGGER.warning(message)
+        raise ValueError(message)
 
     raw.interpolate_bads(
-        reset_bads=False,
+        reset_bads=True,
         exclude=invalid_position_names,
         verbose="ERROR",
     )

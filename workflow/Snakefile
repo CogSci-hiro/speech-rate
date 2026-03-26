@@ -140,6 +140,26 @@ def epochs_stage_inputs(wildcards):
     ]
 
 
+def epoch_subject_preprocessing_inputs(wildcards):
+    index_path = _dataset_index_checkpoint_path()
+    subject_id = str(wildcards.subject_id)
+    rows = [
+        row
+        for row in _epochs_run_map(index_path).values()
+        if str(row["subject_id"]) == subject_id
+    ]
+    inputs: list[str] = []
+    for row in rows:
+        paths = build_preprocessing_output_paths(RESOLVED_CONFIG, row)
+        inputs.extend(
+            [
+                str(paths.eeg_output_path),
+                str(paths.summary_output_path),
+            ]
+        )
+    return inputs
+
+
 def glm_row(wildcards):
     index_path = _dataset_index_checkpoint_path()
     return _epochs_subject_map(index_path)[str(wildcards.subject_id)]

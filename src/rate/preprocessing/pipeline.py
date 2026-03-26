@@ -12,7 +12,7 @@ from rate.eeg.io import read_raw_eeg
 from rate.preprocessing.bad_channels import interpolate_bad_channels, load_bad_channels_from_bids_tsv
 from rate.preprocessing.channels import apply_bids_channel_types, apply_montage, split_eeg_and_emg_channels
 from rate.preprocessing.downsample import downsample_raw
-from rate.preprocessing.events import extract_events_table
+from rate.preprocessing.events import extract_events_table, find_run_anchor_event
 from rate.preprocessing.filter import apply_bandpass_filter
 from rate.preprocessing.ica import apply_precomputed_ica
 from rate.preprocessing.io import (
@@ -80,6 +80,7 @@ def preprocess_run(
     )
 
     raw = read_raw_eeg(run_paths.raw_eeg_path, preload=True, verbose="ERROR")
+    anchor_event_sample, anchor_event_time_s = find_run_anchor_event(raw, config)
 
     # 1. Separate/drop channels, extract events, and add montage.
     events_df, event_id_map = extract_events_table(raw, config)
@@ -121,6 +122,8 @@ def preprocess_run(
         "eeg_output_path": str(run_paths.eeg_output_path),
         "emg_output_path": str(run_paths.emg_output_path),
         "events_output_path": str(run_paths.events_output_path),
+        "anchor_event_sample": int(anchor_event_sample),
+        "anchor_event_time_s": float(anchor_event_time_s),
         "sfreq_before_hz": float(raw.info["sfreq"]),
         "sfreq_after_hz": float(eeg_raw.info["sfreq"]),
         "event_count": int(len(events_df)),

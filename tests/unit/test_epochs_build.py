@@ -137,6 +137,45 @@ def test_build_epochs_for_run_uses_time_s_on_downsampled_raw_and_drops_out_of_bo
     assert result.summary["epochs_count"] == 1
 
 
+def test_build_epochs_for_run_passes_detrend_to_mne_epochs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _config(out_dir)
+    config["epochs"]["detrend"] = 1
+    row = {"dyad_id": "dyad-001", "subject_id": "sub-001", "role": "odd", "task": "conversation", "run": "1"}
+
+    raw = _make_raw(sfreq=100.0, first_samp=250, n_samples=400)
+    raw_path = tmp_path / "sub-001_raw.fif"
+    raw.save(raw_path, overwrite=True, verbose="ERROR")
+
+    events_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "role": "odd",
+                "task": "conversation",
+                "run": "1",
+                "sample": 275,
+                "time_s": 2.75,
+                "previous": 0,
+                "event_id": 2,
+            },
+        ]
+    )
+    events_table_path = tmp_path / "events.csv"
+    events_df.to_csv(events_table_path, index=False)
+
+    result = build_epochs_for_run(
+        config,
+        row,
+        raw_path=raw_path,
+        events_table_path=events_table_path,
+    )
+
+    assert result.epochs.detrend == 1
+    assert result.summary["detrend"] == 1
+
+
 def test_build_epoch_metadata_renames_confusing_timing_columns() -> None:
     metadata = build_epoch_metadata(
         pd.DataFrame(

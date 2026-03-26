@@ -48,6 +48,7 @@ def _config(tmp_path: Path) -> dict:
         "paths": {
             "out_dir": str(tmp_path / "out"),
             "bids_dir": str(tmp_path / "bids"),
+            "ica_dir": str(tmp_path / "ica"),
             "annotations_dir": str(tmp_path / "annotations"),
         },
         "preprocessing": {
@@ -95,6 +96,7 @@ def test_preprocess_run_writes_eeg_emg_events_and_summary(tmp_path: Path, monkey
     }
 
     monkeypatch.setattr("rate.preprocessing.pipeline.apply_precomputed_ica", lambda raw, path: None)
+    monkeypatch.setattr("rate.preprocessing.pipeline.find_run_anchor_event", lambda raw, config: (100, 0.5))
 
     preprocess_run(
         _config(tmp_path),
@@ -124,9 +126,11 @@ def test_preprocess_run_writes_eeg_emg_events_and_summary(tmp_path: Path, monkey
     assert summary["subject_id"] == "sub-001"
     assert "MISC1" in summary["dropped_channels"]
     assert summary["emg_channels"] == ["EMG1"]
+    assert summary["anchor_event_sample"] == 100
+    assert summary["anchor_event_time_s"] == pytest.approx(0.5)
 
 
-def test_load_bad_channels_from_bids_tsv_warns_on_partial_name_mismatch(tmp_path: Path) -> None:
+def test_load_bad_channels_from_bids_tsv_raises_on_partial_name_mismatch(tmp_path: Path) -> None:
     raw = _make_raw().pick(["Fz", "Cz", "Pz", "Oz"])
     channels_tsv_path = tmp_path / "channels.tsv"
     table = pd.DataFrame(
@@ -137,11 +141,8 @@ def test_load_bad_channels_from_bids_tsv_warns_on_partial_name_mismatch(tmp_path
     )
     table.to_csv(channels_tsv_path, sep="\t", index=False)
 
-    with pytest.warns(RuntimeWarning):
-        bads = load_bad_channels_from_bids_tsv(channels_tsv_path, raw=raw)
-
-    assert bads == ["Fz"]
-    assert raw.info["bads"] == ["Fz"]
+    with pytest.raises(ValueError, match="were not found in raw data"):
+        load_bad_channels_from_bids_tsv(channels_tsv_path, raw=raw)
 
 
 def test_apply_bids_channel_types_overrides_raw_types(tmp_path: Path) -> None:
@@ -170,6 +171,32 @@ def test_apply_bids_channel_types_overrides_raw_types(tmp_path: Path) -> None:
     assert raw.get_channel_types() == ["eeg", "eeg", "misc", "misc"]
 
 
+def test_apply_bids_channel_types_demotes_ear_references_even_if_labeled_eeg(tmp_path: Path) -> None:
+    raw = mne.io.RawArray(
+        np.random.default_rng(6).normal(scale=1e-6, size=(4, 400)),
+        mne.create_info(
+            ch_names=["Fz", "Cz", "rEAR", "lEAR"],
+            sfreq=200.0,
+            ch_types=["eeg", "eeg", "eeg", "eeg"],
+        ),
+        verbose="ERROR",
+    )
+    channels_tsv_path = tmp_path / "channels.tsv"
+    _write_channels_tsv_with_types(
+        channels_tsv_path,
+        rows=[
+            {"name": "Fz", "type": "EEG", "status": "good"},
+            {"name": "Cz", "type": "EEG", "status": "good"},
+            {"name": "rEAR", "type": "EEG", "status": "good"},
+            {"name": "lEAR", "type": "EEG", "status": "good"},
+        ],
+    )
+
+    apply_bids_channel_types(raw, channels_tsv_path)
+
+    assert raw.get_channel_types() == ["eeg", "eeg", "misc", "misc"]
+
+
 def test_preprocess_run_drops_non_eeg_channels_from_bids_types(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     raw = mne.io.RawArray(
         np.random.default_rng(9).normal(scale=1e-6, size=(6, 400)),
@@ -188,7 +215,7 @@ def test_preprocess_run_drops_non_eeg_channels_from_bids_types(tmp_path: Path, m
     _write_channels_tsv_with_types(
         channels_tsv_path,
         rows=[
-            {"name": "Fz", "type": "EEG", "status": "good"},
+            {"name": "Fz", "type": "EEG", "status": "bad"},
             {"name": "Cz", "type": "EEG", "status": "good"},
             {"name": "Pz", "type": "EEG", "status": "good"},
             {"name": "Oz", "type": "EEG", "status": "good"},
@@ -207,6 +234,7 @@ def test_preprocess_run_drops_non_eeg_channels_from_bids_types(tmp_path: Path, m
     }
 
     monkeypatch.setattr("rate.preprocessing.pipeline.apply_precomputed_ica", lambda raw, path: None)
+    monkeypatch.setattr("rate.preprocessing.pipeline.find_run_anchor_event", lambda raw, config: (100, 0.5))
 
     preprocess_run(
         _config(tmp_path),
@@ -224,7 +252,7 @@ def test_preprocess_run_drops_non_eeg_channels_from_bids_types(tmp_path: Path, m
     assert eeg_raw.ch_names == ["Fz", "Cz", "Pz", "Oz"]
 
 
-def test_interpolate_bad_channels_skips_eeg_channels_without_positions() -> None:
+def test_interpolate_bad_channels_raises_for_eeg_channels_without_positions() -> None:
     raw = mne.io.RawArray(
         np.random.default_rng(11).normal(scale=1e-6, size=(5, 400)),
         mne.create_info(
@@ -235,23 +263,70 @@ def test_interpolate_bad_channels_skips_eeg_channels_without_positions() -> None
         verbose="ERROR",
     )
     raw.set_montage(mne.channels.make_standard_montage("standard_1020"), on_missing="ignore")
-    raw.info["bads"] = ["Fz"]
+    raw.info["bads"] = ["rEAR"]
 
-    with pytest.warns(RuntimeWarning, match="without finite sensor positions"):
+    with pytest.raises(ValueError, match="without finite sensor positions"):
         from rate.preprocessing.bad_channels import interpolate_bad_channels
 
         interpolate_bad_channels(raw)
 
-    assert raw.info["bads"] == ["Fz", "rEAR"]
+    assert raw.info["bads"] == ["rEAR"]
 
 
-def test_preprocess_run_skips_missing_ica_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_interpolate_bad_channels_ignores_non_bad_channels_without_positions() -> None:
+    from rate.preprocessing.bad_channels import interpolate_bad_channels
+
+    raw = mne.io.RawArray(
+        np.random.default_rng(12).normal(scale=1e-6, size=(5, 400)),
+        mne.create_info(
+            ch_names=["Fz", "Cz", "Pz", "Oz", "rEAR"],
+            sfreq=200.0,
+            ch_types=["eeg", "eeg", "eeg", "eeg", "eeg"],
+        ),
+        verbose="ERROR",
+    )
+    raw.set_montage(mne.channels.make_standard_montage("standard_1020"), on_missing="ignore")
+    raw.info["bads"] = ["Fz"]
+
+    interpolate_bad_channels(raw)
+
+    assert raw.info["bads"] == []
+
+
+def test_load_bad_channels_from_bids_tsv_allows_no_bad_rows(tmp_path: Path) -> None:
+    raw = _make_raw().pick(["Fz", "Cz", "Pz", "Oz"])
+    channels_tsv_path = tmp_path / "channels.tsv"
+    pd.DataFrame(
+        {
+            "name": ["Fz", "Cz"],
+            "status": ["good", "good"],
+        }
+    ).to_csv(channels_tsv_path, sep="\t", index=False)
+
+    bads = load_bad_channels_from_bids_tsv(channels_tsv_path, raw=raw)
+
+    assert bads == []
+    assert raw.info["bads"] == []
+
+
+def test_interpolate_bad_channels_allows_no_bads_marked() -> None:
+    from rate.preprocessing.bad_channels import interpolate_bad_channels
+
+    raw = _make_raw().pick(["Fz", "Cz", "Pz", "Oz"])
+    raw.info["bads"] = []
+
+    interpolate_bad_channels(raw)
+
+    assert raw.info["bads"] == []
+
+
+def test_preprocess_run_raises_on_missing_ica_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     raw = _make_raw()
     raw_path = tmp_path / "input_raw.fif"
     raw.save(raw_path, overwrite=True, verbose="ERROR")
 
     channels_tsv_path = tmp_path / "sub-001_task-conversation_run-01_channels.tsv"
-    _write_channels_tsv(channels_tsv_path, bad_names=[])
+    _write_channels_tsv(channels_tsv_path, bad_names=["Fz"])
 
     row = {
         "dyad_id": "dyad-001",
@@ -262,14 +337,17 @@ def test_preprocess_run_skips_missing_ica_file(tmp_path: Path, monkeypatch: pyte
         "eeg_path": str(tmp_path / "out" / "preprocessing" / "sub-001" / "task-conversation" / "run-1" / "eeg_preprocessed_raw.fif"),
     }
 
-    preprocess_run(
-        _config(tmp_path),
-        row,
-        raw_eeg_path=raw_path,
-        channels_tsv_path=channels_tsv_path,
-        ica_path=tmp_path / "missing-ica.fif",
-        eeg_output_path=tmp_path / "out" / "eeg_preprocessed_raw.fif",
-        emg_output_path=tmp_path / "out" / "emg.npz",
-        events_output_path=tmp_path / "out" / "events.tsv",
-        summary_output_path=tmp_path / "out" / "preprocessing_summary.json",
-    )
+    monkeypatch.setattr("rate.preprocessing.pipeline.find_run_anchor_event", lambda raw, config: (100, 0.5))
+
+    with pytest.raises(FileNotFoundError, match="Precomputed ICA file does not exist"):
+        preprocess_run(
+            _config(tmp_path),
+            row,
+            raw_eeg_path=raw_path,
+            channels_tsv_path=channels_tsv_path,
+            ica_path=tmp_path / "missing-ica.fif",
+            eeg_output_path=tmp_path / "out" / "eeg_preprocessed_raw.fif",
+            emg_output_path=tmp_path / "out" / "emg.npz",
+            events_output_path=tmp_path / "out" / "events.tsv",
+            summary_output_path=tmp_path / "out" / "preprocessing_summary.json",
+        )

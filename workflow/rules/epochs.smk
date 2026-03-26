@@ -22,7 +22,7 @@ EPOCHS_STAGE = f"{OUT_DIR}/_stage/epochs_all.done.json"
 
 rule epoch_subject:
     input:
-        preprocessing_stage=PREPROCESSING_STAGE,
+        preprocessing=epoch_subject_preprocessing_inputs,
         events_table=f"{OUT_DIR}/events/events.csv",
         dataset_index=f"{OUT_DIR}/dataset/index.parquet",
         config_path="config/config.yaml",

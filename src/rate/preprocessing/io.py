@@ -118,8 +118,11 @@ def resolve_precomputed_ica_path(
     if not pattern_value:
         return None
     pattern = str(pattern_value)
-    root_dir_value = ica_cfg.get("root_dir")
-    root_dir = Path(str(root_dir_value)).expanduser() if root_dir_value else resolve_out_dir(config) / "ica"
+    paths_cfg = dict(config.get("paths") or {})
+    ica_dir_value = paths_cfg.get("ica_dir")
+    if not ica_dir_value:
+        raise KeyError("Config is missing required `paths.ica_dir` for precomputed ICA resolution.")
+    root_dir = Path(str(ica_dir_value)).expanduser()
     return _resolve_from_pattern(pattern, root_dir=root_dir, context=context)
 
 

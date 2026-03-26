@@ -1,7 +1,23 @@
 glm:
   models:
     other_rate_model:
-      formula: "~ other_rate + latency + run"
+      formula: "~ other_rate + latency + run + self_ipu_duration + other_ipu_duration"
+      eligibility:
+        not_null:
+          - self_rate
+          - other_rate
+          - self_n_syllables
+          - other_n_syllables
+          - self_ipu_duration
+          - other_ipu_duration
+        min_values:
+          other_n_syllables: 3
+          self_ipu_duration: 0.10
+          other_ipu_duration: 0.10
+      test_predictors:
+        - "other_rate"
+    self_rate_model:
+      formula: "~ self_ipu_duration" #"~ self_rate + latency + run + self_ipu_duration + other_ipu_duration"
       eligibility:
         not_null:
           - self_rate
@@ -12,11 +28,7 @@ glm:
           - other_ipu_duration
         min_values:
           self_n_syllables: 3
-          other_n_syllables: 3
-          self_ipu_duration: 0.20
-          other_ipu_duration: 0.20
-        max_values:
-          self_ipu_duration: 8.0
-          other_ipu_duration: 8.0
+          self_ipu_duration: 0.10
+          other_ipu_duration: 0.10
       test_predictors:
-        - "other_rate"
+        - "self_ipu_duration"

@@ -3,7 +3,7 @@ preprocessing:
     eeg_names: []
     eeg_name_patterns: []
     emg_names: ["EMG1", "EMG2"]
-    emg_patterns: ["\\bEMG\\b", "\\bEXG\\b", "masseter", "jaw"]
+    emg_patterns: ["\\bEMG\\b", "\\bEXG\\b"]
     drop_names: []
   montage:
     name: "standard_1020"
@@ -17,12 +17,11 @@ preprocessing:
     sfreq_hz: 200.0
   filter:
     l_freq_hz: 0.1
-    h_freq_hz: 40.0
+    h_freq_hz: 30.0
   bad_channels:
     path_pattern: null
   ica:
-    root_dir: null
-    path_pattern: "{subject_id}/task-{task}/run-{run_padded}_ica.fif"
+    path_pattern: "{subject_id}_task-{task}-ica.fif"
   interpolation:
     method: "mne_interpolate_bads"
   rereference:

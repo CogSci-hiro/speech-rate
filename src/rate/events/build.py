@@ -10,6 +10,7 @@ import pandas as pd
 
 from rate.events.features import SUPPORTED_MATCHING_TIME_LOCKS, SUPPORTED_TIME_METHODS, add_event_rate_features
 from rate.events.io import EventsTableError, load_ipu_annotations
+from rate.preprocessing.events import find_run_anchor_event_from_file
 from rate.events.questionnaires import (
     QUESTIONNAIRE_OUTPUT_COLUMNS,
     QuestionnaireError,
@@ -102,7 +103,32 @@ def _empty_events_df() -> pd.DataFrame:
     return pd.DataFrame(columns=BASE_EVENTS_COLUMNS)
 
 
-def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[str, Any]) -> pd.DataFrame:
+def _resolve_run_anchor_time_s(dataset_row: Mapping[str, Any], config: Mapping[str, Any]) -> float:
+    raw_eeg_path_value = dataset_row.get("raw_eeg_path")
+    if not raw_eeg_path_value:
+        LOGGER.warning(
+            "Dataset row is missing raw_eeg_path; leaving annotation times unshifted for subject_id=%s run=%s task=%s",
+            dataset_row.get("subject_id"),
+            dataset_row.get("run"),
+            dataset_row.get("task"),
+        )
+        return 0.0
+
+    raw_path = Path(str(raw_eeg_path_value))
+    if not raw_path.exists():
+        raise EventsTableError(f"Raw EEG file does not exist for anchor extraction: {raw_path}")
+
+    try:
+        _, anchor_time_s = find_run_anchor_event_from_file(raw_path, config)
+    except ValueError as exc:
+        raise EventsTableError(
+            f"Unable to extract raw anchor event for subject_id={dataset_row.get('subject_id')} "
+            f"run={dataset_row.get('run')} task={dataset_row.get('task')}: {exc}"
+        ) from exc
+    return float(anchor_time_s)
+
+
+def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[str, Any], config: Mapping[str, Any]) -> pd.DataFrame:
     annotations_path_value = dataset_row.get("annotations_path")
     if not annotations_path_value:
         return _empty_events_df()
@@ -117,6 +143,9 @@ def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[s
         return _empty_events_df()
 
     unit_df = unit_df.copy()
+    anchor_time_s = _resolve_run_anchor_time_s(dataset_row, config)
+    unit_df["t_onset"] = unit_df["t_onset"].astype(float) + anchor_time_s
+    unit_df["t_offset"] = unit_df["t_offset"].astype(float) + anchor_time_s
     unit_df["duration_s"] = unit_df["t_offset"] - unit_df["t_onset"]
     unit_df = unit_df[unit_df["t_offset"] > unit_df["t_onset"]]
     unit_df = unit_df[unit_df["duration_s"] >= float(events_cfg["ipu_min_duration_s"])]
@@ -240,7 +269,7 @@ def build_events_table(config: Mapping[str, Any], dataset_index_df: pd.DataFrame
 
     built_frames: list[pd.DataFrame] = []
     for dataset_row in rows.to_dict(orient="records"):
-        built_df = _build_events_for_unit(dataset_row, events_cfg)
+        built_df = _build_events_for_unit(dataset_row, events_cfg, config)
         if not built_df.empty:
             built_frames.append(built_df)
 

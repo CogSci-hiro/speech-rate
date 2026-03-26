@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
 
 import pandas as pd
 import pytest
@@ -230,3 +234,51 @@ def test_build_events_table_requires_annotation_columns(tmp_path: Path) -> None:
 
     with pytest.raises(EventsTableError, match="missing required columns: syllables"):
         build_events_table(config, dataset_index_df=dataset_index_df)
+
+
+def test_build_events_table_shifts_annotation_times_by_raw_anchor_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    questionnaire_dir = tmp_path / "questionnaires"
+    config = _config(out_dir, questionnaire_dir)
+
+    ann = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
+    _write_annotation(
+        ann,
+        """
+        t_onset,t_offset,syllables,speaker
+        0.0,0.7,4,A
+        1.0,1.6,5,A
+        """,
+    )
+    _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15")
+    _write_csv(
+        questionnaire_dir / "personality.csv",
+        "subject_id,extraversion,agreeableness,conscienciousness,neuroticism,openness\n001,4,4,7,7,3",
+    )
+    raw_path = tmp_path / "sub-001_raw.fif"
+    raw_path.write_text("", encoding="utf-8")
+
+    dataset_index_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "role": "odd",
+                "task": "dialogue",
+                "run": "1",
+                "annotations_path": str(ann),
+                "raw_eeg_path": str(raw_path),
+                "status": "ok",
+            }
+        ]
+    )
+
+    monkeypatch.setattr("rate.events.build.find_run_anchor_event_from_file", lambda raw_path, config: (500, 2.5))
+
+    events_df, _ = build_events_table(config, dataset_index_df=dataset_index_df)
+
+    assert events_df["t_onset"].tolist() == pytest.approx([2.5, 3.5])
+    assert events_df["t_offset"].tolist() == pytest.approx([3.2, 4.1])

@@ -205,6 +205,21 @@ def _resolve_baseline(config: Mapping[str, Any]) -> tuple[float | None, float | 
     )
 
 
+def _resolve_detrend(config: Mapping[str, Any]) -> int | None:
+    detrend_value = (config.get("epochs") or {}).get("detrend")
+    if detrend_value is None:
+        return None
+
+    try:
+        detrend_int = int(detrend_value)
+    except (TypeError, ValueError) as exc:
+        raise EpochBuildError("`epochs.detrend` must be null, 0, or 1.") from exc
+
+    if detrend_int not in (0, 1):
+        raise EpochBuildError("`epochs.detrend` must be null, 0, or 1.")
+    return detrend_int
+
+
 def build_epochs_for_run(
     config: Mapping[str, Any],
     row: Mapping[str, Any],
@@ -259,6 +274,7 @@ def build_epochs_for_run(
         tmin=tmin_s,
         tmax=tmax_s,
         baseline=_resolve_baseline(config),
+        detrend=_resolve_detrend(config),
         preload=bool(epochs_cfg.get("preload", True)),
         metadata=metadata_df,
         verbose="ERROR",
@@ -277,6 +293,7 @@ def build_epochs_for_run(
         "events_table_path": str(events_table_path),
         "event_column": event_column,
         "time_origin": time_origin,
+        "detrend": _resolve_detrend(config),
         "raw_first_samp": int(raw.first_samp),
         "raw_last_samp": int(raw.last_samp),
         "sfreq_hz": float(raw.info["sfreq"]),

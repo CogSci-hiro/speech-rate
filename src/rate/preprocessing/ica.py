@@ -7,6 +7,7 @@ from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 
+
 def apply_precomputed_ica(raw, ica_path: Path | str | None) -> None:
     """Load a precomputed ICA file and apply it in-place.
 
@@ -20,13 +21,11 @@ def apply_precomputed_ica(raw, ica_path: Path | str | None) -> None:
     import mne
 
     if ica_path is None:
-        LOGGER.info("No precomputed ICA path configured; skipping ICA application.")
-        return
+        raise FileNotFoundError("No precomputed ICA path was resolved for this run.")
 
     path = Path(ica_path)
     if not path.exists():
-        LOGGER.warning("Precomputed ICA file does not exist; skipping ICA application: %s", path)
-        return
+        raise FileNotFoundError(f"Precomputed ICA file does not exist: {path}")
 
     ica = mne.preprocessing.read_ica(path, verbose="ERROR")
     ica.apply(raw, verbose="ERROR")

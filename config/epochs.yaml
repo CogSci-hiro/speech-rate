@@ -8,6 +8,7 @@ epochs:
   baseline:
     start_s: -2.0
     end_s: 0.5
+  detrend: 1
   preload: true
   on_out_of_bounds: "drop"
   metadata_columns: []

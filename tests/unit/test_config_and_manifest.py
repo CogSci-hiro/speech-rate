@@ -17,7 +17,10 @@ def _write_yaml(path: Path, payload: dict) -> None:
 
 def _minimal_config(out_dir: Path) -> dict:
     return {
-        "paths": {"out_dir": str(out_dir)},
+        "paths": {
+            "out_dir": str(out_dir),
+            "ica_dir": str(out_dir / "ica"),
+        },
         "dataset": {},
         "preprocessing": {},
         "epochs": {},
@@ -73,7 +76,15 @@ def test_default_logs_dir_applied(tmp_path: Path) -> None:
 
 def test_modular_compute_files_attach_mass_univariate_sections(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
-    _write_yaml(cfg_path, {"paths": {"out_dir": str(tmp_path / "outputs")}})
+    _write_yaml(
+        cfg_path,
+        {
+            "paths": {
+                "out_dir": str(tmp_path / "outputs"),
+                "ica_dir": str(tmp_path / "outputs" / "ica"),
+            }
+        },
+    )
     _write_yaml(tmp_path / "dataset.yaml", {"dataset": {"tasks": ["conversation"], "runs": [1]}})
     _write_yaml(tmp_path / "preprocessing.yaml", {"preprocessing": {"downsample_hz": 128.0}})
     _write_yaml(tmp_path / "epochs.yaml", {"epochs": {"metadata_source": "Epochs.metadata"}})
