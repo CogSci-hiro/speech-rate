@@ -219,8 +219,17 @@ def _resolve_adjacency(stats_cfg: Mapping[str, Any], channel_names: list[str]):
     import mne
 
     info = mne.create_info(channel_names, sfreq=1.0, ch_types=["eeg"] * len(channel_names))
-    adjacency, _ = mne.channels.find_ch_adjacency(info, ch_type="eeg")
-    return adjacency
+    try:
+        montage = mne.channels.make_standard_montage("standard_1020")
+        info.set_montage(montage, on_missing="ignore")
+        adjacency, _ = mne.channels.find_ch_adjacency(info, ch_type="eeg")
+        return adjacency
+    except Exception as exc:
+        LOGGER.warning(
+            "Unable to construct EEG adjacency from channel locations; falling back to no adjacency: %s",
+            exc,
+        )
+        return None
 
 
 def _write_inference_outputs(

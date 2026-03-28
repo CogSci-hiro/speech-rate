@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import logging
 from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
 
 from rate.design import DesignMatrixResult, build_design_matrix, load_model_spec
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,15 @@ def build_lmeeeg_trial_data_from_arrays(
     filtered_eeg_data = eeg_array[row_index, :, :]
     if filtered_eeg_data.shape[0] != design_result.design_matrix.shape[0]:
         raise ValueError("Filtered EEG rows and lmeEEG design rows do not align.")
+
+    LOGGER.info(
+        "Prepared lmeEEG trials for model=%s: input=%d, after_eligibility=%d, after_missing=%d, final=%d",
+        model_name or "<default>",
+        int(design_result.n_rows_input),
+        int(design_result.n_rows_after_eligibility),
+        int(design_result.n_rows_after_missing),
+        int(design_result.n_rows_final),
+    )
 
     return LMEEEGTrialData(
         design_result=design_result,

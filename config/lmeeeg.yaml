@@ -11,8 +11,8 @@ lmeeeg:
       eligibility:
         not_null:
           - convergence
-          - baseline_self_rate
-          - baseline_other_rate
+          - self_rate
+          - other_rate
       test_predictors:
         - "self_rate"
         - "other_rate"
