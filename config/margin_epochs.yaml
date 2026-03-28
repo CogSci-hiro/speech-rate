@@ -1,0 +1,22 @@
+margin_epochs:
+  event_column: "self_ipu_onset"
+  time_origin: "raw_start"
+  event_id_column: "event_id"
+  metadata_source: "Epochs.metadata"
+  tmin_s: -2.5
+  tmax_s: 1.0
+  baseline:
+    start_s: -2.0
+    end_s: 0.5
+  detrend: 1
+  preload: true
+  on_out_of_bounds: "drop"
+  metadata_columns: []
+  output:
+    epochs_filename: "margin-epochs-{lock_name}.fif"
+    metadata_filename: "margin-metadata-{lock_name}.csv"
+    events_array_filename: "margin-events-{lock_name}.npy"
+    summary_filename: "margin-epoching_summary-{lock_name}.json"
+  eligibility:
+    require_metadata: true
+    include_columns: []

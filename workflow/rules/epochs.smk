@@ -18,6 +18,15 @@ _EVENTS_ARRAY_FILENAME = _render_filename(_EPOCHS_OUTPUT_CFG.get("events_array_f
 _SUMMARY_FILENAME = _render_filename(_EPOCHS_OUTPUT_CFG.get("summary_filename", "epoching_summary-{lock_name}.json"), lock_name=_LOCK_NAME)
 
 EPOCHS_STAGE = f"{OUT_DIR}/_stage/epochs_all.done.json"
+_MARGIN_EPOCHS_CFG = dict(RESOLVED_CONFIG.get("margin_epochs") or {})
+_MARGIN_EPOCHS_OUTPUT_CFG = dict(_MARGIN_EPOCHS_CFG.get("output") or {})
+_MARGIN_LOCK_NAME = str(_MARGIN_EPOCHS_CFG.get("event_column", "time_s"))
+_MARGIN_EPOCHS_FILENAME = _render_filename(_MARGIN_EPOCHS_OUTPUT_CFG.get("epochs_filename", "epochs-{lock_name}.fif"), lock_name=_MARGIN_LOCK_NAME)
+_MARGIN_METADATA_FILENAME = _render_filename(_MARGIN_EPOCHS_OUTPUT_CFG.get("metadata_filename", "metadata-{lock_name}.csv"), lock_name=_MARGIN_LOCK_NAME)
+_MARGIN_EVENTS_ARRAY_FILENAME = _render_filename(_MARGIN_EPOCHS_OUTPUT_CFG.get("events_array_filename", "events-{lock_name}.npy"), lock_name=_MARGIN_LOCK_NAME)
+_MARGIN_SUMMARY_FILENAME = _render_filename(_MARGIN_EPOCHS_OUTPUT_CFG.get("summary_filename", "epoching_summary-{lock_name}.json"), lock_name=_MARGIN_LOCK_NAME)
+
+MARGIN_EPOCHS_STAGE = f"{OUT_DIR}/_stage/margin_epochs_all.done.json"
 
 
 rule epoch_subject:
@@ -48,6 +57,42 @@ rule epochs_stage:
         epochs_stage_inputs,
     output:
         EPOCHS_STAGE,
+    shell:
+        "python -c \"from pathlib import Path; "
+        "path = Path(r'{output}'); "
+        "path.parent.mkdir(parents=True, exist_ok=True); "
+        "path.write_text('ok\\n', encoding='utf-8')\""
+
+
+rule margin_epoch_subject:
+    input:
+        preprocessing=epoch_subject_preprocessing_inputs,
+        events_table=f"{OUT_DIR}/events/events.csv",
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        config_path="config/config.yaml",
+        schema_path="config/schema.json",
+    output:
+        epochs=f"{OUT_DIR}/epochs/{{subject_id}}/{_MARGIN_EPOCHS_FILENAME}",
+        metadata=f"{OUT_DIR}/epochs/{{subject_id}}/{_MARGIN_METADATA_FILENAME}",
+        events_array=f"{OUT_DIR}/epochs/{{subject_id}}/{_MARGIN_EVENTS_ARRAY_FILENAME}",
+        summary=f"{OUT_DIR}/epochs/{{subject_id}}/{_MARGIN_SUMMARY_FILENAME}",
+    params:
+        dyad_id=lambda wildcards: str(_epochs_subject_map(_dataset_index_checkpoint_path())[str(wildcards.subject_id)]["dyad_id"]),
+        subject_id=lambda wildcards: str(wildcards.subject_id),
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main epoch-subject "
+        "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
+        "--dyad-id {params.dyad_id} --subject-id {params.subject_id} --events-table {input.events_table} "
+        "--epochs-section margin_epochs "
+        "--epochs-output {output.epochs} --metadata-output {output.metadata} "
+        "--events-array-output {output.events_array} --summary-output {output.summary}"
+
+
+rule margin_epochs_stage:
+    input:
+        margin_epochs_stage_inputs,
+    output:
+        MARGIN_EPOCHS_STAGE,
     shell:
         "python -c \"from pathlib import Path; "
         "path = Path(r'{output}'); "

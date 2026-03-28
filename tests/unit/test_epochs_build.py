@@ -31,6 +31,22 @@ def _config(out_dir: Path) -> dict:
             "preload": True,
             "on_out_of_bounds": "drop",
         },
+        "margin_epochs": {
+            "event_column": "time_s",
+            "time_origin": "recording_start",
+            "event_id_column": "event_id",
+            "tmin_s": -0.6,
+            "tmax_s": 0.7,
+            "baseline": {"start_s": -0.1, "end_s": 0.0},
+            "preload": True,
+            "on_out_of_bounds": "drop",
+            "output": {
+                "epochs_filename": "margin-epochs-{lock_name}.fif",
+                "metadata_filename": "margin-metadata-{lock_name}.csv",
+                "events_array_filename": "margin-events-{lock_name}.npy",
+                "summary_filename": "margin-summary-{lock_name}.json",
+            },
+        },
     }
 
 
@@ -265,3 +281,55 @@ def test_build_epochs_for_subject_concatenates_runs_and_uses_flat_subject_output
     assert result.summary["merged_bads"] == ["Fz", "Cz"]
     assert output_paths.epochs_output_path == out_dir / "epochs" / "sub-001" / "epochs-self_ipu_onset.fif"
     assert output_paths.metadata_output_path == out_dir / "epochs" / "sub-001" / "metadata-self_ipu_onset.csv"
+
+
+def test_build_epoch_output_paths_uses_requested_epochs_section(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _config(out_dir)
+    row = {"dyad_id": "dyad-001", "subject_id": "sub-001", "task": "conversation", "run": "1"}
+
+    output_paths = build_epoch_output_paths(config, row, epochs_section="margin_epochs")
+
+    assert output_paths.epochs_output_path == out_dir / "epochs" / "sub-001" / "margin-epochs-time_s.fif"
+    assert output_paths.metadata_output_path == out_dir / "epochs" / "sub-001" / "margin-metadata-time_s.csv"
+    assert output_paths.summary_output_path == out_dir / "epochs" / "sub-001" / "margin-summary-time_s.json"
+
+
+def test_build_epochs_for_run_uses_requested_epochs_section_timing(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _config(out_dir)
+    row = {"dyad_id": "dyad-001", "subject_id": "sub-001", "role": "odd", "task": "conversation", "run": "1"}
+
+    raw = _make_raw(sfreq=100.0, first_samp=250, n_samples=400)
+    raw_path = tmp_path / "sub-001_raw.fif"
+    raw.save(raw_path, overwrite=True, verbose="ERROR")
+
+    events_df = pd.DataFrame(
+        [
+            {
+                "dyad_id": "dyad-001",
+                "subject_id": "sub-001",
+                "role": "odd",
+                "task": "conversation",
+                "run": "1",
+                "sample": 350,
+                "time_s": 3.5,
+                "previous": 0,
+                "event_id": 1,
+            },
+        ]
+    )
+    events_table_path = tmp_path / "events.csv"
+    events_df.to_csv(events_table_path, index=False)
+
+    result = build_epochs_for_run(
+        config,
+        row,
+        epochs_section="margin_epochs",
+        raw_path=raw_path,
+        events_table_path=events_table_path,
+    )
+
+    assert result.epochs.tmin == pytest.approx(-0.6)
+    assert result.epochs.tmax == pytest.approx(0.7)
+    assert result.summary["epochs_section"] == "margin_epochs"

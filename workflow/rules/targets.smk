@@ -15,6 +15,11 @@ rule epochs_all:
         epochs_stage_inputs
 
 
+rule margin_epochs_all:
+    input:
+        margin_epochs_stage_inputs
+
+
 rule glm_all:
     input:
         GLM_STAGE,
@@ -25,6 +30,11 @@ rule fooof_mass_all:
     input:
         FOOOF_MASS_STAGE,
         FOOOF_MASS_STATS_OUTPUT
+
+
+rule fooof_epochs_all:
+    input:
+        FOOOF_EPOCHS_STAGE
 
 
 rule lmeeeg_all:
@@ -59,6 +69,8 @@ rule all:
         PREPROCESSING_STAGE,
         EVENTS_STAGE,
         EPOCHS_STAGE,
+        MARGIN_EPOCHS_STAGE,
+        FOOOF_EPOCHS_STAGE,
         GLM_STATS_OUTPUT,
         FOOOF_MASS_STATS_OUTPUT,
         LMEEEG_STATS_OUTPUT,

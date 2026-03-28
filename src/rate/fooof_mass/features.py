@@ -19,6 +19,19 @@ class FooofFeatureResult:
     success_mask: np.ndarray
 
 
+def list_fooof_epoch_feature_names(config: Mapping[str, Any]) -> list[str]:
+    """Return feature names requested for feature-epochs outputs."""
+    fooof_cfg = dict(config.get("fooof") or {})
+    configured = fooof_cfg.get("features")
+    if configured is not None:
+        if not isinstance(configured, list):
+            raise ValueError("`fooof.features` must be a list when provided.")
+        return [str(value) for value in configured]
+
+    bands_cfg = dict(fooof_cfg.get("bands") or {})
+    return ["offset", "exponent", *bands_cfg.keys()]
+
+
 def extract_fooof_features(
     fit_result: FooofTensorResult,
     config: Mapping[str, Any],
@@ -59,6 +72,7 @@ def extract_fooof_features(
                     bw_values[epoch_index, channel_index, window_index] = float(best_peak[2])
 
         feature_tensors[f"{band_name}_cf"] = cf_values
+        feature_tensors[band_name] = pw_values
         feature_tensors[f"{band_name}_pw"] = pw_values
         feature_tensors[f"{band_name}_bw"] = bw_values
 

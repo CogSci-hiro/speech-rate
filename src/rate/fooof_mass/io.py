@@ -1,4 +1,4 @@
-"""FOOOF mass IO helpers."""
+"""FOOOF mass and feature-epochs IO helpers."""
 
 from __future__ import annotations
 
@@ -11,7 +11,14 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from rate.epochs.io import build_epoch_output_paths, read_epochs
+from rate.epochs.io import (
+    build_epoch_output_paths,
+    read_epochs,
+    write_epoch_events_array,
+    write_epoch_metadata,
+    write_epoch_summary,
+    write_epochs,
+)
 from rate.fooof_mass.features import FooofFeatureResult
 from rate.fooof_mass.fit import FooofTensorResult
 from rate.fooof_mass.glm import FooofMassGLMResult
@@ -42,9 +49,47 @@ class FooofMassRunPaths:
     summary_output_path: Path
 
 
+@dataclass(frozen=True)
+class FooofEpochFeaturePaths:
+    """Resolved output paths for one feature-specific FOOOF epochs artifact."""
+
+    feature_name: str
+    epochs_output_path: Path
+    metadata_output_path: Path
+    events_array_output_path: Path
+    summary_output_path: Path
+
+
 def _sanitize_name(value: str) -> str:
     token = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value).strip()).strip("._-")
     return token or "item"
+
+
+def build_fooof_epoch_feature_paths(
+    config: Mapping[str, Any],
+    row: Mapping[str, Any],
+    *,
+    feature_name: str,
+) -> FooofEpochFeaturePaths:
+    """Build canonical output paths for one feature-specific FOOOF epochs file."""
+    out_dir = resolve_out_dir(config)
+    source_paths = build_epoch_output_paths(config, row, epochs_section="margin_epochs")
+    base_dir = out_dir / "fooof_epochs" / _sanitize_name(feature_name) / str(row["subject_id"])
+    return FooofEpochFeaturePaths(
+        feature_name=str(feature_name),
+        epochs_output_path=base_dir / source_paths.epochs_output_path.name,
+        metadata_output_path=base_dir / source_paths.metadata_output_path.name,
+        events_array_output_path=base_dir / source_paths.events_array_output_path.name,
+        summary_output_path=base_dir / source_paths.summary_output_path.name,
+    )
+
+
+def build_fooof_epochs_subject_summary_path(
+    config: Mapping[str, Any],
+    row: Mapping[str, Any],
+) -> Path:
+    """Build the subject-level summary path for the FOOOF feature-epochs stage."""
+    return resolve_out_dir(config) / "fooof_epochs" / str(row["subject_id"]) / "summary.json"
 
 
 def build_fooof_mass_output_paths(
@@ -58,7 +103,7 @@ def build_fooof_mass_output_paths(
 ) -> FooofMassRunPaths:
     """Build canonical input/output paths for one FOOOF-mass model run."""
     out_dir = resolve_out_dir(config)
-    epoch_paths = build_epoch_output_paths(config, row)
+    epoch_paths = build_epoch_output_paths(config, row, epochs_section="margin_epochs")
     model_dir = (
         out_dir
         / "fooof_mass"
@@ -98,6 +143,22 @@ def load_fooof_mass_inputs(epochs_path: Path, metadata_path: Path):
             f"{len(epochs)} != {len(metadata_df)}"
         )
     return epochs, metadata_df.reset_index(drop=True)
+
+
+def save_fooof_feature_epochs_result(
+    *,
+    output_paths: FooofEpochFeaturePaths,
+    epochs,
+    metadata_df: pd.DataFrame,
+    events_array: np.ndarray,
+    summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Write one feature-specific FOOOF epochs artifact and its sidecars."""
+    write_epochs(epochs, output_paths.epochs_output_path)
+    write_epoch_metadata(metadata_df, output_paths.metadata_output_path)
+    write_epoch_events_array(events_array, output_paths.events_array_output_path)
+    write_epoch_summary(summary, output_paths.summary_output_path)
+    return dict(summary)
 
 
 def save_fooof_mass_result(

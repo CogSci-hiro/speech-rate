@@ -12,7 +12,7 @@ import pandas as pd
 
 from rate.eeg.io import read_raw_eeg
 from rate.epochs.metadata import build_epoch_metadata, prepare_epoch_event_rows
-from rate.epochs.io import read_events_table
+from rate.epochs.io import DEFAULT_EPOCHS_SECTION, get_epochs_config, read_events_table
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,11 +34,11 @@ class EpochBuildResult:
     summary: dict[str, Any]
 
 
-def build_epoch_plan(config: Mapping[str, Any]) -> dict[str, Any]:
+def build_epoch_plan(config: Mapping[str, Any], *, epochs_section: str = DEFAULT_EPOCHS_SECTION) -> dict[str, Any]:
     """Return a minimal description of the intended epoching plan."""
-    epochs_cfg = dict(config.get("epochs") or {})
+    epochs_cfg = get_epochs_config(config, section=epochs_section)
     return {
-        "stage": "epochs",
+        "stage": epochs_section,
         "tmin_s": epochs_cfg.get("tmin_s"),
         "tmax_s": epochs_cfg.get("tmax_s"),
         "event_column": epochs_cfg.get("event_column"),
@@ -190,8 +190,8 @@ def _bounds_mask_for_epochs(raw, event_samples: np.ndarray, *, tmin_s: float, tm
     return (epoch_starts >= first_valid_sample) & (epoch_ends <= last_valid_sample)
 
 
-def _resolve_baseline(config: Mapping[str, Any]) -> tuple[float | None, float | None] | None:
-    baseline_cfg = dict((config.get("epochs") or {}).get("baseline") or {})
+def _resolve_baseline(config: Mapping[str, Any], *, epochs_section: str = DEFAULT_EPOCHS_SECTION) -> tuple[float | None, float | None] | None:
+    baseline_cfg = dict(get_epochs_config(config, section=epochs_section).get("baseline") or {})
     if not baseline_cfg:
         return None
 
@@ -205,8 +205,8 @@ def _resolve_baseline(config: Mapping[str, Any]) -> tuple[float | None, float | 
     )
 
 
-def _resolve_detrend(config: Mapping[str, Any]) -> int | None:
-    detrend_value = (config.get("epochs") or {}).get("detrend")
+def _resolve_detrend(config: Mapping[str, Any], *, epochs_section: str = DEFAULT_EPOCHS_SECTION) -> int | None:
+    detrend_value = get_epochs_config(config, section=epochs_section).get("detrend")
     if detrend_value is None:
         return None
 
@@ -224,18 +224,19 @@ def build_epochs_for_run(
     config: Mapping[str, Any],
     row: Mapping[str, Any],
     *,
+    epochs_section: str = DEFAULT_EPOCHS_SECTION,
     raw_path: Path,
     events_table_path: Path,
 ):
     """Build epochs for one preprocessed raw file and one events table subset."""
     import mne
 
-    raw = read_raw_eeg(raw_path, preload=bool((config.get("epochs") or {}).get("preload", True)), verbose="ERROR")
+    epochs_cfg = get_epochs_config(config, section=epochs_section)
+    raw = read_raw_eeg(raw_path, preload=bool(epochs_cfg.get("preload", True)), verbose="ERROR")
     events_df = read_events_table(events_table_path)
     selected_events = select_run_events(events_df, row)
     selected_events = prepare_epoch_event_rows(selected_events)
 
-    epochs_cfg = dict(config.get("epochs") or {})
     event_column = str(epochs_cfg.get("event_column", "time_s"))
     time_origin = str(epochs_cfg.get("time_origin", "recording_start"))
     event_id_column = str(epochs_cfg.get("event_id_column", "event_id"))
@@ -266,15 +267,15 @@ def build_epochs_for_run(
         )
 
     events_array, event_id_map = build_mne_events_array(kept_events, kept_samples, event_id_column=event_id_column)
-    metadata_df = build_epoch_metadata(kept_events, config, epoch_samples=events_array[:, 0])
+    metadata_df = build_epoch_metadata(kept_events, config, epochs_section=epochs_section, epoch_samples=events_array[:, 0])
     epochs = mne.Epochs(
         raw,
         events_array,
         event_id=event_id_map,
         tmin=tmin_s,
         tmax=tmax_s,
-        baseline=_resolve_baseline(config),
-        detrend=_resolve_detrend(config),
+        baseline=_resolve_baseline(config, epochs_section=epochs_section),
+        detrend=_resolve_detrend(config, epochs_section=epochs_section),
         preload=bool(epochs_cfg.get("preload", True)),
         metadata=metadata_df,
         verbose="ERROR",
@@ -291,9 +292,10 @@ def build_epochs_for_run(
         "run": str(row["run"]),
         "raw_path": str(raw_path),
         "events_table_path": str(events_table_path),
+        "epochs_section": epochs_section,
         "event_column": event_column,
         "time_origin": time_origin,
-        "detrend": _resolve_detrend(config),
+        "detrend": _resolve_detrend(config, epochs_section=epochs_section),
         "raw_first_samp": int(raw.first_samp),
         "raw_last_samp": int(raw.last_samp),
         "sfreq_hz": float(raw.info["sfreq"]),
@@ -324,6 +326,7 @@ def build_epochs_for_subject(
     config: Mapping[str, Any],
     rows: list[Mapping[str, Any]],
     *,
+    epochs_section: str = DEFAULT_EPOCHS_SECTION,
     events_table_path: Path,
 ) -> EpochBuildResult:
     """Build one concatenated epochs object for a subject across all runs."""
@@ -344,6 +347,7 @@ def build_epochs_for_subject(
             build_epochs_for_run(
                 config,
                 row,
+                epochs_section=epochs_section,
                 raw_path=Path(str(raw_path_value)),
                 events_table_path=events_table_path,
             )
@@ -376,6 +380,7 @@ def build_epochs_for_subject(
         "status": "ok",
         "dyad_id": str(rows[0]["dyad_id"]),
         "subject_id": str(rows[0]["subject_id"]),
+        "epochs_section": epochs_section,
         "events_table_path": str(events_table_path),
         "n_runs": int(len(run_results)),
         "merged_bads": list(merged_bads),

@@ -49,10 +49,17 @@ def make_sliding_windows(times: np.ndarray, sfreq: float, config: Mapping[str, A
     start_s = float(windows_cfg.get("start_s", epoch_start_s))
     stop_s = float(windows_cfg.get("stop_s", epoch_stop_s))
     length_s = float(windows_cfg.get("length_s", fooof_cfg.get("window_s", 1.0)))
-    step_s = float(windows_cfg.get("step_s", fooof_cfg.get("step_s", length_s)))
+    sampling_frequency_hz = windows_cfg.get("sfreq_hz", windows_cfg.get("sampling_frequency_hz"))
+    if sampling_frequency_hz is not None:
+        sampling_frequency_hz = float(sampling_frequency_hz)
+        if sampling_frequency_hz <= 0:
+            raise ValueError("FOOOF windows sfreq_hz must be positive.")
+        step_s = 1.0 / sampling_frequency_hz
+    else:
+        step_s = float(windows_cfg.get("step_s", fooof_cfg.get("step_s", length_s)))
 
     if length_s <= 0 or step_s <= 0:
-        raise ValueError("FOOOF windows length_s and step_s must both be positive.")
+        raise ValueError("FOOOF windows length_s and step size must both be positive.")
     if stop_s <= start_s:
         raise ValueError("FOOOF windows stop_s must be greater than start_s.")
 

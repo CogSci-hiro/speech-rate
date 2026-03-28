@@ -6,6 +6,8 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
+from rate.epochs.io import DEFAULT_EPOCHS_SECTION, get_epochs_config
+
 
 def prepare_epoch_event_rows(event_rows: pd.DataFrame) -> pd.DataFrame:
     """Add epoch-facing timing aliases derived from the canonical events table."""
@@ -24,6 +26,7 @@ def build_epoch_metadata(
     event_rows: pd.DataFrame,
     config: Mapping[str, Any],
     *,
+    epochs_section: str = DEFAULT_EPOCHS_SECTION,
     epoch_samples: Sequence[int] | None = None,
 ) -> pd.DataFrame:
     """Build the metadata table attached to epochs.
@@ -43,7 +46,7 @@ def build_epoch_metadata(
         Metadata rows aligned 1:1 with the final epochs order.
     """
     prepared_rows = prepare_epoch_event_rows(event_rows)
-    epochs_cfg = dict(config.get("epochs") or {})
+    epochs_cfg = get_epochs_config(config, section=epochs_section)
     selected_columns = epochs_cfg.get("metadata_columns")
 
     if selected_columns:

@@ -15,6 +15,8 @@ import pandas as pd
 from rate.paths import ensure_parent_dir, resolve_out_dir
 from rate.preprocessing.io import resolve_preprocessed_eeg_path
 
+DEFAULT_EPOCHS_SECTION = "epochs"
+
 
 @dataclass(frozen=True)
 class EpochRunPaths:
@@ -37,6 +39,14 @@ def _render_filename(pattern: str, *, lock_name: str) -> str:
     return pattern.format(lock_name=_sanitize_lock_name(lock_name))
 
 
+def get_epochs_config(config: Mapping[str, Any], *, section: str = DEFAULT_EPOCHS_SECTION) -> dict[str, Any]:
+    """Return one epoching config section as a plain dictionary."""
+    epochs_cfg = config.get(section) or {}
+    if not isinstance(epochs_cfg, Mapping):
+        raise TypeError(f"`{section}` must be a mapping.")
+    return dict(epochs_cfg)
+
+
 def resolve_events_table_path(config: Mapping[str, Any], *, override_path: Path | None = None) -> Path:
     """Resolve the project-level events table path."""
     if override_path is not None:
@@ -48,12 +58,13 @@ def build_epoch_output_paths(
     config: Mapping[str, Any],
     row: Mapping[str, Any],
     *,
+    epochs_section: str = DEFAULT_EPOCHS_SECTION,
     raw_eeg_path: Path | None = None,
     events_table_path: Path | None = None,
 ) -> EpochRunPaths:
     """Build canonical input and output paths for one epoching run."""
     out_dir = resolve_out_dir(config)
-    epochs_cfg = dict(config.get("epochs") or {})
+    epochs_cfg = get_epochs_config(config, section=epochs_section)
     output_cfg = dict(epochs_cfg.get("output") or {})
     lock_name = str(epochs_cfg.get("event_column", "time_s"))
 

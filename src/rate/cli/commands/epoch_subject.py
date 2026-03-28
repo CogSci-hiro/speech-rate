@@ -27,6 +27,11 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--run", help="Run number.")
     parser.add_argument("--raw-path", help="Optional explicit preprocessed raw path.")
     parser.add_argument("--events-table", help="Optional explicit events.csv path.")
+    parser.add_argument(
+        "--epochs-section",
+        default="epochs",
+        help="Config section to use for epoch construction and output naming.",
+    )
     parser.add_argument("--epochs-output", help="Optional explicit epochs FIF output path.")
     parser.add_argument("--metadata-output", help="Optional explicit metadata CSV output path.")
     parser.add_argument("--events-array-output", help="Optional explicit epoch events-array output path.")
@@ -107,12 +112,14 @@ def _write_subject_outputs(
     output_paths = build_epoch_output_paths(
         config,
         row,
+        epochs_section=str(args.epochs_section),
         events_table_path=events_table_path,
     )
     subject_rows = _rows_for_subject(config, args, row)
     result = build_epochs_for_subject(
         config,
         subject_rows,
+        epochs_section=str(args.epochs_section),
         events_table_path=events_table_path or output_paths.events_table_path,
     )
 

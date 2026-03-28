@@ -34,9 +34,6 @@ def compute_window_spectra(
     fooof_cfg = dict(config.get("fooof") or {})
     spectrum_cfg = dict(fooof_cfg.get("spectrum") or {})
     method = str(spectrum_cfg.get("method", spectrum_cfg.get("spectrum_method", "welch"))).lower()
-    if method != "welch":
-        raise ValueError(f"Unsupported fooof spectrum method `{method}`. Only `welch` is implemented.")
-
     import mne
 
     data = epochs.get_data(copy=True)
@@ -48,21 +45,39 @@ def compute_window_spectra(
     n_per_seg = max(int(round(n_per_seg_s * sfreq)), 1)
     n_overlap = int(round(n_per_seg * overlap_fraction))
     n_overlap = min(n_overlap, n_per_seg - 1) if n_per_seg > 1 else 0
+    bandwidth_hz = spectrum_cfg.get("multitaper_bandwidth_hz")
+    adaptive = bool(spectrum_cfg.get("multitaper_adaptive", False))
+    low_bias = bool(spectrum_cfg.get("multitaper_low_bias", True))
 
     psd_windows: list[np.ndarray] = []
     freqs: np.ndarray | None = None
     for window in windows:
         window_data = data[:, :, window.start_sample : window.stop_sample]
-        window_psd, window_freqs = mne.time_frequency.psd_array_welch(
-            window_data,
-            sfreq=sfreq,
-            fmin=fmin,
-            fmax=fmax,
-            n_per_seg=min(n_per_seg, window_data.shape[-1]),
-            n_overlap=min(n_overlap, max(window_data.shape[-1] - 1, 0)),
-            average="mean",
-            verbose="ERROR",
-        )
+        if method == "welch":
+            window_psd, window_freqs = mne.time_frequency.psd_array_welch(
+                window_data,
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                n_per_seg=min(n_per_seg, window_data.shape[-1]),
+                n_overlap=min(n_overlap, max(window_data.shape[-1] - 1, 0)),
+                average="mean",
+                verbose="ERROR",
+            )
+        elif method == "multitaper":
+            window_psd, window_freqs = mne.time_frequency.psd_array_multitaper(
+                window_data,
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                bandwidth=None if bandwidth_hz is None else float(bandwidth_hz),
+                adaptive=adaptive,
+                low_bias=low_bias,
+                normalization="length",
+                verbose="ERROR",
+            )
+        else:
+            raise ValueError(f"Unsupported fooof spectrum method `{method}`.")
         if freqs is None:
             freqs = np.asarray(window_freqs, dtype=float)
         elif not np.allclose(freqs, window_freqs):

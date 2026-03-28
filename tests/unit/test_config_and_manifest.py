@@ -44,8 +44,10 @@ def test_repository_config_validates() -> None:
 
     expected_logs = str(Path(resolved["paths"]["out_dir"]) / "logs")
     assert resolved["paths"]["logs_dir"] == expected_logs
-    assert resolved["preprocessing"]["downsample"]["sfreq_hz"] == pytest.approx(200.0)
+    assert resolved["preprocessing"]["downsample"]["sfreq_hz"] == pytest.approx(64.0)
     assert resolved["epochs"]["metadata_source"] == "Epochs.metadata"
+    assert resolved["margin_epochs"]["tmin_s"] == pytest.approx(-2.5)
+    assert resolved["margin_epochs"]["tmax_s"] == pytest.approx(1.0)
 
 
 def test_schema_rejects_missing_required_key(tmp_path: Path) -> None:
@@ -88,6 +90,7 @@ def test_modular_compute_files_attach_mass_univariate_sections(tmp_path: Path) -
     _write_yaml(tmp_path / "dataset.yaml", {"dataset": {"tasks": ["conversation"], "runs": [1]}})
     _write_yaml(tmp_path / "preprocessing.yaml", {"preprocessing": {"downsample_hz": 128.0}})
     _write_yaml(tmp_path / "epochs.yaml", {"epochs": {"metadata_source": "Epochs.metadata"}})
+    _write_yaml(tmp_path / "margin_epochs.yaml", {"margin_epochs": {"tmin_s": -0.6, "tmax_s": 0.7}})
     _write_yaml(tmp_path / "glm.yaml", {"glm": {"regressors": ["speech_rate"]}})
     _write_yaml(tmp_path / "fooof.yaml", {"fooof": {"window_s": 1.0}})
     _write_yaml(tmp_path / "lmeeeg.yaml", {"lmeeeg": {"enabled": False}})
@@ -96,6 +99,7 @@ def test_modular_compute_files_attach_mass_univariate_sections(tmp_path: Path) -
 
     assert resolved["preprocessing"]["downsample_hz"] == pytest.approx(128.0)
     assert resolved["glm"]["regressors"] == ["speech_rate"]
+    assert resolved["margin_epochs"]["tmin_s"] == pytest.approx(-0.6)
 
 
 def test_manifest_written(tmp_path: Path) -> None:

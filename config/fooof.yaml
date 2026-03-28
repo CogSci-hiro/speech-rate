@@ -3,13 +3,11 @@ fooof:
   mode: "sliding_mass_univariate"
 
   windows:
-    start_s: -2.0
-    stop_s: 0.0
     length_s: 1.0
-    step_s: 0.1
+    sfreq_hz: 16
 
   spectrum:
-    method: "welch"
+    method: "multitaper"
     fit_range_hz: [3.0, 30.0]
     welch_n_per_seg_s: 1.0
     welch_overlap: 0.5
@@ -29,25 +27,4 @@ fooof:
     alpha: [8.0, 12.0]
     beta: [13.0, 30.0]
 
-  models:
-    theta_cf_other_rate:
-      outcome: "theta_cf"
-      formula: "theta_cf ~ other_rate + latency + duration_s + run"
-      eligibility:
-        not_null:
-          - self_rate
-      test_predictors:
-        - "other_rate"
-      standardize:
-        - other_rate
-        - latency
-        - duration_s
-
-    offset_other_rate:
-      outcome: "offset"
-      formula: "offset ~ other_rate + latency + duration_s + run"
-      eligibility:
-        not_null:
-          - self_rate
-      test_predictors:
-        - "other_rate"
+  features: ["exponent", "offset", "theta", "alpha"]

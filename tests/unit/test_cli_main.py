@@ -12,6 +12,7 @@ def test_build_arg_parser_registers_mass_univariate_commands() -> None:
     assert "epoch-subject" in commands
     assert "glm-subject" in commands
     assert "glm-group-stats" in commands
+    assert "fooof-epochs-subject" in commands
     assert "fooof-mass-subject" in commands
     assert "fooof-mass-group-stats" in commands
     assert "lmeeeg-subject" in commands

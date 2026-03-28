@@ -22,6 +22,7 @@ _COMMANDS = {
     "epoch-subject": "rate.cli.commands.epoch_subject",
     "glm-subject": "rate.cli.commands.glm_subject",
     "glm-group-stats": "rate.cli.commands.glm_group_stats",
+    "fooof-epochs-subject": "rate.cli.commands.fooof_epochs_subject",
     "fooof-mass-subject": "rate.cli.commands.fooof_mass_subject",
     "fooof-mass-group-stats": "rate.cli.commands.fooof_mass_group_stats",
     "lmeeeg-subject": "rate.cli.commands.lmeeeg_subject",
