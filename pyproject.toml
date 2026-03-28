@@ -16,6 +16,7 @@ dependencies = [
   "PyYAML>=6.0",
   "jsonschema>=4.19",
   "pandas>=2.1",
+  "rich>=13.7",
   "scikit-learn>=1.8.0",
   "pyarrow>=23.0.1"
 ]

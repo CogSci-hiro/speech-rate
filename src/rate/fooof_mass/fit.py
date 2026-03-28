@@ -1,7 +1,6 @@
 """FOOOF fitting helpers for PSD tensors."""
 
-from __future__ import annotations
-
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Mapping
 
