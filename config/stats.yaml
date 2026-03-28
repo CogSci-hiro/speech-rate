@@ -1,9 +1,11 @@
 stats:
-  method: "mne_cluster"
-  n_permutations: 1024
-  cluster_forming_alpha: 0.05
+  method: "tfce"
+  n_permutations: 100
   tail: 0
   adjacency: "mne_default"
+  tfce_threshold:
+    start: 0.0
+    step: 0.01
   outputs:
     glm: "stats/glm_group_stats.json"
     fooof_mass: "stats/fooof_mass_group_stats.json"

@@ -17,5 +17,7 @@ def test_build_arg_parser_registers_mass_univariate_commands() -> None:
     assert "lmeeeg-subject" in commands
     assert "lmeeeg-group-stats" in commands
     assert "figures-glm" in commands
+    assert "figures-lmeeeg" in commands
+    assert "figures-lmeeeg-inference" in commands
     assert "model-weights-glm" in commands
     assert "figures-fooof" in commands

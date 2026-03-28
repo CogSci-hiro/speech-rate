@@ -6,7 +6,7 @@ preprocessing:
     emg_patterns: ["\\bEMG\\b", "\\bEXG\\b"]
     drop_names: []
   montage:
-    name: "standard_1020"
+    name: "biosemi64"
     on_missing: "ignore"
     match_case: false
   events:
@@ -14,7 +14,7 @@ preprocessing:
     shortest_event: 1
     consecutive: true
   downsample:
-    sfreq_hz: 200.0
+    sfreq_hz: 64.0
   filter:
     l_freq_hz: 0.1
     h_freq_hz: 30.0

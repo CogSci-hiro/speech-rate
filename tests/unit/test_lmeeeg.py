@@ -6,6 +6,7 @@ import json
 import os
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
@@ -17,11 +18,13 @@ import yaml
 
 from rate.cli.commands import lmeeeg_group_stats
 from rate.cli.commands import lmeeeg_subject
+from rate.cli.commands import figures_lmeeeg
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
 from rate.util import write_parquet_dataframe
+from rate.viz import lmeeeg as lmeeeg_viz
 
 
 def _make_epochs(data: np.ndarray, metadata: pd.DataFrame) -> mne.EpochsArray:
@@ -34,6 +37,7 @@ def _lmeeeg_config(out_dir: Path) -> dict:
     return {
         "paths": {"out_dir": str(out_dir)},
         "epochs": {},
+        "preprocessing": {"montage": {"name": "standard_1020"}},
         "lmeeeg": {
             "backend": "lmeeeg",
             "random_effects": {"group": "item_id", "structure": "random_intercept"},
@@ -213,3 +217,136 @@ def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) ->
     assert effect_summary["predictor"] == "speech_rate"
     assert Path(effect_summary["observed_statistic"]).exists()
     assert Path(effect_summary["corrected_p_values"]).exists()
+
+
+def test_resolve_adjacency_uses_configured_preprocessing_montage(monkeypatch) -> None:
+    import mne
+
+    captured: dict[str, str] = {}
+
+    original_make_standard_montage = mne.channels.make_standard_montage
+    original_find_ch_adjacency = mne.channels.find_ch_adjacency
+
+    def fake_make_standard_montage(name: str):
+        captured["montage_name"] = name
+        return original_make_standard_montage("standard_1020")
+
+    def fake_find_ch_adjacency(info, ch_type):
+        return np.eye(len(info.ch_names), dtype=float), info.ch_names
+
+    monkeypatch.setattr(mne.channels, "make_standard_montage", fake_make_standard_montage)
+    monkeypatch.setattr(mne.channels, "find_ch_adjacency", fake_find_ch_adjacency)
+
+    config = {
+        "preprocessing": {
+            "montage": {
+                "name": "biosemi64",
+            }
+        }
+    }
+    stats_cfg = {"stats": {"adjacency": "mne_default"}}
+
+    adjacency = lmeeeg_group_stats._resolve_adjacency(config, stats_cfg, ["Fz", "Cz"])
+
+    assert captured["montage_name"] == "biosemi64"
+    assert adjacency is not None
+
+
+def test_build_lmeeeg_qc_manifest_falls_back_to_nested_model_dir(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    lmeeeg_root = out_dir / "lmeeeg"
+    nested_model_dir = lmeeeg_root / "sub-001" / "task-conversation" / "run-1" / "speech_rate_item_intercept"
+    nested_model_dir.mkdir(parents=True, exist_ok=True)
+
+    np.save(nested_model_dir / "t_values.npy", np.asarray([[[1.0, 2.0], [3.0, 4.0]]], dtype=float))
+    np.save(nested_model_dir / "times.npy", np.asarray([-0.1, 0.0], dtype=float))
+    (nested_model_dir / "channel_names.json").write_text(json.dumps(["Fz", "Cz"]) + "\n", encoding="utf-8")
+    (nested_model_dir / "column_names.json").write_text(json.dumps(["speech_rate"]) + "\n", encoding="utf-8")
+    (nested_model_dir / "summary.json").write_text(json.dumps({"status": "ok"}) + "\n", encoding="utf-8")
+
+    captured_output_stems: list[Path] = []
+
+    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
+        captured_output_stems.append(output_stem)
+        output_stem.parent.mkdir(parents=True, exist_ok=True)
+        written_path = output_stem.with_suffix(".png")
+        written_path.write_text("stub\n", encoding="utf-8")
+        return [written_path]
+
+    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
+
+    manifest_path = out_dir / "figures" / "lmeeeg" / "figure_manifest.json"
+    manifest = lmeeeg_viz.build_lmeeeg_qc_manifest(
+        out_dir=out_dir,
+        lmeeeg_root=lmeeeg_root,
+        manifest_path=manifest_path,
+        formats=("png",),
+    )
+
+    assert manifest["plot_count"] == 1
+    assert captured_output_stems == [out_dir / "figures" / "lmeeeg" / "t_values" / "speech_rate_item_intercept" / "speech_rate"]
+    assert manifest["plots"][0]["model_name"] == "speech_rate_item_intercept"
+    assert manifest_path.exists()
+
+
+def test_figures_lmeeeg_falls_back_to_stats_outputs_when_lmeeeg_dir_missing(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    stats_effect_dir = out_dir / "stats" / "lmeeeg" / "convergence_subject_intercept" / "latency"
+    stats_effect_dir.mkdir(parents=True, exist_ok=True)
+    observed_path = stats_effect_dir / "observed_statistic.npy"
+    corrected_p_path = stats_effect_dir / "corrected_p_values.npy"
+    np.save(observed_path, np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float))
+    np.save(corrected_p_path, np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float))
+    (stats_effect_dir / "summary.json").write_text(
+        json.dumps({"observed_statistic": str(observed_path), "corrected_p_values": str(corrected_p_path)}) + "\n",
+        encoding="utf-8",
+    )
+
+    viz_config_path = tmp_path / "viz.yaml"
+    viz_config_path.write_text(yaml.safe_dump({"viz": {"formats": ["png"], "dpi": 72}}), encoding="utf-8")
+
+    monkeypatch.setattr(figures_lmeeeg, "select_lmeeeg_rows", lambda config: [{"subject_id": "sub-001", "task": "conversation", "run": "1"}])
+    monkeypatch.setattr(
+        figures_lmeeeg,
+        "_load_or_fit_model_payloads",
+        lambda config, rows: {
+            "convergence_subject_intercept": {
+                "betas": np.asarray([[[0.1, 0.2], [0.3, 0.4]]], dtype=float),
+                "t_values": np.asarray([[[1.0, 2.0], [3.0, 4.0]]], dtype=float),
+                "times": np.asarray([-0.1, 0.0], dtype=float),
+                "channel_names": ["Fz", "Cz"],
+                "column_names": ["latency"],
+            }
+        },
+    )
+
+    captured_output_stems: list[Path] = []
+
+    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
+        captured_output_stems.append(output_stem)
+        output_stem.parent.mkdir(parents=True, exist_ok=True)
+        written_path = output_stem.with_suffix(".png")
+        written_path.write_text("stub\n", encoding="utf-8")
+        return [written_path]
+
+    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        viz_config=str(viz_config_path),
+        output=None,
+    )
+    exit_code = figures_lmeeeg.run(args, config=_lmeeeg_config(out_dir))
+
+    assert exit_code == 0
+    manifest_path = out_dir / "figures" / "lmeeeg" / "figure_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["plot_count"] == 3
+    assert {plot["measure"] for plot in manifest["plots"] if "measure" in plot} == {"beta", "t_value"}
+    assert any(plot.get("source") == "stats_fallback" for plot in manifest["plots"])
+    assert captured_output_stems == [
+        out_dir / "figures" / "lmeeeg" / "betas" / "convergence_subject_intercept" / "latency",
+        out_dir / "figures" / "lmeeeg" / "t_values" / "convergence_subject_intercept" / "latency",
+        out_dir / "figures" / "lmeeeg" / "statistics" / "convergence_subject_intercept" / "latency",
+    ]

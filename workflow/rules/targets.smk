@@ -44,6 +44,16 @@ rule figures_all:
         FOOOF_FIGURES_OUTPUT
 
 
+rule qc_lmeeeg_plots_all:
+    input:
+        LMEEEG_QC_FIGURES_OUTPUT
+
+
+rule qc_lmeeeg_inference_plots_all:
+    input:
+        LMEEEG_INFERENCE_FIGURES_OUTPUT
+
+
 rule all:
     input:
         PREPROCESSING_STAGE,

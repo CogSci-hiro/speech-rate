@@ -101,7 +101,7 @@ def _run_one_analysis(
     tail = int((stats_cfg.get("stats") or {}).get("tail", 0))
     n_permutations = int((stats_cfg.get("stats") or {}).get("n_permutations", 1024))
     threshold = _resolve_threshold(stats_cfg, n_observations=int(trial_data.eeg_data.shape[0]), correction=correction, tail=tail)
-    adjacency = _resolve_adjacency(stats_cfg, trial_data.channel_names)
+    adjacency = _resolve_adjacency(config, stats_cfg, trial_data.channel_names)
     effect_specs = _resolve_effects(trial_data)
 
     outputs: list[dict[str, Any]] = []
@@ -209,7 +209,11 @@ def _resolve_threshold(
     return None
 
 
-def _resolve_adjacency(stats_cfg: Mapping[str, Any], channel_names: list[str]):
+def _resolve_adjacency(
+    config: Mapping[str, Any],
+    stats_cfg: Mapping[str, Any],
+    channel_names: list[str],
+):
     adjacency_cfg = (stats_cfg.get("stats") or {}).get("adjacency")
     if adjacency_cfg in (None, "none", "None"):
         return None
@@ -220,7 +224,7 @@ def _resolve_adjacency(stats_cfg: Mapping[str, Any], channel_names: list[str]):
 
     info = mne.create_info(channel_names, sfreq=1.0, ch_types=["eeg"] * len(channel_names))
     try:
-        montage = mne.channels.make_standard_montage("standard_1020")
+        montage = mne.channels.make_standard_montage(_resolve_preprocessing_montage_name(config))
         info.set_montage(montage, on_missing="ignore")
         adjacency, _ = mne.channels.find_ch_adjacency(info, ch_type="eeg")
         return adjacency
@@ -230,6 +234,14 @@ def _resolve_adjacency(stats_cfg: Mapping[str, Any], channel_names: list[str]):
             exc,
         )
         return None
+
+
+def _resolve_preprocessing_montage_name(config: Mapping[str, Any]) -> str:
+    preprocessing_cfg = dict(config.get("preprocessing") or {})
+    montage_cfg = preprocessing_cfg.get("montage", preprocessing_cfg.get("montage_name"))
+    if isinstance(montage_cfg, Mapping):
+        return str(montage_cfg.get("name", "standard_1020"))
+    return str(montage_cfg or "standard_1020")
 
 
 def _write_inference_outputs(
