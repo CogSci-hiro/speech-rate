@@ -1,6 +1,6 @@
 lmeeeg:
   enabled: false
-  backend: "python"
+  backend: "lmeeeg"
   random_effects:
     group: "subject_id"
     structure: "random_intercept"

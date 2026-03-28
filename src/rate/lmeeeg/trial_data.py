@@ -56,8 +56,28 @@ def build_lmeeeg_trial_table(
     model_name
         lmeEEG model name to resolve from config.
     """
-    if len(epochs) != len(metadata_df):
-        raise ValueError("Epochs and metadata lengths must match before lmeEEG design filtering.")
+    return build_lmeeeg_trial_data_from_arrays(
+        eeg_data=epochs.get_data(copy=True),
+        metadata_df=metadata_df,
+        channel_names=list(epochs.ch_names),
+        times=np.asarray(epochs.times, dtype=float),
+        config=config,
+        model_name=model_name,
+    )
+
+
+def build_lmeeeg_trial_data_from_arrays(
+    *,
+    eeg_data: np.ndarray,
+    metadata_df: pd.DataFrame,
+    channel_names: list[str],
+    times: np.ndarray,
+    config: Mapping[str, Any],
+    model_name: str | None = None,
+) -> LMEEEGTrialData:
+    """Prepare filtered trial data from pooled EEG arrays and metadata."""
+    if int(np.asarray(eeg_data).shape[0]) != len(metadata_df):
+        raise ValueError("EEG rows and metadata rows must match before lmeEEG design filtering.")
 
     design_result = prepare_lmeeeg_design(metadata_df, config, model_name=model_name)
     group_column = resolve_random_effect_group(config, model_name=model_name)
@@ -69,8 +89,9 @@ def build_lmeeeg_trial_table(
     if trial_metadata[group_column].isna().any():
         raise ValueError(f"Configured lmeEEG random-effect group column `{group_column}` contains missing values.")
 
-    eeg_data = epochs.get_data(copy=True)[row_index, :, :]
-    if eeg_data.shape[0] != design_result.design_matrix.shape[0]:
+    eeg_array = np.asarray(eeg_data, dtype=float)
+    filtered_eeg_data = eeg_array[row_index, :, :]
+    if filtered_eeg_data.shape[0] != design_result.design_matrix.shape[0]:
         raise ValueError("Filtered EEG rows and lmeEEG design rows do not align.")
 
     return LMEEEGTrialData(
@@ -78,9 +99,9 @@ def build_lmeeeg_trial_table(
         trial_metadata=trial_metadata,
         row_index=row_index,
         group_column=group_column,
-        eeg_data=eeg_data,
-        channel_names=list(epochs.ch_names),
-        times=np.asarray(epochs.times, dtype=float),
+        eeg_data=filtered_eeg_data,
+        channel_names=list(channel_names),
+        times=np.asarray(times, dtype=float),
     )
 
 

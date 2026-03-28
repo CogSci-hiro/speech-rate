@@ -39,6 +39,26 @@ class LMEEEGRunPaths:
     summary_output_path: Path
 
 
+@dataclass(frozen=True)
+class LMEEEGModelPaths:
+    """Resolved output paths for one pooled lmeEEG model fit."""
+
+    residualised_trials_output_path: Path
+    random_effects_output_path: Path
+    betas_output_path: Path
+    standard_errors_output_path: Path
+    t_values_output_path: Path
+    residual_variance_output_path: Path
+    row_index_output_path: Path
+    times_output_path: Path
+    channel_names_output_path: Path
+    column_names_output_path: Path
+    test_predictors_output_path: Path
+    selection_output_path: Path
+    lmm_diagnostics_output_path: Path
+    summary_output_path: Path
+
+
 def _sanitize_model_name(model_name: str) -> str:
     token = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(model_name).strip()).strip("._-")
     return token or "model"
@@ -83,6 +103,32 @@ def build_lmeeeg_output_paths(
     )
 
 
+def build_lmeeeg_model_output_paths(
+    config: Mapping[str, Any],
+    *,
+    model_name: str,
+) -> LMEEEGModelPaths:
+    """Build canonical output paths for one pooled lmeEEG model fit."""
+    out_dir = resolve_out_dir(config)
+    model_dir = out_dir / "lmeeeg" / _sanitize_model_name(model_name)
+    return LMEEEGModelPaths(
+        residualised_trials_output_path=model_dir / "residualised_trials.npy",
+        random_effects_output_path=model_dir / "random_effects.npy",
+        betas_output_path=model_dir / "betas.npy",
+        standard_errors_output_path=model_dir / "standard_errors.npy",
+        t_values_output_path=model_dir / "t_values.npy",
+        residual_variance_output_path=model_dir / "residual_variance.npy",
+        row_index_output_path=model_dir / "row_index.npy",
+        times_output_path=model_dir / "times.npy",
+        channel_names_output_path=model_dir / "channel_names.json",
+        column_names_output_path=model_dir / "column_names.json",
+        test_predictors_output_path=model_dir / "test_predictors.json",
+        selection_output_path=model_dir / "selection.parquet",
+        lmm_diagnostics_output_path=model_dir / "lmm_diagnostics.json",
+        summary_output_path=model_dir / "summary.json",
+    )
+
+
 def load_lmeeeg_inputs(epochs_path: Path, metadata_path: Path):
     """Load epochs and metadata for one lmeEEG run."""
     epochs = read_epochs(epochs_path, preload=True)
@@ -95,7 +141,7 @@ def load_lmeeeg_inputs(epochs_path: Path, metadata_path: Path):
     return epochs, metadata_df.reset_index(drop=True)
 
 
-def save_lmeeeg_result(result: LMEEEGResult, output_paths: LMEEEGRunPaths) -> dict[str, Any]:
+def save_lmeeeg_result(result: LMEEEGResult, output_paths: LMEEEGRunPaths | LMEEEGModelPaths) -> dict[str, Any]:
     """Write primary lmeEEG artifacts to disk."""
     ensure_parent_dir(output_paths.summary_output_path)
     np.save(output_paths.residualised_trials_output_path, result.residualised_data)

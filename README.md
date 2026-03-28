@@ -2,6 +2,8 @@
 
 This repository now uses Snakemake as the active pipeline core for a new mass-univariate EEG scaffold. The active workflow is organized around dataset indexing, preprocessing, epoching, subject-level modeling, thin group-level stats wrappers, and figure generation.
 
+The subject-level `lmeEEG` fitting stage is backed by the external [`lmeeeg`](https://pypi.org/project/lmeeeg/) package rather than an in-repo mixed-model implementation.
+
 ## Active Workflow
 
 - Main config entry point: `config/config.yaml`

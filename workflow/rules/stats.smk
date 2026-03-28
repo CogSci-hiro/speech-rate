@@ -31,9 +31,10 @@ rule lmeeeg_group_stats:
     input:
         lmeeeg=LMEEEG_STAGE,
         stats_config="config/stats.yaml",
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
     output:
         LMEEEG_STATS_OUTPUT,
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
         "--config config/config.yaml --schema config/schema.json "
-        "--stats-config {input.stats_config} --output {output}"
+        "--stats-config {input.stats_config} --dataset-index {input.dataset_index} --output {output}"

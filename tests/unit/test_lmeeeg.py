@@ -13,8 +13,11 @@ os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
 import mne
 import numpy as np
 import pandas as pd
+import yaml
 
+from rate.cli.commands import lmeeeg_group_stats
 from rate.cli.commands import lmeeeg_subject
+from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
@@ -32,7 +35,7 @@ def _lmeeeg_config(out_dir: Path) -> dict:
         "paths": {"out_dir": str(out_dir)},
         "epochs": {},
         "lmeeeg": {
-            "backend": "python",
+            "backend": "lmeeeg",
             "random_effects": {"group": "item_id", "structure": "random_intercept"},
             "models": {
                 "speech_rate_item_intercept": {
@@ -129,7 +132,84 @@ def test_lmeeeg_subject_cli_writes_outputs(tmp_path: Path) -> None:
     betas = np.load(output_paths.betas_output_path)
 
     assert summary["status"] == "ok"
-    assert summary["backend"] == "python"
+    assert summary["backend"] == "lmeeeg"
     assert summary["random_effect_structure"] == "random_intercept"
     assert summary["n_lmm_failed"] == 0
     assert betas.shape == (2, 2, 2)
+
+
+def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "status": "ok",
+        "eeg_path": str(tmp_path / "placeholder_raw.fif"),
+    }
+    metadata = pd.DataFrame(
+        {
+            "speech_rate": [0.0, 1.0, 2.0, 0.5, 1.5, 2.5],
+            "item_id": ["A", "A", "A", "B", "B", "B"],
+        }
+    )
+    slope_map = np.array([[1.0, 0.0], [0.5, -0.25]])
+    intercept_map = np.array([[1.0, 1.5], [-0.5, 0.25]])
+    group_intercepts = {"A": 3.0, "B": -1.0}
+    data = np.zeros((6, 2, 2), dtype=float)
+    for index, row_values in metadata.iterrows():
+        data[index] = intercept_map + (float(row_values["speech_rate"]) * slope_map) + group_intercepts[str(row_values["item_id"])]
+
+    epochs = _make_epochs(data, metadata.copy())
+    epoch_paths = build_epoch_output_paths(config, row)
+    epochs_path = epoch_paths.epochs_output_path
+    metadata_path = epoch_paths.metadata_output_path
+    dataset_index_path = out_dir / "dataset" / "index.parquet"
+    epochs_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_index_path.parent.mkdir(parents=True, exist_ok=True)
+    epochs.save(epochs_path, overwrite=True, verbose="ERROR")
+    metadata.to_csv(metadata_path, index=False)
+    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
+
+    stats_cfg_path = tmp_path / "stats.yaml"
+    stats_cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "stats": {
+                    "method": "maxstat",
+                    "n_permutations": 8,
+                    "tail": 0,
+                    "adjacency": None,
+                    "outputs": {"lmeeeg": "stats/lmeeeg_group_stats.json"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        stats_config=str(stats_cfg_path),
+        dataset_index=str(dataset_index_path),
+        subject_id="sub-001",
+        task="conversation",
+        run="1",
+        model_name="speech_rate_item_intercept",
+        output=None,
+    )
+    exit_code = lmeeeg_group_stats.run(args, config=config)
+    assert exit_code == 0
+
+    summary_path = out_dir / "stats" / "lmeeeg_group_stats.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert summary["status"] == "ok"
+    assert summary["method"] == "maxstat"
+    assert summary["n_analyses"] == 1
+    effect_summary = summary["analyses"][0]["effects"][0]
+    assert effect_summary["predictor"] == "speech_rate"
+    assert Path(effect_summary["observed_statistic"]).exists()
+    assert Path(effect_summary["corrected_p_values"]).exists()

@@ -9,6 +9,7 @@ description = "Speech-rate analysis scaffolding package."
 requires-python = ">=3.10"
 dependencies = [
   "fooof",
+  "lmeeeg>=0.1.0",
   "mne>=1.11.0",
   "numpy>=1.26",
   "patsy>=0.5.6",

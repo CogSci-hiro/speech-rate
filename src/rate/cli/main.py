@@ -25,7 +25,6 @@ _COMMANDS = {
     "fooof-mass-subject": "rate.cli.commands.fooof_mass_subject",
     "fooof-mass-group-stats": "rate.cli.commands.fooof_mass_group_stats",
     "lmeeeg-subject": "rate.cli.commands.lmeeeg_subject",
-    "lmeeeg-prepare-trials": "rate.cli.commands.lmeeeg_prepare_trials",
     "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
     "figures-glm": "rate.cli.commands.figures_glm",
     "model-weights-glm": "rate.cli.commands.model_weights_glm",
