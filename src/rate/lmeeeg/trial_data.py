@@ -12,6 +12,7 @@ import pandas as pd
 from rate.design import DesignMatrixResult, build_design_matrix, load_model_spec
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_LMEEEG_SECTION = "lmeeeg"
 
 _LEGACY_METADATA_ALIASES: dict[str, str] = {
     "proximity": "alignment",
@@ -35,11 +36,12 @@ def prepare_lmeeeg_design(
     metadata_df: pd.DataFrame,
     config: Mapping[str, Any],
     *,
+    config_section: str = DEFAULT_LMEEEG_SECTION,
     model_name: str | None = None,
 ) -> DesignMatrixResult:
     """Build the fixed-effect design matrix for the lmeEEG branch."""
     metadata_df = _apply_legacy_metadata_aliases(metadata_df)
-    model_spec = load_model_spec(config, section="lmeeeg", model_name=model_name)
+    model_spec = load_model_spec(config, section=config_section, model_name=model_name)
     design_spec = _make_rhs_only_model_spec(model_spec)
     return build_design_matrix(metadata_df, model_spec=design_spec)
 
@@ -49,6 +51,7 @@ def build_lmeeeg_trial_table(
     metadata_df: pd.DataFrame,
     config: Mapping[str, Any],
     *,
+    config_section: str = DEFAULT_LMEEEG_SECTION,
     model_name: str | None = None,
 ) -> LMEEEGTrialData:
     """Prepare the filtered trial-level table aligned to EEG epochs.
@@ -70,6 +73,7 @@ def build_lmeeeg_trial_table(
         channel_names=list(epochs.ch_names),
         times=np.asarray(epochs.times, dtype=float),
         config=config,
+        config_section=config_section,
         model_name=model_name,
     )
 
@@ -81,6 +85,7 @@ def build_lmeeeg_trial_data_from_arrays(
     channel_names: list[str],
     times: np.ndarray,
     config: Mapping[str, Any],
+    config_section: str = DEFAULT_LMEEEG_SECTION,
     model_name: str | None = None,
 ) -> LMEEEGTrialData:
     """Prepare filtered trial data from pooled EEG arrays and metadata."""
@@ -88,8 +93,8 @@ def build_lmeeeg_trial_data_from_arrays(
         raise ValueError("EEG rows and metadata rows must match before lmeEEG design filtering.")
 
     prepared_metadata_df = _apply_legacy_metadata_aliases(metadata_df)
-    design_result = prepare_lmeeeg_design(prepared_metadata_df, config, model_name=model_name)
-    group_column = resolve_random_effect_group(config, model_name=model_name)
+    design_result = prepare_lmeeeg_design(prepared_metadata_df, config, config_section=config_section, model_name=model_name)
+    group_column = resolve_random_effect_group(config, config_section=config_section, model_name=model_name)
     if group_column not in prepared_metadata_df.columns:
         raise ValueError(f"Configured lmeEEG random-effect group column `{group_column}` is missing from metadata.")
 
@@ -123,9 +128,14 @@ def build_lmeeeg_trial_data_from_arrays(
     )
 
 
-def resolve_random_effect_group(config: Mapping[str, Any], *, model_name: str | None = None) -> str:
+def resolve_random_effect_group(
+    config: Mapping[str, Any],
+    *,
+    config_section: str = DEFAULT_LMEEEG_SECTION,
+    model_name: str | None = None,
+) -> str:
     """Resolve the grouping column for the random-intercept stage."""
-    lmeeeg_cfg = dict(config.get("lmeeeg") or {})
+    lmeeeg_cfg = dict(config.get(config_section) or {})
     model_cfg = {}
     if model_name is not None:
         models_cfg = dict(lmeeeg_cfg.get("models") or {})
@@ -141,9 +151,14 @@ def resolve_random_effect_group(config: Mapping[str, Any], *, model_name: str | 
     return str(lmeeeg_cfg.get("group_column", "subject_id"))
 
 
-def resolve_random_effect_structure(config: Mapping[str, Any], *, model_name: str | None = None) -> str:
+def resolve_random_effect_structure(
+    config: Mapping[str, Any],
+    *,
+    config_section: str = DEFAULT_LMEEEG_SECTION,
+    model_name: str | None = None,
+) -> str:
     """Resolve and validate the supported random-effects structure."""
-    lmeeeg_cfg = dict(config.get("lmeeeg") or {})
+    lmeeeg_cfg = dict(config.get(config_section) or {})
     model_cfg = {}
     if model_name is not None:
         models_cfg = dict(lmeeeg_cfg.get("models") or {})

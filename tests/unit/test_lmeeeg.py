@@ -20,6 +20,7 @@ from rate.cli.commands import lmeeeg_group_stats
 from rate.cli.commands import lmeeeg_subject
 from rate.cli.commands import figures_lmeeeg
 from rate.epochs.io import build_epoch_output_paths
+from rate.fooof_mass.io import build_fooof_epoch_feature_paths
 from rate.lmeeeg.io import build_lmeeeg_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays, build_lmeeeg_trial_table
@@ -37,10 +38,32 @@ def _lmeeeg_config(out_dir: Path) -> dict:
     return {
         "paths": {"out_dir": str(out_dir)},
         "epochs": {},
+        "margin_epochs": {
+            "event_column": "self_ipu_onset",
+            "output": {
+                "epochs_filename": "margin-epochs-{lock_name}.fif",
+                "metadata_filename": "margin-metadata-{lock_name}.csv",
+                "events_array_filename": "margin-events-{lock_name}.npy",
+                "summary_filename": "margin-epoching_summary-{lock_name}.json",
+            },
+        },
         "preprocessing": {"montage": {"name": "standard_1020"}},
         "lmeeeg": {
             "backend": "lmeeeg",
             "random_effects": {"group": "item_id", "structure": "random_intercept"},
+            "models": {
+                "speech_rate_item_intercept": {
+                    "formula": "signal ~ speech_rate",
+                    "test_predictors": ["speech_rate"],
+                    "random_effect_group": "item_id",
+                    "random_effect_structure": "random_intercept",
+                }
+            },
+        },
+        "lmeeeg_fooof": {
+            "backend": "lmeeeg",
+            "random_effects": {"group": "item_id", "structure": "random_intercept"},
+            "targets": ["offset", "exponent"],
             "models": {
                 "speech_rate_item_intercept": {
                     "formula": "signal ~ speech_rate",
@@ -140,6 +163,74 @@ def test_lmeeeg_subject_cli_writes_outputs(tmp_path: Path) -> None:
     assert summary["random_effect_structure"] == "random_intercept"
     assert summary["n_lmm_failed"] == 0
     assert betas.shape == (2, 2, 2)
+
+
+def test_lmeeeg_fooof_subject_cli_writes_targeted_outputs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "status": "ok",
+        "eeg_path": str(tmp_path / "placeholder_raw.fif"),
+    }
+
+    metadata = pd.DataFrame(
+        {
+            "speech_rate": [0.0, 1.0, 2.0, 0.5, 1.5, 2.5],
+            "item_id": ["A", "A", "A", "B", "B", "B"],
+        }
+    )
+    slope_map = np.array([[1.5, -0.5], [0.25, 0.75]])
+    intercept_map = np.array([[2.0, 1.0], [-1.0, 0.5]])
+    group_intercepts = {"A": 4.0, "B": -2.0}
+    data = np.zeros((6, 2, 2), dtype=float)
+    for index, row_values in metadata.iterrows():
+        data[index] = intercept_map + (float(row_values["speech_rate"]) * slope_map) + group_intercepts[str(row_values["item_id"])]
+
+    epochs = _make_epochs(data, metadata.copy())
+    fooof_paths = build_fooof_epoch_feature_paths(config, row, feature_name="offset")
+    epochs_path = fooof_paths.epochs_output_path
+    metadata_path = fooof_paths.metadata_output_path
+    dataset_index_path = tmp_path / "index.parquet"
+    epochs_path.parent.mkdir(parents=True, exist_ok=True)
+    epochs.save(epochs_path, overwrite=True, verbose="ERROR")
+    metadata.to_csv(metadata_path, index=False)
+    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        dataset_index=str(dataset_index_path),
+        subject_id="sub-001",
+        task="conversation",
+        run="1",
+        config_section="lmeeeg_fooof",
+        target="offset",
+        model_name="speech_rate_item_intercept",
+        epochs_path=str(epochs_path),
+        metadata_path=str(metadata_path),
+        run_all=False,
+        output=None,
+    )
+    exit_code = lmeeeg_subject.run(args, config=config)
+    assert exit_code == 0
+
+    output_paths = build_lmeeeg_output_paths(
+        config,
+        row,
+        config_section="lmeeeg_fooof",
+        target_name="offset",
+        model_name="speech_rate_item_intercept",
+    )
+    assert output_paths.summary_output_path.exists()
+    assert output_paths.betas_output_path.exists()
+
+    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
+    assert summary["status"] == "ok"
+    assert summary["n_lmm_failed"] == 0
 
 
 def test_build_lmeeeg_trial_data_backfills_proximity_from_alignment() -> None:

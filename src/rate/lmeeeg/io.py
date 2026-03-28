@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from rate.epochs.io import build_epoch_output_paths, read_epochs
+from rate.fooof_mass.io import build_fooof_epoch_feature_paths
 from rate.lmeeeg.mass_model import LMEEEGResult
 from rate.paths import ensure_parent_dir, resolve_out_dir
 from rate.util import write_parquet_dataframe
@@ -64,25 +65,45 @@ def _sanitize_model_name(model_name: str) -> str:
     return token or "model"
 
 
+def _analysis_root_name(config_section: str) -> str:
+    return "lmeeeg" if config_section == "lmeeeg" else str(config_section)
+
+
 def build_lmeeeg_output_paths(
     config: Mapping[str, Any],
     row: Mapping[str, Any],
     *,
+    config_section: str = "lmeeeg",
+    target_name: str | None = None,
     model_name: str,
     epochs_path: Path | None = None,
     metadata_path: Path | None = None,
 ) -> LMEEEGRunPaths:
     """Build canonical input and output paths for one lmeEEG run."""
     out_dir = resolve_out_dir(config)
-    epoch_paths = build_epoch_output_paths(config, row)
-    model_dir = (
-        out_dir
-        / "lmeeeg"
-        / str(row["subject_id"])
-        / f"task-{row['task']}"
-        / f"run-{row['run']}"
-        / _sanitize_model_name(model_name)
-    )
+    if config_section == "lmeeeg_fooof":
+        if target_name is None:
+            raise ValueError("`target_name` is required when building lmeeeg_fooof paths.")
+        epoch_paths = build_fooof_epoch_feature_paths(config, row, feature_name=target_name)
+        model_dir = (
+            out_dir
+            / _analysis_root_name(config_section)
+            / _sanitize_model_name(target_name)
+            / str(row["subject_id"])
+            / f"task-{row['task']}"
+            / f"run-{row['run']}"
+            / _sanitize_model_name(model_name)
+        )
+    else:
+        epoch_paths = build_epoch_output_paths(config, row)
+        model_dir = (
+            out_dir
+            / _analysis_root_name(config_section)
+            / str(row["subject_id"])
+            / f"task-{row['task']}"
+            / f"run-{row['run']}"
+            / _sanitize_model_name(model_name)
+        )
     return LMEEEGRunPaths(
         epochs_input_path=epochs_path or epoch_paths.epochs_output_path,
         metadata_input_path=metadata_path or epoch_paths.metadata_output_path,
@@ -106,11 +127,18 @@ def build_lmeeeg_output_paths(
 def build_lmeeeg_model_output_paths(
     config: Mapping[str, Any],
     *,
+    config_section: str = "lmeeeg",
+    target_name: str | None = None,
     model_name: str,
 ) -> LMEEEGModelPaths:
     """Build canonical output paths for one pooled lmeEEG model fit."""
     out_dir = resolve_out_dir(config)
-    model_dir = out_dir / "lmeeeg" / _sanitize_model_name(model_name)
+    if config_section == "lmeeeg_fooof":
+        if target_name is None:
+            raise ValueError("`target_name` is required when building lmeeeg_fooof pooled output paths.")
+        model_dir = out_dir / _analysis_root_name(config_section) / _sanitize_model_name(target_name) / _sanitize_model_name(model_name)
+    else:
+        model_dir = out_dir / _analysis_root_name(config_section) / _sanitize_model_name(model_name)
     return LMEEEGModelPaths(
         residualised_trials_output_path=model_dir / "residualised_trials.npy",
         random_effects_output_path=model_dir / "random_effects.npy",

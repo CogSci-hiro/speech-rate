@@ -47,21 +47,22 @@ def fit_lmeeeg_mass_model(
     trial_data: LMEEEGTrialData,
     config: Mapping[str, Any],
     *,
+    config_section: str = "lmeeeg",
     model_name: str | None = None,
 ) -> LMEEEGResult:
     """Run the lmeEEG approximation through the external `lmeeeg` package."""
-    backend = str((config.get("lmeeeg") or {}).get("backend", "lmeeeg")).lower()
+    backend = str((config.get(config_section) or {}).get("backend", "lmeeeg")).lower()
     if backend not in {"python", "lmeeeg"}:
         raise ValueError(
             f"Unsupported lmeEEG backend `{backend}`. Supported values are `lmeeeg` and legacy alias `python`."
         )
 
-    group_column = resolve_random_effect_group(config, model_name=model_name)
-    random_effect_structure = resolve_random_effect_structure(config, model_name=model_name)
+    group_column = resolve_random_effect_group(config, config_section=config_section, model_name=model_name)
+    random_effect_structure = resolve_random_effect_structure(config, config_section=config_section, model_name=model_name)
 
     eeg_data = np.asarray(trial_data.eeg_data, dtype=float)
     n_trials_used, n_channels, n_times = eeg_data.shape
-    fit_result = fit_lmeeeg_backend_result(trial_data, config, model_name=model_name)
+    fit_result = fit_lmeeeg_backend_result(trial_data, config, config_section=config_section, model_name=model_name)
 
     converged_mask = _converged_feature_mask(
         fit_result.feature_diagnostics,
@@ -110,10 +111,11 @@ def fit_lmeeeg_backend_result(
     trial_data: LMEEEGTrialData,
     config: Mapping[str, Any],
     *,
+    config_section: str = "lmeeeg",
     model_name: str | None = None,
 ):
     """Return the package-native `lmeeeg` fit result for a prepared trial table."""
-    group_column = resolve_random_effect_group(config, model_name=model_name)
+    group_column = resolve_random_effect_group(config, config_section=config_section, model_name=model_name)
     metadata = trial_data.trial_metadata.reset_index(drop=True).copy()
     return fit_lmm_mass_univariate(
         eeg=np.asarray(trial_data.eeg_data, dtype=float),

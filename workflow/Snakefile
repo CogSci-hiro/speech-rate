@@ -58,6 +58,8 @@ GLM_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="glm")
 FOOOF_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="fooof")
 FOOOF_EPOCH_FEATURE_NAMES = tuple(list_fooof_epoch_feature_names(RESOLVED_CONFIG))
 LMEEEG_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg")
+LMEEEG_FOOOF_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg_fooof")
+LMEEEG_FOOOF_TARGET_NAMES = tuple(str(value) for value in (RESOLVED_CONFIG.get("lmeeeg_fooof") or {}).get("targets", []))
 
 
 def _dataset_index_checkpoint_path() -> str:
@@ -258,6 +260,14 @@ def fooof_stage_inputs(wildcards):
         )
         for row in _epochs_run_map(index_path).values()
         for model_name in FOOOF_MODEL_NAMES
+    ]
+
+
+def lmeeeg_fooof_stage_inputs(wildcards):
+    return [
+        str(build_lmeeeg_model_output_paths(RESOLVED_CONFIG, config_section="lmeeeg_fooof", target_name=target_name, model_name=model_name).summary_output_path)
+        for target_name in LMEEEG_FOOOF_TARGET_NAMES
+        for model_name in LMEEEG_FOOOF_MODEL_NAMES
     ]
 
 

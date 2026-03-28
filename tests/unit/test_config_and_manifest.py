@@ -27,6 +27,7 @@ def _minimal_config(out_dir: Path) -> dict:
         "glm": {},
         "fooof": {},
         "lmeeeg": {},
+        "lmeeeg_fooof": {},
     }
 
 
@@ -48,6 +49,7 @@ def test_repository_config_validates() -> None:
     assert resolved["epochs"]["metadata_source"] == "Epochs.metadata"
     assert resolved["margin_epochs"]["tmin_s"] == pytest.approx(-2.5)
     assert resolved["margin_epochs"]["tmax_s"] == pytest.approx(1.0)
+    assert resolved["lmeeeg_fooof"]["targets"] == ["offset", "exponent", "theta", "alpha"]
 
 
 def test_schema_rejects_missing_required_key(tmp_path: Path) -> None:
@@ -94,12 +96,14 @@ def test_modular_compute_files_attach_mass_univariate_sections(tmp_path: Path) -
     _write_yaml(tmp_path / "glm.yaml", {"glm": {"regressors": ["speech_rate"]}})
     _write_yaml(tmp_path / "fooof.yaml", {"fooof": {"window_s": 1.0}})
     _write_yaml(tmp_path / "lmeeeg.yaml", {"lmeeeg": {"enabled": False}})
+    _write_yaml(tmp_path / "lmeeeg_fooof.yaml", {"lmeeeg_fooof": {"targets": ["offset", "theta"]}})
 
     resolved = load_and_validate_config(cfg_path, schema_path=Path("config/schema.json"))
 
     assert resolved["preprocessing"]["downsample_hz"] == pytest.approx(128.0)
     assert resolved["glm"]["regressors"] == ["speech_rate"]
     assert resolved["margin_epochs"]["tmin_s"] == pytest.approx(-0.6)
+    assert resolved["lmeeeg_fooof"]["targets"] == ["offset", "theta"]
 
 
 def test_manifest_written(tmp_path: Path) -> None:

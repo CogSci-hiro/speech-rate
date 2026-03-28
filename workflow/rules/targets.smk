@@ -43,6 +43,11 @@ rule lmeeeg_all:
         LMEEEG_STATS_OUTPUT
 
 
+rule lmeeeg_fooof_all:
+    input:
+        LMEEEG_FOOOF_STAGE
+
+
 rule model_weights_all:
     input:
         MODEL_WEIGHTS_OUTPUT_DIR
