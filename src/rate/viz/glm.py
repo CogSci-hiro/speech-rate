@@ -188,8 +188,8 @@ def plot_joint_model_weights(
             "markeredgecolor": "0.6",
             "markeredgewidth": 0.0,
             "linestyle": "None",
+            "markersize": 8.0,
         }
-        topomap_args["contours"] = 0
     try:
         figure = evoked.plot_joint(times=selected_joint_times, title=title, show=False, topomap_args=topomap_args)
     except ValueError as exc:

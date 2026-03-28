@@ -6,16 +6,81 @@ lmeeeg:
     structure: "random_intercept"
 
   models:
-    convergence_subject_intercept:
-      formula: "~ run + latency + duration_s"
+    other_rate_effect:
+      formula: "~ other_rate + latency + duration_s + run"
       eligibility:
         not_null:
-          - "latency"
+          - "other_rate"
+        min_values:
+          other_n_syllables: 3
+          self_ipu_duration: 0.10
+          other_ipu_duration: 0.10
       test_predictors:
-        - "latency"
+        - "other_rate"
       standardize:
-        - latency
-        #- other_rate- latency
-        - duration_s
+        - "other_rate"
+        - "latency"
+        - "duration_s"
+      random_effect_group: "subject_id"
+      random_effect_structure: "random_intercept"
+    self_rate_effect:
+      formula: "~ self_rate + latency + duration_s + run"
+      eligibility:
+        not_null:
+          - "self_rate"
+        min_values:
+          self_n_syllables: 3
+          self_ipu_duration: 0.10
+          other_ipu_duration: 0.10
+      test_predictors:
+        - "self_rate"
+      standardize:
+        - "self_rate"
+        - "latency"
+        - "duration_s"
+      random_effect_group: "subject_id"
+      random_effect_structure: "random_intercept"
+    proximity_effect:
+      formula: "~ proximity + self_rate + other_rate + latency + duration_s + run"
+      eligibility:
+        not_null:
+          - "proximity"
+          - "self_rate"
+          - "other_rate"
+        min_values:
+          self_n_syllables: 3
+          other_n_syllables: 3
+          self_ipu_duration: 0.10
+          other_ipu_duration: 0.10
+      test_predictors:
+        - "proximity"
+      standardize:
+        - "proximity"
+        - "self_rate"
+        - "other_rate"
+        - "latency"
+        - "duration_s"
+      random_effect_group: "subject_id"
+      random_effect_structure: "random_intercept"
+    convergence_effect:
+      formula: "~ convergence + self_rate + other_rate + latency + duration_s + run"
+      eligibility:
+        not_null:
+          - "convergence"
+          - "self_rate"
+          - "other_rate"
+        min_values:
+          self_n_syllables: 3
+          other_n_syllables: 3
+          self_ipu_duration: 0.10
+          other_ipu_duration: 0.10
+      test_predictors:
+        - "convergence"
+      standardize:
+        - "convergence"
+        - "self_rate"
+        - "other_rate"
+        - "latency"
+        - "duration_s"
       random_effect_group: "subject_id"
       random_effect_structure: "random_intercept"

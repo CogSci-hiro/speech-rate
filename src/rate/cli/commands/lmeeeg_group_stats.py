@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from argparse import ArgumentParser, Namespace
@@ -131,6 +132,8 @@ def _run_one_analysis(
                 predictor_name=predictor_name,
                 effect_name=effect_name,
                 inference=inference,
+                channel_names=trial_data.channel_names,
+                times=trial_data.times,
             )
         )
 
@@ -251,6 +254,8 @@ def _write_inference_outputs(
     predictor_name: str,
     effect_name: str,
     inference,
+    channel_names: list[str],
+    times: np.ndarray,
 ) -> dict[str, Any]:
     out_dir = resolve_out_dir(config)
     effect_dir = (
@@ -264,6 +269,7 @@ def _write_inference_outputs(
     corrected_p_path = effect_dir / "corrected_p_values.npy"
     null_path = effect_dir / "null_distribution.npy"
     cluster_p_path = effect_dir / "cluster_p_values.npy"
+    p_values_csv_path = effect_dir / "p_values.csv"
     metadata_path = effect_dir / "summary.json"
 
     ensure_parent_dir(metadata_path)
@@ -271,6 +277,12 @@ def _write_inference_outputs(
     np.save(corrected_p_path, np.asarray(inference.corrected_p_values, dtype=float))
     np.save(null_path, np.asarray(inference.null_distribution, dtype=float))
     np.save(cluster_p_path, np.asarray([] if inference.cluster_p_values is None else inference.cluster_p_values, dtype=float))
+    csv_columns = _write_p_values_csv(
+        p_values_csv_path,
+        inference=inference,
+        channel_names=channel_names,
+        times=np.asarray(times, dtype=float),
+    )
 
     significant_mask = np.asarray(inference.corrected_p_values, dtype=float) < 0.05
     summary = {
@@ -288,9 +300,113 @@ def _write_inference_outputs(
         "null_distribution": str(null_path),
         "cluster_p_values": str(cluster_p_path),
     }
+    if csv_columns is not None:
+        summary["p_values_csv"] = str(p_values_csv_path)
+        summary["p_values_csv_columns"] = csv_columns
     metadata_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary
 
 
 def _safe_token(value: str) -> str:
     return "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value) or "effect"
+
+
+def _write_p_values_csv(
+    path: Path,
+    *,
+    inference,
+    channel_names: list[str],
+    times: np.ndarray,
+) -> list[str] | None:
+    correction = str(getattr(inference, "correction", "")).lower()
+    if correction == "cluster":
+        fieldnames = ["p_values", "cluster_size", "duration", "spatial_extent"]
+        rows = _build_cluster_rows(inference, channel_names=channel_names, times=times)
+    elif correction in {"tfce", "maxstat"}:
+        fieldnames = ["p_values", "channel", "time"]
+        rows = _build_pointwise_rows(inference, channel_names=channel_names, times=times)
+    else:
+        return None
+
+    ensure_parent_dir(path)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return fieldnames
+
+
+def _build_cluster_rows(
+    inference,
+    *,
+    channel_names: list[str],
+    times: np.ndarray,
+) -> list[dict[str, float | int]]:
+    cluster_p_values = np.asarray([] if inference.cluster_p_values is None else inference.cluster_p_values, dtype=float)
+    clusters = list(getattr(inference, "clusters", []) or [])
+    rows: list[dict[str, float | int]] = []
+    for cluster_mask, cluster_p_value in zip(clusters, cluster_p_values, strict=False):
+        if not np.isfinite(cluster_p_value):
+            continue
+        time_channel_mask = _normalize_cluster_mask(cluster_mask, n_channels=len(channel_names), n_times=int(times.shape[0]))
+        time_indices, channel_indices = np.where(time_channel_mask)
+        if time_indices.size == 0:
+            continue
+        rows.append(
+            {
+                "p_values": float(cluster_p_value),
+                "cluster_size": int(np.count_nonzero(time_channel_mask)),
+                "duration": _cluster_duration(times[np.unique(time_indices)], all_times=times),
+                "spatial_extent": int(np.unique(channel_indices).size),
+            }
+        )
+    return sorted(rows, key=lambda row: (float(row["p_values"]), -int(row["cluster_size"]), -int(row["spatial_extent"])))
+
+
+def _build_pointwise_rows(
+    inference,
+    *,
+    channel_names: list[str],
+    times: np.ndarray,
+) -> list[dict[str, float | str]]:
+    corrected_p_values = np.asarray(inference.corrected_p_values, dtype=float)
+    if corrected_p_values.ndim != 2:
+        raise ValueError("Expected corrected_p_values to have shape (n_channels, n_times).")
+    if corrected_p_values.shape != (len(channel_names), int(times.shape[0])):
+        raise ValueError(
+            "corrected_p_values shape does not match provided channel/time axes: "
+            f"{corrected_p_values.shape} != {(len(channel_names), int(times.shape[0]))}"
+        )
+
+    rows: list[dict[str, float | str]] = []
+    point_indices = np.argwhere(np.isfinite(corrected_p_values))
+    for channel_index, time_index in point_indices:
+        rows.append(
+            {
+                "p_values": float(corrected_p_values[channel_index, time_index]),
+                "channel": str(channel_names[channel_index]),
+                "time": float(times[time_index]),
+            }
+        )
+    return sorted(rows, key=lambda row: (float(row["p_values"]), str(row["channel"]), float(row["time"])))
+
+
+def _normalize_cluster_mask(cluster_mask: Any, *, n_channels: int, n_times: int) -> np.ndarray:
+    mask = np.asarray(cluster_mask, dtype=bool)
+    if mask.shape == (n_times, n_channels):
+        return mask
+    if mask.shape == (n_channels, n_times):
+        return mask.T
+    raise ValueError(f"Unexpected cluster mask shape {mask.shape}; expected {(n_times, n_channels)} or {(n_channels, n_times)}.")
+
+
+def _cluster_duration(cluster_times: np.ndarray, *, all_times: np.ndarray) -> float:
+    selected = np.sort(np.asarray(cluster_times, dtype=float))
+    if selected.size == 0:
+        return 0.0
+    if all_times.size < 2:
+        return 0.0
+    sample_step = float(np.median(np.diff(np.sort(np.asarray(all_times, dtype=float)))))
+    if selected.size == 1:
+        return abs(sample_step)
+    return float((selected[-1] - selected[0]) + abs(sample_step))

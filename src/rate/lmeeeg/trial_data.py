@@ -13,6 +13,10 @@ from rate.design import DesignMatrixResult, build_design_matrix, load_model_spec
 
 LOGGER = logging.getLogger(__name__)
 
+_LEGACY_METADATA_ALIASES: dict[str, str] = {
+    "proximity": "alignment",
+}
+
 
 @dataclass(frozen=True)
 class LMEEEGTrialData:
@@ -34,6 +38,7 @@ def prepare_lmeeeg_design(
     model_name: str | None = None,
 ) -> DesignMatrixResult:
     """Build the fixed-effect design matrix for the lmeEEG branch."""
+    metadata_df = _apply_legacy_metadata_aliases(metadata_df)
     model_spec = load_model_spec(config, section="lmeeeg", model_name=model_name)
     design_spec = _make_rhs_only_model_spec(model_spec)
     return build_design_matrix(metadata_df, model_spec=design_spec)
@@ -82,13 +87,14 @@ def build_lmeeeg_trial_data_from_arrays(
     if int(np.asarray(eeg_data).shape[0]) != len(metadata_df):
         raise ValueError("EEG rows and metadata rows must match before lmeEEG design filtering.")
 
-    design_result = prepare_lmeeeg_design(metadata_df, config, model_name=model_name)
+    prepared_metadata_df = _apply_legacy_metadata_aliases(metadata_df)
+    design_result = prepare_lmeeeg_design(prepared_metadata_df, config, model_name=model_name)
     group_column = resolve_random_effect_group(config, model_name=model_name)
-    if group_column not in metadata_df.columns:
+    if group_column not in prepared_metadata_df.columns:
         raise ValueError(f"Configured lmeEEG random-effect group column `{group_column}` is missing from metadata.")
 
     row_index = design_result.row_index.to_numpy(dtype=int, copy=True)
-    trial_metadata = metadata_df.iloc[row_index].copy().reset_index(drop=True)
+    trial_metadata = prepared_metadata_df.iloc[row_index].copy().reset_index(drop=True)
     if trial_metadata[group_column].isna().any():
         raise ValueError(f"Configured lmeEEG random-effect group column `{group_column}` contains missing values.")
 
@@ -163,3 +169,13 @@ def _make_rhs_only_model_spec(model_spec):
     if not lhs.strip():
         return model_spec
     return replace(model_spec, formula=f"~ {rhs.strip()}", outcome=None)
+
+
+def _apply_legacy_metadata_aliases(metadata_df: pd.DataFrame) -> pd.DataFrame:
+    """Backfill renamed metadata columns so older cached epoch tables remain readable."""
+    aliased = metadata_df.copy()
+    for target_column, source_column in _LEGACY_METADATA_ALIASES.items():
+        if target_column in aliased.columns or source_column not in aliased.columns:
+            continue
+        aliased.loc[:, target_column] = aliased[source_column]
+    return aliased

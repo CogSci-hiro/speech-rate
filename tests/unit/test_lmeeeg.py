@@ -22,7 +22,7 @@ from rate.cli.commands import figures_lmeeeg
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
-from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
+from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays, build_lmeeeg_trial_table
 from rate.util import write_parquet_dataframe
 from rate.viz import lmeeeg as lmeeeg_viz
 
@@ -142,6 +142,47 @@ def test_lmeeeg_subject_cli_writes_outputs(tmp_path: Path) -> None:
     assert betas.shape == (2, 2, 2)
 
 
+def test_build_lmeeeg_trial_data_backfills_proximity_from_alignment() -> None:
+    config = {
+        "lmeeeg": {
+            "models": {
+                "proximity_effect": {
+                    "formula": "~ proximity + self_rate",
+                    "eligibility": {"not_null": ["proximity", "self_rate"]},
+                    "test_predictors": ["proximity"],
+                    "standardize": ["proximity", "self_rate"],
+                    "random_effect_group": "subject_id",
+                    "random_effect_structure": "random_intercept",
+                }
+            }
+        }
+    }
+    eeg_data = np.arange(4 * 2 * 3, dtype=float).reshape(4, 2, 3)
+    metadata = pd.DataFrame(
+        {
+            "alignment": [-0.5, -0.25, -0.1, -0.05],
+            "self_rate": [3.0, 3.5, 4.0, 4.5],
+            "subject_id": ["sub-001", "sub-001", "sub-002", "sub-002"],
+        }
+    )
+
+    trial_data = build_lmeeeg_trial_data_from_arrays(
+        eeg_data=eeg_data,
+        metadata_df=metadata,
+        channel_names=["Fz", "Cz"],
+        times=np.asarray([0.0, 0.1, 0.2], dtype=float),
+        config=config,
+        model_name="proximity_effect",
+    )
+
+    assert "proximity" in trial_data.trial_metadata.columns
+    assert np.allclose(
+        trial_data.trial_metadata["proximity"].to_numpy(dtype=float),
+        metadata["alignment"].to_numpy(dtype=float),
+    )
+    assert trial_data.design_result.test_predictors == ["proximity"]
+
+
 def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
@@ -217,6 +258,80 @@ def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) ->
     assert effect_summary["predictor"] == "speech_rate"
     assert Path(effect_summary["observed_statistic"]).exists()
     assert Path(effect_summary["corrected_p_values"]).exists()
+    assert Path(effect_summary["p_values_csv"]).exists()
+
+
+def test_write_inference_outputs_writes_cluster_pvalues_csv(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    inference = SimpleNamespace(
+        correction="cluster",
+        observed_statistic=np.zeros((2, 3), dtype=float),
+        corrected_p_values=np.asarray([[0.02, 0.02, 1.0], [1.0, 0.04, 0.04]], dtype=float),
+        null_distribution=np.asarray([0.0], dtype=float),
+        cluster_p_values=np.asarray([0.04, 0.02, 0.3], dtype=float),
+        clusters=[
+            np.asarray([[False, True], [False, True], [False, False]], dtype=bool),
+            np.asarray([[True, False], [True, False], [False, False]], dtype=bool),
+            np.asarray([[True, True], [False, False], [False, False]], dtype=bool),
+        ],
+        backend_metadata={},
+    )
+
+    summary = lmeeeg_group_stats._write_inference_outputs(
+        config,
+        model_name="speech_rate_item_intercept",
+        predictor_name="speech_rate",
+        effect_name="speech_rate",
+        inference=inference,
+        channel_names=["Fz", "Cz"],
+        times=np.asarray([0.0, 0.1, 0.2], dtype=float),
+    )
+
+    csv_path = Path(summary["p_values_csv"])
+    csv_df = pd.read_csv(csv_path)
+
+    assert list(csv_df.columns) == ["p_values", "cluster_size", "duration", "spatial_extent"]
+    assert csv_df.to_dict(orient="records") == [
+        {"p_values": 0.02, "cluster_size": 2, "duration": 0.2, "spatial_extent": 1},
+        {"p_values": 0.04, "cluster_size": 2, "duration": 0.2, "spatial_extent": 1},
+        {"p_values": 0.3, "cluster_size": 2, "duration": 0.1, "spatial_extent": 2},
+    ]
+
+
+def test_write_inference_outputs_writes_tfce_pvalues_csv_sorted_by_pvalue(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    inference = SimpleNamespace(
+        correction="tfce",
+        observed_statistic=np.zeros((2, 2), dtype=float),
+        corrected_p_values=np.asarray([[0.03, 0.2], [0.01, 0.04]], dtype=float),
+        null_distribution=np.asarray([0.0], dtype=float),
+        cluster_p_values=np.asarray([], dtype=float),
+        clusters=[],
+        backend_metadata={},
+    )
+
+    summary = lmeeeg_group_stats._write_inference_outputs(
+        config,
+        model_name="speech_rate_item_intercept",
+        predictor_name="speech_rate",
+        effect_name="speech_rate",
+        inference=inference,
+        channel_names=["Fz", "Cz"],
+        times=np.asarray([0.0, 0.1], dtype=float),
+    )
+
+    csv_path = Path(summary["p_values_csv"])
+    csv_df = pd.read_csv(csv_path)
+
+    assert list(csv_df.columns) == ["p_values", "channel", "time"]
+    assert csv_df.to_dict(orient="records") == [
+        {"p_values": 0.01, "channel": "Cz", "time": 0.0},
+        {"p_values": 0.03, "channel": "Fz", "time": 0.0},
+        {"p_values": 0.04, "channel": "Cz", "time": 0.1},
+        {"p_values": 0.2, "channel": "Fz", "time": 0.1},
+    ]
 
 
 def test_resolve_adjacency_uses_configured_preprocessing_montage(monkeypatch) -> None:
