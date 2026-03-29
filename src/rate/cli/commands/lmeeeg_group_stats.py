@@ -31,6 +31,8 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--subject-id", help="Optional subject identifier filter.")
     parser.add_argument("--task", help="Optional task filter.")
     parser.add_argument("--run", help="Optional run filter.")
+    parser.add_argument("--config-section", default="lmeeeg", help="Config section to analyse (`lmeeeg` or `lmeeeg_fooof`).")
+    parser.add_argument("--target", help="Optional FOOOF target name when running `lmeeeg_fooof` inference.")
     parser.add_argument("--model-name", help="Optional lmeEEG model name filter.")
     parser.add_argument("--output", help="Optional explicit output path.")
     return parser
@@ -39,7 +41,9 @@ def add_subparser(subparsers) -> ArgumentParser:
 def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     assert config is not None
     stats_cfg = _load_stats_config(Path(args.stats_config))
-    output_path = Path(args.output) if args.output else resolve_out_dir(config) / "stats" / "lmeeeg_group_stats.json"
+    config_section = str(getattr(args, "config_section", "lmeeeg") or "lmeeeg")
+    output_filename = "lmeeeg_group_stats.json" if config_section == "lmeeeg" else f"{config_section}_group_stats.json"
+    output_path = Path(args.output) if args.output else resolve_out_dir(config) / "stats" / output_filename
 
     try:
         rows = select_lmeeeg_rows(
@@ -49,10 +53,25 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
             task=args.task,
             run=args.run,
         )
-        model_names = [str(args.model_name)] if args.model_name else list_model_names(config, section="lmeeeg")
-        LOGGER.info("Running lmeEEG inference for %d model(s) across %d selected dataset rows", len(model_names), len(rows))
+        model_names = [str(args.model_name)] if args.model_name else list_model_names(config, section=config_section)
+        target_names = _resolve_target_names(config, config_section=config_section, target_name=getattr(args, "target", None))
+        LOGGER.info(
+            "Running lmeEEG inference for section=%s across %d model(s), %d target(s), and %d selected dataset rows",
+            config_section,
+            len(model_names),
+            len(target_names),
+            len(rows),
+        )
         analyses = [
-            _run_one_analysis(config, stats_cfg, rows, model_name=model_name)
+            _run_one_analysis(
+                config,
+                stats_cfg,
+                rows,
+                config_section=config_section,
+                target_name=target_name,
+                model_name=model_name,
+            )
+            for target_name in target_names
             for model_name in model_names
         ]
     except (FileNotFoundError, ValueError, KeyError) as exc:
@@ -61,7 +80,8 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
 
     summary = {
         "status": "ok",
-        "stage": "lmeeeg_group_stats",
+        "stage": f"{config_section}_group_stats",
+        "config_section": config_section,
         "method": _resolve_correction_name(stats_cfg),
         "n_permutations": int((stats_cfg.get("stats") or {}).get("n_permutations", 1024)),
         "n_analyses": len(analyses),
@@ -87,16 +107,36 @@ def _run_one_analysis(
     stats_cfg: Mapping[str, Any],
     rows: list[Mapping[str, Any]],
     *,
+    config_section: str = "lmeeeg",
+    target_name: str | None = None,
     model_name: str,
 ) -> dict[str, Any]:
-    LOGGER.info("Preparing pooled lmeEEG inference inputs for model=%s", model_name)
-    trial_data = load_pooled_lmeeeg_trial_data(config, rows, model_name=model_name)
     LOGGER.info(
-        "Refitting pooled lmeEEG model=%s for inference with %d filtered trials",
+        "Preparing pooled lmeEEG inference inputs for section=%s target=%s model=%s",
+        config_section,
+        target_name or "<none>",
+        model_name,
+    )
+    trial_data = load_pooled_lmeeeg_trial_data(
+        config,
+        rows,
+        config_section=config_section,
+        target_name=target_name,
+        model_name=model_name,
+    )
+    LOGGER.info(
+        "Refitting pooled lmeEEG section=%s target=%s model=%s for inference with %d filtered trials",
+        config_section,
+        target_name or "<none>",
         model_name,
         int(trial_data.eeg_data.shape[0]),
     )
-    fit_result = fit_lmeeeg_backend_result(trial_data, config, model_name=model_name)
+    fit_result = fit_lmeeeg_backend_result(
+        trial_data,
+        config,
+        config_section=config_section,
+        model_name=model_name,
+    )
 
     correction = _resolve_correction_name(stats_cfg)
     tail = int((stats_cfg.get("stats") or {}).get("tail", 0))
@@ -128,6 +168,8 @@ def _run_one_analysis(
         outputs.append(
             _write_inference_outputs(
                 config,
+                config_section=config_section,
+                target_name=target_name,
                 model_name=model_name,
                 predictor_name=predictor_name,
                 effect_name=effect_name,
@@ -137,12 +179,31 @@ def _run_one_analysis(
             )
         )
 
-    return {
+    analysis_summary = {
         "model_name": model_name,
         "n_input_rows": len(rows),
         "n_effects": len(outputs),
         "effects": outputs,
     }
+    if target_name is not None:
+        analysis_summary["target"] = target_name
+    return analysis_summary
+
+
+def _resolve_target_names(
+    config: Mapping[str, Any],
+    *,
+    config_section: str,
+    target_name: str | None,
+) -> list[str | None]:
+    if config_section != "lmeeeg_fooof":
+        return [None]
+    if target_name:
+        return [str(target_name)]
+    targets = [str(value) for value in (config.get("lmeeeg_fooof") or {}).get("targets", [])]
+    if not targets:
+        raise ValueError("No `lmeeeg_fooof.targets` were configured for inference.")
+    return targets
 
 
 def _resolve_effects(trial_data) -> list[tuple[str, str]]:
@@ -250,6 +311,8 @@ def _resolve_preprocessing_montage_name(config: Mapping[str, Any]) -> str:
 def _write_inference_outputs(
     config: Mapping[str, Any],
     *,
+    config_section: str = "lmeeeg",
+    target_name: str | None = None,
     model_name: str,
     predictor_name: str,
     effect_name: str,
@@ -258,13 +321,12 @@ def _write_inference_outputs(
     times: np.ndarray,
 ) -> dict[str, Any]:
     out_dir = resolve_out_dir(config)
-    effect_dir = (
-        out_dir
-        / "stats"
-        / "lmeeeg"
-        / str(model_name)
-        / _safe_token(effect_name)
-    )
+    if config_section == "lmeeeg_fooof":
+        if target_name is None:
+            raise ValueError("`target_name` is required when writing lmeeeg_fooof inference outputs.")
+        effect_dir = out_dir / "stats" / "lmeeeg_fooof" / _safe_token(target_name) / str(model_name) / _safe_token(effect_name)
+    else:
+        effect_dir = out_dir / "stats" / "lmeeeg" / str(model_name) / _safe_token(effect_name)
     observed_path = effect_dir / "observed_statistic.npy"
     corrected_p_path = effect_dir / "corrected_p_values.npy"
     null_path = effect_dir / "null_distribution.npy"
@@ -300,6 +362,8 @@ def _write_inference_outputs(
         "null_distribution": str(null_path),
         "cluster_p_values": str(cluster_p_path),
     }
+    if target_name is not None:
+        summary["target"] = target_name
     if csv_columns is not None:
         summary["p_values_csv"] = str(p_values_csv_path)
         summary["p_values_csv_columns"] = csv_columns

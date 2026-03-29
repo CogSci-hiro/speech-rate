@@ -19,6 +19,8 @@ import yaml
 from rate.cli.commands import lmeeeg_group_stats
 from rate.cli.commands import lmeeeg_subject
 from rate.cli.commands import figures_lmeeeg
+from rate.cli.commands import figures_lmeeeg_fooof
+from rate.cli.commands import figures_lmeeeg_fooof_inference
 from rate.epochs.io import build_epoch_output_paths
 from rate.fooof_mass.io import build_fooof_epoch_feature_paths
 from rate.lmeeeg.io import build_lmeeeg_output_paths
@@ -352,6 +354,87 @@ def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) ->
     assert Path(effect_summary["p_values_csv"]).exists()
 
 
+def test_lmeeeg_fooof_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "status": "ok",
+        "eeg_path": str(tmp_path / "placeholder_raw.fif"),
+    }
+    metadata = pd.DataFrame(
+        {
+            "speech_rate": [0.0, 1.0, 2.0, 0.5, 1.5, 2.5],
+            "item_id": ["A", "A", "A", "B", "B", "B"],
+        }
+    )
+    slope_map = np.array([[1.0, 0.0], [0.5, -0.25]])
+    intercept_map = np.array([[1.0, 1.5], [-0.5, 0.25]])
+    group_intercepts = {"A": 3.0, "B": -1.0}
+    data = np.zeros((6, 2, 2), dtype=float)
+    for index, row_values in metadata.iterrows():
+        data[index] = intercept_map + (float(row_values["speech_rate"]) * slope_map) + group_intercepts[str(row_values["item_id"])]
+
+    epochs = _make_epochs(data, metadata.copy())
+    fooof_paths = build_fooof_epoch_feature_paths(config, row, feature_name="offset")
+    epochs_path = fooof_paths.epochs_output_path
+    metadata_path = fooof_paths.metadata_output_path
+    dataset_index_path = out_dir / "dataset" / "index.parquet"
+    epochs_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_index_path.parent.mkdir(parents=True, exist_ok=True)
+    epochs.save(epochs_path, overwrite=True, verbose="ERROR")
+    metadata.to_csv(metadata_path, index=False)
+    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
+
+    stats_cfg_path = tmp_path / "stats.yaml"
+    stats_cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "stats": {
+                    "method": "maxstat",
+                    "n_permutations": 8,
+                    "tail": 0,
+                    "adjacency": None,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        stats_config=str(stats_cfg_path),
+        dataset_index=str(dataset_index_path),
+        subject_id="sub-001",
+        task="conversation",
+        run="1",
+        config_section="lmeeeg_fooof",
+        target="offset",
+        model_name="speech_rate_item_intercept",
+        output=None,
+    )
+    exit_code = lmeeeg_group_stats.run(args, config=config)
+    assert exit_code == 0
+
+    summary_path = out_dir / "stats" / "lmeeeg_fooof_group_stats.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert summary["status"] == "ok"
+    assert summary["config_section"] == "lmeeeg_fooof"
+    assert summary["n_analyses"] == 1
+    analysis = summary["analyses"][0]
+    assert analysis["target"] == "offset"
+    effect_summary = analysis["effects"][0]
+    assert effect_summary["target"] == "offset"
+    assert Path(effect_summary["observed_statistic"]).exists()
+    assert Path(effect_summary["corrected_p_values"]).exists()
+    assert Path(effect_summary["p_values_csv"]).exists()
+
+
 def test_write_inference_outputs_writes_cluster_pvalues_csv(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
@@ -555,4 +638,141 @@ def test_figures_lmeeeg_falls_back_to_stats_outputs_when_lmeeeg_dir_missing(tmp_
         out_dir / "figures" / "lmeeeg" / "betas" / "convergence_subject_intercept" / "latency",
         out_dir / "figures" / "lmeeeg" / "t_values" / "convergence_subject_intercept" / "latency",
         out_dir / "figures" / "lmeeeg" / "statistics" / "convergence_subject_intercept" / "latency",
+    ]
+
+
+def test_figures_lmeeeg_fooof_writes_plots_for_each_target(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+
+    viz_config_path = tmp_path / "viz.yaml"
+    viz_config_path.write_text(yaml.safe_dump({"viz": {"formats": ["png"], "dpi": 72}}), encoding="utf-8")
+
+    for target_name in ("offset", "exponent"):
+        stats_effect_dir = out_dir / "stats" / "lmeeeg_fooof" / target_name / "speech_rate_item_intercept" / "speech_rate"
+        stats_effect_dir.mkdir(parents=True, exist_ok=True)
+        observed_path = stats_effect_dir / "observed_statistic.npy"
+        corrected_p_path = stats_effect_dir / "corrected_p_values.npy"
+        np.save(observed_path, np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float))
+        np.save(corrected_p_path, np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float))
+        (stats_effect_dir / "summary.json").write_text(
+            json.dumps({"observed_statistic": str(observed_path), "corrected_p_values": str(corrected_p_path)}) + "\n",
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(
+        figures_lmeeeg_fooof,
+        "select_lmeeeg_rows",
+        lambda config: [{"subject_id": "sub-001", "task": "conversation", "run": "1"}],
+    )
+    monkeypatch.setattr(
+        figures_lmeeeg_fooof,
+        "_load_or_fit_model_payloads",
+        lambda config, rows, target_name: {
+            "speech_rate_item_intercept": {
+                "betas": np.asarray([[[0.1, 0.2], [0.3, 0.4]]], dtype=float),
+                "t_values": np.asarray([[[1.0, 2.0], [3.0, 4.0]]], dtype=float),
+                "times": np.asarray([-0.1, 0.0], dtype=float),
+                "channel_names": ["Fz", "Cz"],
+                "column_names": ["speech_rate"],
+            }
+        },
+    )
+
+    captured_output_stems: list[Path] = []
+
+    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
+        captured_output_stems.append(output_stem)
+        output_stem.parent.mkdir(parents=True, exist_ok=True)
+        written_path = output_stem.with_suffix(".png")
+        written_path.write_text("stub\n", encoding="utf-8")
+        return [written_path]
+
+    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        viz_config=str(viz_config_path),
+        output=None,
+    )
+    exit_code = figures_lmeeeg_fooof.run(args, config=config)
+
+    assert exit_code == 0
+    manifest_path = out_dir / "figures" / "lmeeeg_fooof" / "figure_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["plot_count"] == 6
+    assert {plot["target"] for plot in manifest["plots"]} == {"offset", "exponent"}
+    assert {plot["measure"] for plot in manifest["plots"] if "measure" in plot} == {"beta", "t_value"}
+    assert any(plot.get("has_significance_overlay") for plot in manifest["plots"] if plot.get("measure") == "beta")
+    assert any(plot.get("source") == "stats_fallback" for plot in manifest["plots"])
+    assert captured_output_stems == [
+        out_dir / "figures" / "lmeeeg_fooof" / "offset" / "betas" / "speech_rate_item_intercept" / "speech_rate",
+        out_dir / "figures" / "lmeeeg_fooof" / "offset" / "t_values" / "speech_rate_item_intercept" / "speech_rate",
+        out_dir / "figures" / "lmeeeg_fooof" / "offset" / "statistics" / "speech_rate_item_intercept" / "speech_rate",
+        out_dir / "figures" / "lmeeeg_fooof" / "exponent" / "betas" / "speech_rate_item_intercept" / "speech_rate",
+        out_dir / "figures" / "lmeeeg_fooof" / "exponent" / "t_values" / "speech_rate_item_intercept" / "speech_rate",
+        out_dir / "figures" / "lmeeeg_fooof" / "exponent" / "statistics" / "speech_rate_item_intercept" / "speech_rate",
+    ]
+
+
+def test_figures_lmeeeg_fooof_inference_writes_plots_for_each_target(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    model_name = "speech_rate_item_intercept"
+    effect_name = "speech_rate"
+
+    for target_name in ("offset", "exponent"):
+        target_lmeeeg_dir = out_dir / "lmeeeg_fooof" / target_name / model_name
+        target_stats_dir = out_dir / "stats" / "lmeeeg_fooof" / target_name / model_name / effect_name
+        target_lmeeeg_dir.mkdir(parents=True, exist_ok=True)
+        target_stats_dir.mkdir(parents=True, exist_ok=True)
+
+        np.save(target_lmeeeg_dir / "times.npy", np.asarray([-0.1, 0.0], dtype=float))
+        (target_lmeeeg_dir / "channel_names.json").write_text(json.dumps(["Fz", "Cz"]) + "\n", encoding="utf-8")
+
+        observed_path = target_stats_dir / "observed_statistic.npy"
+        corrected_p_path = target_stats_dir / "corrected_p_values.npy"
+        np.save(observed_path, np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float))
+        np.save(corrected_p_path, np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float))
+        (target_stats_dir / "summary.json").write_text(
+            json.dumps({"observed_statistic": str(observed_path), "corrected_p_values": str(corrected_p_path), "correction": "maxstat"}) + "\n",
+            encoding="utf-8",
+        )
+
+    viz_config_path = tmp_path / "viz.yaml"
+    viz_config_path.write_text(yaml.safe_dump({"viz": {"formats": ["png"], "dpi": 72}}), encoding="utf-8")
+
+    captured_output_stems: list[Path] = []
+
+    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
+        captured_output_stems.append(output_stem)
+        output_stem.parent.mkdir(parents=True, exist_ok=True)
+        written_path = output_stem.with_suffix(".png")
+        written_path.write_text("stub\n", encoding="utf-8")
+        return [written_path]
+
+    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        viz_config=str(viz_config_path),
+        output=None,
+    )
+    exit_code = figures_lmeeeg_fooof_inference.run(args, config=config)
+
+    assert exit_code == 0
+    manifest_path = out_dir / "figures" / "lmeeeg_fooof_inference" / "figure_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["plot_count"] == 2
+    assert {plot["target"] for plot in manifest["plots"]} == {"offset", "exponent"}
+    assert captured_output_stems == [
+        out_dir / "figures" / "lmeeeg_fooof_inference" / "offset" / model_name / "speech_rate_observed",
+        out_dir / "figures" / "lmeeeg_fooof_inference" / "offset" / model_name / "speech_rate_corrected_p",
+        out_dir / "figures" / "lmeeeg_fooof_inference" / "offset" / model_name / "speech_rate_p005_masked",
+        out_dir / "figures" / "lmeeeg_fooof_inference" / "exponent" / model_name / "speech_rate_observed",
+        out_dir / "figures" / "lmeeeg_fooof_inference" / "exponent" / model_name / "speech_rate_corrected_p",
+        out_dir / "figures" / "lmeeeg_fooof_inference" / "exponent" / model_name / "speech_rate_p005_masked",
     ]

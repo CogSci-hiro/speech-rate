@@ -31,6 +31,8 @@ preprocessing:
     emg_filename: "emg.npz"
     events_filename: "events.tsv"
     summary_filename: "preprocessing_summary.json"
+    save_intermediates: true
+    intermediates_dirname: "debug"
   pipeline_order:
     - "separate_drop_channels"
     - "downsample"

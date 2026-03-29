@@ -29,7 +29,9 @@ _COMMANDS = {
     "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
     "figures-glm": "rate.cli.commands.figures_glm",
     "figures-lmeeeg": "rate.cli.commands.figures_lmeeeg",
+    "figures-lmeeeg-fooof": "rate.cli.commands.figures_lmeeeg_fooof",
     "figures-lmeeeg-inference": "rate.cli.commands.figures_lmeeeg_inference",
+    "figures-lmeeeg-fooof-inference": "rate.cli.commands.figures_lmeeeg_fooof_inference",
     "model-weights-glm": "rate.cli.commands.model_weights_glm",
     "figures-fooof": "rate.cli.commands.figures_fooof",
 }

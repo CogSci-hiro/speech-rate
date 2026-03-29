@@ -45,7 +45,8 @@ rule lmeeeg_all:
 
 rule lmeeeg_fooof_all:
     input:
-        LMEEEG_FOOOF_STAGE
+        LMEEEG_FOOOF_STAGE,
+        LMEEEG_FOOOF_STATS_OUTPUT
 
 
 rule model_weights_all:
@@ -64,9 +65,19 @@ rule qc_lmeeeg_plots_all:
         LMEEEG_QC_FIGURES_OUTPUT
 
 
+rule qc_lmeeeg_fooof_plots_all:
+    input:
+        LMEEEG_FOOOF_QC_FIGURES_OUTPUT
+
+
 rule qc_lmeeeg_inference_plots_all:
     input:
         LMEEEG_INFERENCE_FIGURES_OUTPUT
+
+
+rule qc_lmeeeg_fooof_inference_plots_all:
+    input:
+        LMEEEG_FOOOF_INFERENCE_FIGURES_OUTPUT
 
 
 rule all:

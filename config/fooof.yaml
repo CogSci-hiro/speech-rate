@@ -4,7 +4,7 @@ fooof:
 
   windows:
     length_s: 1.0
-    sfreq_hz: 16
+    sfreq_hz: 8
 
   spectrum:
     method: "multitaper"

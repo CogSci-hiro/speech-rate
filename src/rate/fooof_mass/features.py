@@ -52,9 +52,9 @@ def extract_fooof_features(
     for band_name, limits in bands_cfg.items():
         low_hz = float(limits[0])
         high_hz = float(limits[1])
-        cf_values = np.full(feature_shape, np.nan, dtype=float)
-        pw_values = np.full(feature_shape, np.nan, dtype=float)
-        bw_values = np.full(feature_shape, np.nan, dtype=float)
+        cf_values = np.zeros(feature_shape, dtype=float)
+        pw_values = np.zeros(feature_shape, dtype=float)
+        bw_values = np.zeros(feature_shape, dtype=float)
 
         for epoch_index in range(feature_shape[0]):
             for channel_index in range(feature_shape[1]):

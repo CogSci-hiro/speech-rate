@@ -26,6 +26,39 @@ class PreprocessingRunPaths:
     summary_output_path: Path
 
 
+def should_write_preprocessing_intermediates(config: Mapping[str, Any]) -> bool:
+    """Return True when preprocessing should persist intermediate debug artifacts."""
+    preprocessing_cfg = dict(config.get("preprocessing") or {})
+    output_cfg = dict(preprocessing_cfg.get("output") or {})
+    save_intermediates = output_cfg.get("save_intermediates")
+    if save_intermediates is not None:
+        return bool(save_intermediates)
+
+    debug_cfg = config.get("debug")
+    if not isinstance(debug_cfg, Mapping):
+        return False
+    return bool(debug_cfg.get("enabled", False))
+
+
+def resolve_preprocessing_intermediates_dir(
+    config: Mapping[str, Any],
+    row: Mapping[str, Any],
+) -> Path:
+    """Resolve the directory where preprocessing debug intermediates are written."""
+    out_dir = resolve_out_dir(config)
+    preprocessing_cfg = dict(config.get("preprocessing") or {})
+    output_cfg = dict(preprocessing_cfg.get("output") or {})
+    dirname = str(output_cfg.get("intermediates_dirname", "debug"))
+    return (
+        out_dir
+        / "preprocessing"
+        / str(row["subject_id"])
+        / f"task-{row['task']}"
+        / f"run-{row['run']}"
+        / dirname
+    )
+
+
 def _format_context(row: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, str]:
     paths_cfg = dict(config.get("paths") or {})
     return {
@@ -212,4 +245,11 @@ def write_preprocessing_summary(output_path: Path, payload: Mapping[str, Any]) -
     """Write a JSON preprocessing summary."""
     ensure_parent_dir(output_path)
     output_path.write_text(json.dumps(dict(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return output_path
+
+
+def write_debug_raw_snapshot(output_path: Path, raw) -> Path:
+    """Write a Raw snapshot to disk for debugging."""
+    ensure_parent_dir(output_path)
+    raw.save(output_path, overwrite=True, verbose="ERROR")
     return output_path

@@ -18,6 +18,9 @@ from rate.preprocessing.ica import apply_precomputed_ica
 from rate.preprocessing.io import (
     PreprocessingRunPaths,
     build_preprocessing_output_paths,
+    resolve_preprocessing_intermediates_dir,
+    should_write_preprocessing_intermediates,
+    write_debug_raw_snapshot,
     write_emg_artifact,
     write_events_table,
     write_preprocessing_summary,
@@ -25,6 +28,15 @@ from rate.preprocessing.io import (
 from rate.preprocessing.rereference import apply_average_reference
 
 LOGGER = logging.getLogger(__name__)
+
+INTERMEDIATE_STAGE_FILENAMES: tuple[tuple[str, str], ...] = (
+    ("after_channel_selection", "01_after_channel_selection_raw.fif"),
+    ("after_downsample", "02_after_downsample_raw.fif"),
+    ("after_bandpass", "03_after_bandpass_raw.fif"),
+    ("after_ica", "04_after_ica_raw.fif"),
+    ("after_interpolation", "05_after_interpolation_raw.fif"),
+    ("after_rereference", "06_after_rereference_raw.fif"),
+)
 
 
 def _row_mapping_from_series(row: pd.Series | Mapping[str, Any]) -> dict[str, Any]:
@@ -78,6 +90,17 @@ def preprocess_run(
         events_output_path=events_output_path or _get_resolved_paths().events_output_path,
         summary_output_path=summary_output_path or _get_resolved_paths().summary_output_path,
     )
+    save_intermediates = should_write_preprocessing_intermediates(config)
+    intermediates_dir = resolve_preprocessing_intermediates_dir(config, row_mapping) if save_intermediates else None
+    intermediate_output_paths: dict[str, str] = {}
+
+    def _write_intermediate(stage_key: str, raw_snapshot) -> None:
+        if intermediates_dir is None:
+            return
+        filename = dict(INTERMEDIATE_STAGE_FILENAMES)[stage_key]
+        output_path = intermediates_dir / filename
+        write_debug_raw_snapshot(output_path, raw_snapshot)
+        intermediate_output_paths[stage_key] = str(output_path)
 
     raw = read_raw_eeg(run_paths.raw_eeg_path, preload=True, verbose="ERROR")
     anchor_event_sample, anchor_event_time_s = find_run_anchor_event(raw, config)
@@ -90,21 +113,27 @@ def preprocess_run(
     emg_raw = raw.copy().pick(channel_split.emg_names) if channel_split.emg_names else None
     apply_montage(eeg_raw, config)
     load_bad_channels_from_bids_tsv(run_paths.channels_tsv_path, raw=eeg_raw)
+    _write_intermediate("after_channel_selection", eeg_raw)
 
     # 2. Downsample.
     downsample_raw(eeg_raw, config)
+    _write_intermediate("after_downsample", eeg_raw)
 
     # 3. Bandpass.
     apply_bandpass_filter(eeg_raw, config)
+    _write_intermediate("after_bandpass", eeg_raw)
 
     # 4. Apply precomputed ICA.
     apply_precomputed_ica(eeg_raw, run_paths.ica_path)
+    _write_intermediate("after_ica", eeg_raw)
 
     # 5. Interpolate bad channels.
     interpolate_bad_channels(eeg_raw)
+    _write_intermediate("after_interpolation", eeg_raw)
 
     # 6. Rereference.
     apply_average_reference(eeg_raw)
+    _write_intermediate("after_rereference", eeg_raw)
 
     run_paths.eeg_output_path.parent.mkdir(parents=True, exist_ok=True)
     eeg_raw.save(run_paths.eeg_output_path, overwrite=True, verbose="ERROR")
@@ -132,6 +161,7 @@ def preprocess_run(
         "eeg_channels": list(eeg_raw.ch_names),
         "emg_channels": list(emg_raw.ch_names) if emg_raw is not None else [],
         "dropped_channels": channel_split.dropped_names,
+        "intermediate_output_paths": intermediate_output_paths,
         "status": "ok",
     }
     write_preprocessing_summary(run_paths.summary_output_path, summary)

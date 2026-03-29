@@ -67,6 +67,28 @@ def test_extract_fooof_features_selects_highest_power_peak_within_band() -> None
     assert result.feature_tensors["alpha_cf"][0, 0, 0] == 10.0
 
 
+def test_extract_fooof_features_returns_zero_when_no_periodic_peak_is_found() -> None:
+    fit_result = FooofTensorResult(
+        frequencies=np.array([4.0, 8.0, 12.0]),
+        success_mask=np.ones((1, 1, 1), dtype=bool),
+        aperiodic_params=np.array([[[[1.5, 0.75, np.nan]]]]),
+        peak_params=np.full((1, 1, 1, 1, 3), np.nan, dtype=float),
+        error_values=np.zeros((1, 1, 1), dtype=float),
+        r_squared_values=np.ones((1, 1, 1), dtype=float),
+        n_attempted=1,
+        n_failed=0,
+        max_n_peaks=1,
+    )
+    config = {"fooof": {"bands": {"theta": [4.0, 7.0], "alpha": [8.0, 12.0]}}}
+
+    result = extract_fooof_features(fit_result, config)
+
+    assert result.feature_tensors["theta"][0, 0, 0] == 0.0
+    assert result.feature_tensors["theta_cf"][0, 0, 0] == 0.0
+    assert result.feature_tensors["theta_bw"][0, 0, 0] == 0.0
+    assert result.feature_tensors["alpha"][0, 0, 0] == 0.0
+
+
 def test_list_fooof_epoch_feature_names_prefers_configured_list() -> None:
     config = {"fooof": {"bands": {"theta": [4.0, 7.0]}, "features": ["offset", "theta"]}}
 

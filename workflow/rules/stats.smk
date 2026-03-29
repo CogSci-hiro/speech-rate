@@ -1,6 +1,7 @@
 GLM_STATS_OUTPUT = f"{OUT_DIR}/stats/glm_group_stats.json"
 FOOOF_MASS_STATS_OUTPUT = f"{OUT_DIR}/stats/fooof_mass_group_stats.json"
 LMEEEG_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_group_stats.json"
+LMEEEG_FOOOF_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_fooof_group_stats.json"
 
 
 rule glm_group_stats:
@@ -38,3 +39,17 @@ rule lmeeeg_group_stats:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
         "--config config/config.yaml --schema config/schema.json "
         "--stats-config {input.stats_config} --dataset-index {input.dataset_index} --output {output}"
+
+
+rule lmeeeg_fooof_group_stats:
+    input:
+        lmeeeg=LMEEEG_FOOOF_STAGE,
+        stats_config="config/stats.yaml",
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+    output:
+        LMEEEG_FOOOF_STATS_OUTPUT,
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
+        "--config config/config.yaml --schema config/schema.json "
+        "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
+        "--config-section lmeeeg_fooof --output {output}"

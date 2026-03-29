@@ -128,6 +128,63 @@ def test_preprocess_run_writes_eeg_emg_events_and_summary(tmp_path: Path, monkey
     assert summary["emg_channels"] == ["EMG1"]
     assert summary["anchor_event_sample"] == 100
     assert summary["anchor_event_time_s"] == pytest.approx(0.5)
+    assert summary["intermediate_output_paths"] == {}
+
+
+def test_preprocess_run_writes_intermediates_when_debug_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = _make_raw()
+    raw_path = tmp_path / "input_raw.fif"
+    raw.save(raw_path, overwrite=True, verbose="ERROR")
+
+    channels_tsv_path = tmp_path / "sub-001_task-conversation_run-01_channels.tsv"
+    _write_channels_tsv(channels_tsv_path, bad_names=["Fz"])
+
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+        "raw_eeg_path": str(raw_path),
+        "eeg_path": str(tmp_path / "out" / "preprocessing" / "sub-001" / "task-conversation" / "run-1" / "eeg_preprocessed_raw.fif"),
+    }
+    config = _config(tmp_path)
+    config["debug"] = {"enabled": True}
+
+    monkeypatch.setattr("rate.preprocessing.pipeline.apply_precomputed_ica", lambda raw, path: None)
+    monkeypatch.setattr("rate.preprocessing.pipeline.find_run_anchor_event", lambda raw, config: (100, 0.5))
+
+    summary_output_path = tmp_path / "out" / "preprocessing_summary.json"
+    preprocess_run(
+        config,
+        row,
+        raw_eeg_path=raw_path,
+        channels_tsv_path=channels_tsv_path,
+        ica_path=tmp_path / "precomputed-ica.fif",
+        eeg_output_path=tmp_path / "out" / "eeg_preprocessed_raw.fif",
+        emg_output_path=tmp_path / "out" / "emg.npz",
+        events_output_path=tmp_path / "out" / "events.tsv",
+        summary_output_path=summary_output_path,
+    )
+
+    summary = json.loads(summary_output_path.read_text(encoding="utf-8"))
+    expected_stage_keys = [
+        "after_channel_selection",
+        "after_downsample",
+        "after_bandpass",
+        "after_ica",
+        "after_interpolation",
+        "after_rereference",
+    ]
+    assert set(summary["intermediate_output_paths"]) == set(expected_stage_keys)
+
+    for path_str in summary["intermediate_output_paths"].values():
+        debug_path = Path(path_str)
+        assert debug_path.exists()
+        debug_raw = mne.io.read_raw_fif(debug_path, preload=False, verbose="ERROR")
+        assert debug_raw.ch_names == ["Fz", "Cz", "Pz", "Oz"]
 
 
 def test_load_bad_channels_from_bids_tsv_raises_on_partial_name_mismatch(tmp_path: Path) -> None:
