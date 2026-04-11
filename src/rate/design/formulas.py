@@ -20,7 +20,7 @@ class ModelSpec:
     Parameters
     ----------
     section
-        Top-level config section, for example ``"glm"`` or ``"lmeeeg"``.
+        Top-level config section, for example ``"lmeeeg"``.
     name
         Model name within the section.
     formula
@@ -67,7 +67,7 @@ def load_model_spec(
     config
         Full repository config or a mapping containing the requested section.
     section
-        Config section containing models, for example ``"glm"``.
+        Config section containing models, for example ``"lmeeeg"``.
     model_name
         Optional model name. When omitted, the section must resolve to exactly
         one model definition.

@@ -80,8 +80,8 @@ def compute_time_within_run(group_df: pd.DataFrame, normalize: bool, method: str
     return (group_df["t_onset"].astype(float) / t_run).clip(lower=0.0, upper=1.0)
 
 
-def compute_alignment(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
-    """Compute alignment = -abs(self_rate - other_rate)."""
+def compute_proximity(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
+    """Compute proximity = -abs(self_rate - other_rate)."""
     return -(self_rate.astype(float) - other_rate.astype(float)).abs()
 
 
@@ -125,12 +125,12 @@ def add_event_rate_features(
         window_s=absdiff_window_s,
         time_lock=matching_time_lock,
     )
-    enriched["alignment"] = compute_alignment(enriched["self_rate"], enriched["other_rate"])
+    enriched["proximity"] = compute_proximity(enriched["self_rate"], enriched["other_rate"])
     enriched["convergence"] = compute_convergence(enriched["self_rate"], enriched["other_rate"])
     enriched["mean_rate"] = compute_mean_rate(enriched["self_rate"], enriched["other_rate"])
     enriched["self_rate_sq"] = enriched["self_rate"] ** 2
     enriched["other_rate_sq"] = enriched["other_rate"] ** 2
-    enriched["alignment_sq"] = enriched["alignment"] ** 2
+    enriched["proximity_sq"] = enriched["proximity"] ** 2
     enriched["convergence_sq"] = enriched["convergence"] ** 2
     enriched["time_within_run"] = compute_time_within_run(
         enriched,

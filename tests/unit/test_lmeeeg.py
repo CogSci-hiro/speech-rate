@@ -19,10 +19,10 @@ import yaml
 from rate.cli.commands import lmeeeg_group_stats
 from rate.cli.commands import lmeeeg_subject
 from rate.cli.commands import figures_lmeeeg
-from rate.cli.commands import figures_lmeeeg_fooof
-from rate.cli.commands import figures_lmeeeg_fooof_inference
+from rate.legacy.cli.commands import figures_lmeeeg_fooof
+from rate.legacy.cli.commands import figures_lmeeeg_fooof_inference
 from rate.epochs.io import build_epoch_output_paths
-from rate.fooof_mass.io import build_fooof_epoch_feature_paths
+from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
 from rate.lmeeeg.io import build_lmeeeg_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays, build_lmeeeg_trial_table
@@ -274,6 +274,47 @@ def test_build_lmeeeg_trial_data_backfills_proximity_from_alignment() -> None:
         metadata["alignment"].to_numpy(dtype=float),
     )
     assert trial_data.design_result.test_predictors == ["proximity"]
+
+
+def test_build_lmeeeg_trial_data_backfills_proximity_sq_from_alignment_sq() -> None:
+    config = {
+        "lmeeeg": {
+            "models": {
+                "proximity_effect": {
+                    "formula": "~ proximity_sq + self_rate",
+                    "eligibility": {"not_null": ["proximity_sq", "self_rate"]},
+                    "test_predictors": ["proximity_sq"],
+                    "standardize": ["proximity_sq", "self_rate"],
+                    "random_effect_group": "subject_id",
+                    "random_effect_structure": "random_intercept",
+                }
+            }
+        }
+    }
+    eeg_data = np.arange(4 * 2 * 3, dtype=float).reshape(4, 2, 3)
+    metadata = pd.DataFrame(
+        {
+            "alignment_sq": [0.25, 0.0625, 0.01, 0.0025],
+            "self_rate": [3.0, 3.5, 4.0, 4.5],
+            "subject_id": ["sub-001", "sub-001", "sub-002", "sub-002"],
+        }
+    )
+
+    trial_data = build_lmeeeg_trial_data_from_arrays(
+        eeg_data=eeg_data,
+        metadata_df=metadata,
+        channel_names=["Fz", "Cz"],
+        times=np.asarray([0.0, 0.1, 0.2], dtype=float),
+        config=config,
+        model_name="proximity_effect",
+    )
+
+    assert "proximity_sq" in trial_data.trial_metadata.columns
+    assert np.allclose(
+        trial_data.trial_metadata["proximity_sq"].to_numpy(dtype=float),
+        metadata["alignment_sq"].to_numpy(dtype=float),
+    )
+    assert trial_data.design_result.test_predictors == ["proximity_sq"]
 
 
 def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:

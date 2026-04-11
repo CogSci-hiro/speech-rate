@@ -14,8 +14,8 @@ from rate.design import (
     load_model_spec,
     ModelSpecError,
 )
-from rate.fooof_mass.glm import prepare_fooof_mass_design
-from rate.glm.fit import prepare_glm_design
+from rate.legacy.fooof_mass.glm import prepare_fooof_mass_design
+from rate.legacy.glm.fit import prepare_glm_design
 from rate.lmeeeg.trial_data import prepare_lmeeeg_design
 
 

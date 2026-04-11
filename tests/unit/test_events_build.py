@@ -96,7 +96,7 @@ def test_build_subject_questionnaire_table_rejects_duplicate_subjects(tmp_path: 
         build_subject_questionnaire_table(_config(tmp_path / "out", questionnaire_dir))
 
 
-def test_build_events_table_restores_old_columns_and_appends_questionnaires(
+def test_build_events_table_restores_proximity_columns_and_appends_questionnaires(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -159,7 +159,7 @@ def test_build_events_table_restores_old_columns_and_appends_questionnaires(
     caplog.set_level("WARNING")
     events_df, summary = build_events_table(config, dataset_index_df=dataset_index_df)
 
-    required_old_columns = {
+    required_columns = {
         "dyad_id",
         "subject_id",
         "run",
@@ -171,12 +171,12 @@ def test_build_events_table_restores_old_columns_and_appends_questionnaires(
         "self_rate",
         "other_rate",
         "latency",
-        "alignment",
+        "proximity",
         "convergence",
         "mean_rate",
         "self_rate_sq",
         "other_rate_sq",
-        "alignment_sq",
+        "proximity_sq",
         "convergence_sq",
         "time_within_run",
         "task",
@@ -188,7 +188,7 @@ def test_build_events_table_restores_old_columns_and_appends_questionnaires(
         "other_ipu_duration",
         "annotations_path",
     }
-    assert required_old_columns.issubset(set(events_df.columns))
+    assert required_columns.issubset(set(events_df.columns))
     assert {"likeability", "extraversion", "agreeableness", "conscienciousness", "neuroticism", "openness"}.issubset(
         set(events_df.columns)
     )

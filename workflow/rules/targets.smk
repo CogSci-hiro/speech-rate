@@ -20,64 +20,42 @@ rule margin_epochs_all:
         margin_epochs_stage_inputs
 
 
-rule glm_all:
-    input:
-        GLM_STAGE,
-        GLM_STATS_OUTPUT
-
-
-rule fooof_mass_all:
-    input:
-        FOOOF_MASS_STAGE,
-        FOOOF_MASS_STATS_OUTPUT
-
-
-rule fooof_epochs_all:
-    input:
-        FOOOF_EPOCHS_STAGE
-
-
 rule lmeeeg_all:
     input:
         LMEEEG_STAGE,
         LMEEEG_STATS_OUTPUT
 
 
-rule lmeeeg_fooof_all:
-    input:
-        LMEEEG_FOOOF_STAGE,
-        LMEEEG_FOOOF_STATS_OUTPUT
+if "FOOOF_EPOCHS_STAGE" in globals():
+    rule lmeeeg_fooof_all:
+        input:
+            LMEEEG_FOOOF_STAGE,
+            LMEEEG_FOOOF_STATS_OUTPUT
 
 
-rule model_weights_all:
-    input:
-        MODEL_WEIGHTS_OUTPUT_DIR
+if "GLM_STAGE" in globals():
+    rule model_weights_all:
+        input:
+            MODEL_WEIGHTS_OUTPUT_DIR
+
+
+_figures_all_inputs = [LMEEEG_QC_FIGURES_OUTPUT]
+if "GLM_STAGE" in globals():
+    _figures_all_inputs.append(GLM_FIGURES_OUTPUT)
+if "FOOOF_MASS_STAGE" in globals():
+    _figures_all_inputs.append(FOOOF_FIGURES_OUTPUT)
+if "FOOOF_EPOCHS_STAGE" in globals():
+    _figures_all_inputs.append(LMEEEG_FOOOF_QC_FIGURES_OUTPUT)
 
 
 rule figures_all:
     input:
-        GLM_FIGURES_OUTPUT,
-        FOOOF_FIGURES_OUTPUT
+        _figures_all_inputs
 
 
 rule qc_lmeeeg_plots_all:
     input:
         LMEEEG_QC_FIGURES_OUTPUT
-
-
-rule qc_lmeeeg_fooof_plots_all:
-    input:
-        LMEEEG_FOOOF_QC_FIGURES_OUTPUT
-
-
-rule qc_lmeeeg_inference_plots_all:
-    input:
-        LMEEEG_INFERENCE_FIGURES_OUTPUT
-
-
-rule qc_lmeeeg_fooof_inference_plots_all:
-    input:
-        LMEEEG_FOOOF_INFERENCE_FIGURES_OUTPUT
 
 
 rule all:
@@ -86,10 +64,5 @@ rule all:
         EVENTS_STAGE,
         EPOCHS_STAGE,
         MARGIN_EPOCHS_STAGE,
-        FOOOF_EPOCHS_STAGE,
-        GLM_STATS_OUTPUT,
-        FOOOF_MASS_STATS_OUTPUT,
-        LMEEEG_STATS_OUTPUT,
-        GLM_FIGURES_OUTPUT,
-        FOOOF_FIGURES_OUTPUT
+        LMEEEG_STATS_OUTPUT
     default_target: True

@@ -40,12 +40,12 @@ BASE_EVENTS_COLUMNS = [
     "self_rate",
     "other_rate",
     "latency",
-    "alignment",
+    "proximity",
     "convergence",
     "mean_rate",
     "self_rate_sq",
     "other_rate_sq",
-    "alignment_sq",
+    "proximity_sq",
     "convergence_sq",
     "time_within_run",
     "task",
@@ -166,12 +166,12 @@ def _build_events_for_unit(dataset_row: Mapping[str, Any], events_cfg: Mapping[s
     unit_df["self_rate"] = pd.NA
     unit_df["other_rate"] = pd.NA
     unit_df["latency"] = pd.NA
-    unit_df["alignment"] = pd.NA
+    unit_df["proximity"] = pd.NA
     unit_df["convergence"] = pd.NA
     unit_df["mean_rate"] = pd.NA
     unit_df["self_rate_sq"] = pd.NA
     unit_df["other_rate_sq"] = pd.NA
-    unit_df["alignment_sq"] = pd.NA
+    unit_df["proximity_sq"] = pd.NA
     unit_df["convergence_sq"] = pd.NA
     unit_df["time_within_run"] = pd.NA
     unit_df["self_n_syllables"] = pd.NA

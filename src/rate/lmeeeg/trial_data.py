@@ -16,6 +16,7 @@ DEFAULT_LMEEEG_SECTION = "lmeeeg"
 
 _LEGACY_METADATA_ALIASES: dict[str, str] = {
     "proximity": "alignment",
+    "proximity_sq": "alignment_sq",
 }
 
 

@@ -14,10 +14,10 @@ import mne
 import numpy as np
 import pandas as pd
 
-from rate.cli.commands import glm_subject
+from rate.legacy.cli.commands import glm_subject
 from rate.design import build_design_matrix
-from rate.glm.fit import fit_subject_glm
-from rate.glm.io import build_glm_output_paths
+from rate.legacy.glm.fit import fit_subject_glm
+from rate.legacy.glm.io import build_glm_output_paths
 from rate.util import write_parquet_dataframe
 
 

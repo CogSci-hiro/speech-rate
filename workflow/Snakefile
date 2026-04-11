@@ -17,10 +17,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rate.config import load_and_validate_config
 from rate.design import ModelSpecError, list_model_names
 from rate.epochs.io import build_epoch_output_paths
-from rate.fooof_mass.features import list_fooof_epoch_feature_names
-from rate.fooof_mass.io import build_fooof_epochs_subject_summary_path
-from rate.fooof_mass.io import build_fooof_mass_output_paths
-from rate.glm.io import build_glm_output_paths
+from rate.legacy.fooof_mass.features import list_fooof_epoch_feature_names
+from rate.legacy.fooof_mass.io import build_fooof_epochs_subject_summary_path
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths
 from rate.preprocessing.io import build_preprocessing_output_paths
 from rate.util import read_parquet_dataframe
@@ -282,8 +280,10 @@ include: "rules/dataset.smk"
 include: "rules/preprocessing.smk"
 include: "rules/events.smk"
 include: "rules/epochs.smk"
-include: "rules/glm.smk"
-include: "rules/fooof_mass.smk"
+if (WORKFLOW_DIR / "rules" / "glm.smk").exists():
+    include: "rules/glm.smk"
+if (WORKFLOW_DIR / "rules" / "fooof_mass.smk").exists():
+    include: "rules/fooof_mass.smk"
 include: "rules/lmeeeg.smk"
 include: "rules/stats.smk"
 include: "rules/figures.smk"

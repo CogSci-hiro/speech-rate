@@ -14,13 +14,13 @@ import mne
 import numpy as np
 import pandas as pd
 
-from rate.cli.commands import fooof_mass_subject
-from rate.cli.commands import fooof_epochs_subject
-from rate.fooof_mass.features import FooofFeatureResult, extract_fooof_features, list_fooof_epoch_feature_names
-from rate.fooof_mass.fit import FooofTensorResult
-from rate.fooof_mass.glm import fit_fooof_mass_glm
-from rate.fooof_mass.io import build_fooof_epoch_feature_paths, build_fooof_epochs_subject_summary_path, build_fooof_mass_output_paths
-from rate.fooof_mass.windows import make_sliding_windows
+from rate.legacy.cli.commands import fooof_mass_subject
+from rate.legacy.cli.commands import fooof_epochs_subject
+from rate.legacy.fooof_mass.features import FooofFeatureResult, extract_fooof_features, list_fooof_epoch_feature_names
+from rate.legacy.fooof_mass.fit import FooofTensorResult
+from rate.legacy.fooof_mass.glm import fit_fooof_mass_glm
+from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths, build_fooof_epochs_subject_summary_path, build_fooof_mass_output_paths
+from rate.legacy.fooof_mass.windows import make_sliding_windows
 from rate.util import write_parquet_dataframe
 
 
