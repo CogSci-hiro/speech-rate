@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from rate.epochs.io import build_epoch_output_paths
-from rate.fooof_mass.io import build_fooof_epoch_feature_paths
+from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
 from rate.lmeeeg.io import load_lmeeeg_inputs
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays
 from rate.paths import resolve_out_dir
@@ -76,7 +76,7 @@ def load_pooled_lmeeeg_trial_data(
     for row in rows:
         if config_section == "lmeeeg_fooof":
             if target_name is None:
-                raise ValueError("`target_name` is required when loading pooled lmeeeg_fooof trial data.")
+                raise ValueError("`target_name` is required when loading pooled target-specific lmeEEG trial data.")
             metadata_path = str(build_fooof_epoch_feature_paths(config, row, feature_name=target_name).metadata_output_path)
         else:
             metadata_path = str(build_epoch_output_paths(config, row).metadata_output_path)

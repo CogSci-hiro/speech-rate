@@ -20,7 +20,7 @@ class ModelSpec:
     Parameters
     ----------
     section
-        Top-level config section, for example ``"glm"`` or ``"fooof"``.
+        Top-level config section, for example ``"glm"`` or ``"lmeeeg"``.
     name
         Model name within the section.
     formula

@@ -112,6 +112,33 @@ def test_build_design_matrix_reports_row_drops_and_standardizes_after_eligibilit
     assert result.test_predictors == ["other_rate", "run"]
 
 
+def test_build_design_matrix_standardizes_integer_columns_without_dtype_errors() -> None:
+    metadata = pd.DataFrame(
+        {
+            "self_rate": [1.0, 2.0, 3.0, 4.0],
+            "latency": [10, 20, 30, 40],
+        }
+    )
+    config = {
+        "glm": {
+            "models": {
+                "int_standardize": {
+                    "formula": "self_rate ~ latency",
+                    "eligibility": {"not_null": ["self_rate", "latency"]},
+                    "test_predictors": ["latency"],
+                    "standardize": ["latency"],
+                }
+            }
+        }
+    }
+
+    result = build_design_matrix(metadata, config=config, section="glm", model_name="int_standardize")
+
+    assert np.isclose(result.filtered_metadata["latency"].mean(), 0.0)
+    assert np.isclose(result.filtered_metadata["latency"].std(ddof=0), 1.0)
+    assert pd.api.types.is_float_dtype(result.filtered_metadata["latency"])
+
+
 def test_build_design_matrix_supports_threshold_and_expression_eligibility_filters() -> None:
     metadata = pd.DataFrame(
         {

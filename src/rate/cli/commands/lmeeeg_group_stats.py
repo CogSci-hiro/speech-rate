@@ -32,7 +32,7 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--task", help="Optional task filter.")
     parser.add_argument("--run", help="Optional run filter.")
     parser.add_argument("--config-section", default="lmeeeg", help="Config section to analyse (`lmeeeg` or `lmeeeg_fooof`).")
-    parser.add_argument("--target", help="Optional FOOOF target name when running `lmeeeg_fooof` inference.")
+    parser.add_argument("--target", help="Optional target name when running `lmeeeg_fooof` inference.")
     parser.add_argument("--model-name", help="Optional lmeEEG model name filter.")
     parser.add_argument("--output", help="Optional explicit output path.")
     return parser
@@ -202,7 +202,7 @@ def _resolve_target_names(
         return [str(target_name)]
     targets = [str(value) for value in (config.get("lmeeeg_fooof") or {}).get("targets", [])]
     if not targets:
-        raise ValueError("No `lmeeeg_fooof.targets` were configured for inference.")
+        raise ValueError("No `lmeeeg_fooof.targets` were configured for target-specific inference.")
     return targets
 
 
@@ -323,7 +323,7 @@ def _write_inference_outputs(
     out_dir = resolve_out_dir(config)
     if config_section == "lmeeeg_fooof":
         if target_name is None:
-            raise ValueError("`target_name` is required when writing lmeeeg_fooof inference outputs.")
+            raise ValueError("`target_name` is required when writing target-specific lmeEEG inference outputs.")
         effect_dir = out_dir / "stats" / "lmeeeg_fooof" / _safe_token(target_name) / str(model_name) / _safe_token(effect_name)
     else:
         effect_dir = out_dir / "stats" / "lmeeeg" / str(model_name) / _safe_token(effect_name)

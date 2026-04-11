@@ -170,12 +170,16 @@ def _standardize_columns(metadata_df: pd.DataFrame, model_spec: ModelSpec) -> No
         series = metadata_df.loc[:, column_name]
         if not pd.api.types.is_numeric_dtype(series):
             raise ValueError(f"Requested standardization column `{column_name}` must be numeric.")
-        mean = float(series.mean())
-        std = float(series.std(ddof=0))
+        # Coerce integer/nullable-numeric dtypes to float so z-scoring writes
+        # back safely under recent pandas dtype assignment rules.
+        numeric_series = pd.to_numeric(series, errors="coerce").astype(float)
+        metadata_df[column_name] = numeric_series
+        mean = float(numeric_series.mean())
+        std = float(numeric_series.std(ddof=0))
         if np.isclose(std, 0.0):
-            metadata_df.loc[:, column_name] = 0.0
+            metadata_df[column_name] = np.zeros(len(numeric_series), dtype=float)
         else:
-            metadata_df.loc[:, column_name] = (series - mean) / std
+            metadata_df[column_name] = (numeric_series - mean) / std
 
 
 def _build_patsy_matrices(

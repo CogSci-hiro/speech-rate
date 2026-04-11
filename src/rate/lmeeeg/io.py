@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from rate.epochs.io import build_epoch_output_paths, read_epochs
-from rate.fooof_mass.io import build_fooof_epoch_feature_paths
+from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
 from rate.lmeeeg.mass_model import LMEEEGResult
 from rate.paths import ensure_parent_dir, resolve_out_dir
 from rate.util import write_parquet_dataframe
@@ -83,7 +83,7 @@ def build_lmeeeg_output_paths(
     out_dir = resolve_out_dir(config)
     if config_section == "lmeeeg_fooof":
         if target_name is None:
-            raise ValueError("`target_name` is required when building lmeeeg_fooof paths.")
+            raise ValueError("`target_name` is required when building target-specific lmeEEG paths.")
         epoch_paths = build_fooof_epoch_feature_paths(config, row, feature_name=target_name)
         model_dir = (
             out_dir
@@ -135,7 +135,7 @@ def build_lmeeeg_model_output_paths(
     out_dir = resolve_out_dir(config)
     if config_section == "lmeeeg_fooof":
         if target_name is None:
-            raise ValueError("`target_name` is required when building lmeeeg_fooof pooled output paths.")
+            raise ValueError("`target_name` is required when building target-specific pooled lmeEEG paths.")
         model_dir = out_dir / _analysis_root_name(config_section) / _sanitize_model_name(target_name) / _sanitize_model_name(model_name)
     else:
         model_dir = out_dir / _analysis_root_name(config_section) / _sanitize_model_name(model_name)

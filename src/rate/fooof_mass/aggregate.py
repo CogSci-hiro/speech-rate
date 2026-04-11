@@ -1,6 +1,3 @@
-"""Group aggregation placeholders for FOOOF mass analysis."""
+"""Compatibility wrapper for the legacy FOOOF aggregation module."""
 
-
-def aggregate_fooof_mass_subjects(*_args, **_kwargs):
-    """Placeholder for group aggregation."""
-    raise NotImplementedError("FOOOF mass aggregation is not implemented in the scaffold.")
+from rate.legacy.fooof_mass.aggregate import *  # noqa: F401,F403
