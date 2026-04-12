@@ -26,26 +26,12 @@ rule lmeeeg_all:
         LMEEEG_STATS_OUTPUT
 
 
-if "FOOOF_EPOCHS_STAGE" in globals():
-    rule lmeeeg_fooof_all:
-        input:
-            LMEEEG_FOOOF_STAGE,
-            LMEEEG_FOOOF_STATS_OUTPUT
-
-
-if "GLM_STAGE" in globals():
-    rule model_weights_all:
-        input:
-            MODEL_WEIGHTS_OUTPUT_DIR
+rule r_analysis_all:
+    input:
+        R_ANALYSIS_STAGE
 
 
 _figures_all_inputs = [LMEEEG_QC_FIGURES_OUTPUT]
-if "GLM_STAGE" in globals():
-    _figures_all_inputs.append(GLM_FIGURES_OUTPUT)
-if "FOOOF_MASS_STAGE" in globals():
-    _figures_all_inputs.append(FOOOF_FIGURES_OUTPUT)
-if "FOOOF_EPOCHS_STAGE" in globals():
-    _figures_all_inputs.append(LMEEEG_FOOOF_QC_FIGURES_OUTPUT)
 
 
 rule figures_all:
@@ -64,5 +50,6 @@ rule all:
         EVENTS_STAGE,
         EPOCHS_STAGE,
         MARGIN_EPOCHS_STAGE,
-        LMEEEG_STATS_OUTPUT
+        LMEEEG_STATS_OUTPUT,
+        R_ANALYSIS_STAGE
     default_target: True

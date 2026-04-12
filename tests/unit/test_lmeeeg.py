@@ -23,7 +23,7 @@ from rate.legacy.cli.commands import figures_lmeeeg_fooof
 from rate.legacy.cli.commands import figures_lmeeeg_fooof_inference
 from rate.epochs.io import build_epoch_output_paths
 from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
-from rate.lmeeeg.io import build_lmeeeg_output_paths
+from rate.lmeeeg.io import build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays, build_lmeeeg_trial_table
 from rate.util import write_parquet_dataframe
@@ -163,8 +163,43 @@ def test_lmeeeg_subject_cli_writes_outputs(tmp_path: Path) -> None:
     assert summary["status"] == "ok"
     assert summary["backend"] == "lmeeeg"
     assert summary["random_effect_structure"] == "random_intercept"
+    assert summary["predictor_of_interest"] == "speech_rate"
     assert summary["n_lmm_failed"] == 0
     assert betas.shape == (2, 2, 2)
+
+
+def test_merge_trial_regressors_into_metadata_preserves_row_order_and_values() -> None:
+    metadata = pd.DataFrame(
+        {
+            "event_id": ["ev-002", "ev-001", "ev-003"],
+            "subject_id": ["sub-001", "sub-001", "sub-002"],
+            "run": ["1", "1", "2"],
+            "task": ["conversation", "conversation", "conversation"],
+        }
+    )
+    trial_regressors = pd.DataFrame(
+        {
+            "event_id": ["ev-001", "ev-002", "ev-003"],
+            "subject_id": ["sub-001", "sub-001", "sub-002"],
+            "run": ["1", "1", "2"],
+            "task": ["conversation", "conversation", "conversation"],
+            "predicted_self_rate": [4.1, 4.2, 5.0],
+            "residual_signed": [-0.1, 0.2, 0.0],
+            "residual_abs": [0.1, 0.2, 0.0],
+        }
+    )
+
+    merged_df, merge_info = merge_trial_regressors_into_metadata(
+        metadata,
+        trial_regressors,
+        source_path=Path("/tmp/trialwise_residuals.csv"),
+    )
+
+    assert merged_df["event_id"].tolist() == ["ev-002", "ev-001", "ev-003"]
+    assert np.allclose(merged_df["predicted_self_rate"].to_numpy(dtype=float), [4.2, 4.1, 5.0])
+    assert np.allclose(merged_df["residual_signed"].to_numpy(dtype=float), [0.2, -0.1, 0.0])
+    assert merge_info["matched_rows"] == 3
+    assert merge_info["unmatched_rows"] == 0
 
 
 def test_lmeeeg_fooof_subject_cli_writes_targeted_outputs(tmp_path: Path) -> None:

@@ -31,6 +31,7 @@ class LMEEEGTrialData:
     eeg_data: np.ndarray
     channel_names: list[str]
     times: np.ndarray
+    metadata_provenance: dict[str, Any] | None = None
 
 
 def prepare_lmeeeg_design(
@@ -76,6 +77,7 @@ def build_lmeeeg_trial_table(
         config=config,
         config_section=config_section,
         model_name=model_name,
+        metadata_provenance=getattr(metadata_df, "attrs", {}).get("metadata_provenance"),
     )
 
 
@@ -88,6 +90,7 @@ def build_lmeeeg_trial_data_from_arrays(
     config: Mapping[str, Any],
     config_section: str = DEFAULT_LMEEEG_SECTION,
     model_name: str | None = None,
+    metadata_provenance: dict[str, Any] | None = None,
 ) -> LMEEEGTrialData:
     """Prepare filtered trial data from pooled EEG arrays and metadata."""
     if int(np.asarray(eeg_data).shape[0]) != len(metadata_df):
@@ -126,6 +129,7 @@ def build_lmeeeg_trial_data_from_arrays(
         eeg_data=filtered_eeg_data,
         channel_names=list(channel_names),
         times=np.asarray(times, dtype=float),
+        metadata_provenance=metadata_provenance,
     )
 
 

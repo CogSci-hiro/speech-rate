@@ -4,6 +4,8 @@ suppressPackageStartupMessages({
   library(tidyr)
   library(purrr)
   library(jsonlite)
+  library(lme4)
+  library(lmerTest)
 })
 
 # ==============================================================================
@@ -56,6 +58,315 @@ empirical_p_value <- function(observed_value, null_values, direction = c("two_si
   observed_distance <- abs(observed_value - null_center)
   null_distances <- abs(null_values - null_center)
   (sum(null_distances >= observed_distance) + 1) / (length(null_values) + 1)
+}
+
+# ==============================================================================
+# Behavioural residual helpers
+# ==============================================================================
+
+BEHAVIOURAL_REQUIRED_COLUMNS <- c(
+  "self_rate",
+  "other_rate",
+  "latency",
+  "duration_s",
+  "time_within_run",
+  "run"
+)
+BEHAVIOURAL_SUBJECT_COLUMN_CANDIDATES <- c("subject_id", "subject")
+BEHAVIOURAL_TRIAL_ID_COLUMN_CANDIDATES <- c("event_id", "trial_id")
+BEHAVIOURAL_PREDICTION_MODES <- c("in_sample", "leave_one_subject_out")
+BEHAVIOURAL_MODEL_RE_FORMULAS <- list(
+  maximal = "self_rate ~ other_rate + latency + duration_s + time_within_run + run + (1 + other_rate | %s)",
+  intercept_only = "self_rate ~ other_rate + latency + duration_s + time_within_run + run + (1 | %s)"
+)
+
+resolve_existing_column <- function(data, candidates, label) {
+  matched_columns <- candidates[candidates %in% names(data)]
+  if (length(matched_columns) == 0L) {
+    stop(
+      sprintf(
+        "Missing required %s column. Checked: %s",
+        label,
+        paste(candidates, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  matched_columns[[1]]
+}
+
+get_behavioural_model_columns <- function(data) {
+  subject_column <- resolve_existing_column(
+    data = data,
+    candidates = BEHAVIOURAL_SUBJECT_COLUMN_CANDIDATES,
+    label = "subject"
+  )
+  trial_id_column <- BEHAVIOURAL_TRIAL_ID_COLUMN_CANDIDATES[
+    BEHAVIOURAL_TRIAL_ID_COLUMN_CANDIDATES %in% names(data)
+  ]
+
+  list(
+    subject_column = subject_column,
+    trial_id_column = if (length(trial_id_column) > 0L) trial_id_column[[1]] else NULL
+  )
+}
+
+assert_unique_key <- function(data, key_column, label) {
+  if (anyDuplicated(data[[key_column]]) > 0L) {
+    stop(
+      sprintf("Expected `%s` to be unique in %s.", key_column, label),
+      call. = FALSE
+    )
+  }
+}
+
+validate_behavioural_residual_inputs <- function(data) {
+  stop_if_missing_columns(data, BEHAVIOURAL_REQUIRED_COLUMNS)
+  get_behavioural_model_columns(data)
+  invisible(TRUE)
+}
+
+make_behavioural_model_formula <- function(subject_column, random_effect_key = c("maximal", "intercept_only")) {
+  random_effect_key <- match.arg(random_effect_key)
+  stats::as.formula(sprintf(BEHAVIOURAL_MODEL_RE_FORMULAS[[random_effect_key]], subject_column))
+}
+
+fit_behavioural_residual_model <- function(data, subject_column = NULL) {
+  validate_behavioural_residual_inputs(data)
+
+  if (is.null(subject_column)) {
+    subject_column <- get_behavioural_model_columns(data)$subject_column
+  }
+
+  maximal_formula <- make_behavioural_model_formula(subject_column, random_effect_key = "maximal")
+  intercept_only_formula <- make_behavioural_model_formula(subject_column, random_effect_key = "intercept_only")
+
+  maximal_fit <- tryCatch(
+    lmerTest::lmer(formula = maximal_formula, data = data, REML = FALSE),
+    error = identity
+  )
+
+  if (inherits(maximal_fit, "error")) {
+    warning(sprintf(
+      "Behavioural residual model with random slope failed (%s). Falling back to random intercept only.",
+      maximal_fit$message
+    ))
+    fallback_fit <- lmerTest::lmer(formula = intercept_only_formula, data = data, REML = FALSE)
+    return(list(
+      model = fallback_fit,
+      formula = intercept_only_formula,
+      singular_fit = isTRUE(lme4::isSingular(fallback_fit, tol = 1e-4)),
+      fallback_used = TRUE,
+      fallback_reason = sprintf("maximal_fit_error: %s", maximal_fit$message)
+    ))
+  }
+
+  if (isTRUE(lme4::isSingular(maximal_fit, tol = 1e-4))) {
+    warning(
+      "Behavioural residual model random-slope fit was singular. Falling back to random intercept only."
+    )
+    fallback_fit <- lmerTest::lmer(formula = intercept_only_formula, data = data, REML = FALSE)
+    return(list(
+      model = fallback_fit,
+      formula = intercept_only_formula,
+      singular_fit = isTRUE(lme4::isSingular(fallback_fit, tol = 1e-4)),
+      fallback_used = TRUE,
+      fallback_reason = "maximal_fit_singular"
+    ))
+  }
+
+  list(
+    model = maximal_fit,
+    formula = maximal_formula,
+    singular_fit = FALSE,
+    fallback_used = FALSE,
+    fallback_reason = NA_character_
+  )
+}
+
+extract_behavioural_fixed_effects <- function(model) {
+  coefficient_table <- as.data.frame(summary(model)$coefficients)
+  coefficient_table$term <- rownames(coefficient_table)
+  statistic_column <- if ("t value" %in% names(coefficient_table)) "t value" else if ("z value" %in% names(coefficient_table)) "z value" else NULL
+  p_value_column <- if ("Pr(>|t|)" %in% names(coefficient_table)) "Pr(>|t|)" else if ("Pr(>|z|)" %in% names(coefficient_table)) "Pr(>|z|)" else NULL
+
+  tibble::as_tibble(coefficient_table) %>%
+    transmute(
+      term = .data$term,
+      estimate = .data$Estimate,
+      std_error = .data$`Std. Error`,
+      statistic = if (!is.null(statistic_column)) .data[[statistic_column]] else NA_real_,
+      p_value = if (!is.null(p_value_column)) .data[[p_value_column]] else NA_real_
+    )
+}
+
+build_behavioural_model_summary <- function(model_fit, analysis_data, subject_column, prediction_mode) {
+  fixed_effects <- extract_behavioural_fixed_effects(model_fit$model)
+
+  fixed_effects %>%
+    mutate(
+      formula = paste(deparse(model_fit$formula), collapse = " "),
+      singular_fit = isTRUE(model_fit$singular_fit),
+      fallback_used = isTRUE(model_fit$fallback_used),
+      fallback_reason = model_fit$fallback_reason,
+      prediction_mode = prediction_mode,
+      n_observations = nrow(analysis_data),
+      n_subjects = dplyr::n_distinct(analysis_data[[subject_column]])
+    ) %>%
+    relocate(
+      .data$formula,
+      .data$prediction_mode,
+      .data$singular_fit,
+      .data$fallback_used,
+      .data$fallback_reason,
+      .data$n_observations,
+      .data$n_subjects
+    )
+}
+
+format_behavioural_model_summary_text <- function(model_fit, analysis_data, subject_column, prediction_mode) {
+  fixed_effects <- extract_behavioural_fixed_effects(model_fit$model)
+  fixed_effect_lines <- purrr::pmap_chr(
+    fixed_effects,
+    function(term, estimate, std_error, statistic, p_value) {
+      sprintf(
+        "%s: estimate=%.6f, SE=%.6f, statistic=%.6f, p=%.6f",
+        term,
+        estimate,
+        std_error,
+        statistic,
+        p_value
+      )
+    }
+  )
+
+  paste(
+    c(
+      sprintf("formula: %s", paste(deparse(model_fit$formula), collapse = " ")),
+      sprintf("prediction_mode: %s", prediction_mode),
+      sprintf("singular_fit: %s", isTRUE(model_fit$singular_fit)),
+      sprintf("fallback_used: %s", isTRUE(model_fit$fallback_used)),
+      sprintf("fallback_reason: %s", model_fit$fallback_reason),
+      sprintf("n_observations: %d", nrow(analysis_data)),
+      sprintf("n_subjects: %d", dplyr::n_distinct(analysis_data[[subject_column]])),
+      "fixed_effects:",
+      fixed_effect_lines
+    ),
+    collapse = "\n"
+  )
+}
+
+compute_behavioural_residuals <- function(
+  data,
+  prediction_mode = c("in_sample", "leave_one_subject_out")
+) {
+  prediction_mode <- match.arg(prediction_mode, choices = BEHAVIOURAL_PREDICTION_MODES)
+  validate_behavioural_residual_inputs(data)
+
+  resolved_columns <- get_behavioural_model_columns(data)
+  subject_column <- resolved_columns$subject_column
+  model_columns <- c(BEHAVIOURAL_REQUIRED_COLUMNS, subject_column)
+  analysis_data <- data %>%
+    mutate(.source_row_id = dplyr::row_number()) %>%
+    mutate(
+      across(all_of(BEHAVIOURAL_REQUIRED_COLUMNS), ~ suppressWarnings(as.numeric(.x))),
+      across(all_of(subject_column), as.character)
+    ) %>%
+    filter(if_all(all_of(model_columns), ~ !is.na(.x))) %>%
+    mutate(.row_id = .source_row_id)
+
+  if (nrow(analysis_data) == 0L) {
+    stop("No rows available to fit the behavioural residual model after filtering missing values.", call. = FALSE)
+  }
+
+  model_fit <- fit_behavioural_residual_model(
+    data = analysis_data,
+    subject_column = subject_column
+  )
+
+  if (prediction_mode == "in_sample") {
+    analysis_data$predicted_self_rate <- as.numeric(stats::fitted(model_fit$model))
+  } else {
+    if (dplyr::n_distinct(analysis_data[[subject_column]]) < 2L) {
+      stop(
+        "Leave-one-subject-out prediction requires at least two subjects in the behavioural analysis data.",
+        call. = FALSE
+      )
+    }
+    held_out_predictions <- purrr::map_dfr(
+      unique(analysis_data[[subject_column]]),
+      function(held_out_subject) {
+        training_data <- analysis_data %>% filter(.data[[subject_column]] != held_out_subject)
+        testing_data <- analysis_data %>% filter(.data[[subject_column]] == held_out_subject)
+
+        fold_fit <- fit_behavioural_residual_model(
+          data = training_data,
+          subject_column = subject_column
+        )
+        tibble(
+          .row_id = testing_data$.row_id,
+          predicted_self_rate = as.numeric(stats::predict(
+            fold_fit$model,
+            newdata = testing_data,
+            re.form = NA,
+            allow.new.levels = TRUE
+          ))
+        )
+      }
+    )
+    analysis_data <- analysis_data %>%
+      left_join(held_out_predictions, by = ".row_id")
+  }
+
+  assert_unique_key(analysis_data, ".row_id", "behavioural analysis data")
+
+  analysis_data <- analysis_data %>%
+    mutate(
+      residual_signed = self_rate - predicted_self_rate,
+      residual_abs = abs(residual_signed),
+      residual_prediction_mode = prediction_mode
+    )
+
+  join_payload <- analysis_data %>%
+    select(
+      .row_id,
+      predicted_self_rate,
+      residual_signed,
+      residual_abs,
+      residual_prediction_mode
+    )
+  assert_unique_key(join_payload, ".row_id", "behavioural residual join payload")
+
+  augmented_data <- data %>%
+    mutate(.source_row_id = dplyr::row_number()) %>%
+    left_join(join_payload, by = c(".source_row_id" = ".row_id"))
+
+  if (nrow(augmented_data) != nrow(data)) {
+    stop("Behavioural residual merge changed the number of rows.", call. = FALSE)
+  }
+
+  augmented_data <- augmented_data %>%
+    select(-.source_row_id)
+
+  list(
+    augmented_data = augmented_data,
+    analysis_data = analysis_data %>% select(-.row_id, -.source_row_id),
+    model_fit = model_fit,
+    summary_table = build_behavioural_model_summary(
+      model_fit = model_fit,
+      analysis_data = analysis_data,
+      subject_column = subject_column,
+      prediction_mode = prediction_mode
+    ),
+    summary_text = format_behavioural_model_summary_text(
+      model_fit = model_fit,
+      analysis_data = analysis_data,
+      subject_column = subject_column,
+      prediction_mode = prediction_mode
+    ),
+    subject_column = subject_column,
+    trial_id_column = resolved_columns$trial_id_column
+  )
 }
 
 # ==============================================================================
@@ -322,18 +633,109 @@ build_preprocess_summary <- function(raw_events, cleaned_events, partner_events,
 
 write_preprocess_outputs <- function(cleaned_events, partner_events, null_output = NULL, cleaned_path = NULL, partner_path = NULL, null_path = NULL, summary_payload = NULL, summary_path = NULL) {
   if (!is.null(cleaned_path)) {
+    dir.create(dirname(cleaned_path), recursive = TRUE, showWarnings = FALSE)
     readr::write_csv(cleaned_events, cleaned_path)
   }
 
   if (!is.null(partner_path)) {
+    dir.create(dirname(partner_path), recursive = TRUE, showWarnings = FALSE)
     readr::write_csv(partner_events, partner_path)
   }
 
   if (!is.null(null_output) && !is.null(null_path)) {
+    dir.create(dirname(null_path), recursive = TRUE, showWarnings = FALSE)
     readr::write_csv(null_output, null_path)
   }
 
   if (!is.null(summary_payload) && !is.null(summary_path)) {
+    dir.create(dirname(summary_path), recursive = TRUE, showWarnings = FALSE)
     jsonlite::write_json(summary_payload, summary_path, auto_unbox = TRUE, pretty = TRUE)
   }
+}
+
+# ==============================================================================
+# CLI
+# ==============================================================================
+
+parse_cli_args <- function() {
+  raw_args <- commandArgs(trailingOnly = TRUE)
+
+  if (length(raw_args) %% 2 != 0) {
+    stop("Arguments must be supplied as --key value pairs.", call. = FALSE)
+  }
+
+  parsed_args <- list()
+  if (length(raw_args) == 0) {
+    return(parsed_args)
+  }
+
+  key_indices <- seq(1, length(raw_args), by = 2)
+  for (index in key_indices) {
+    key <- raw_args[[index]]
+    value <- raw_args[[index + 1]]
+    key <- sub("^--", "", key)
+    parsed_args[[key]] <- value
+  }
+
+  parsed_args
+}
+
+get_arg_value <- function(args, name, default = NULL, required = FALSE) {
+  if (!is.null(args[[name]])) {
+    return(args[[name]])
+  }
+  if (required) {
+    stop(sprintf("Missing required argument --%s", name), call. = FALSE)
+  }
+  default
+}
+
+main <- function() {
+  args <- parse_cli_args()
+
+  input_path <- get_arg_value(args, "input", required = TRUE)
+  cleaned_path <- get_arg_value(args, "cleaned_output", required = TRUE)
+  partner_path <- get_arg_value(args, "partner_output", required = TRUE)
+  null_path <- get_arg_value(args, "null_output", required = TRUE)
+  summary_path <- get_arg_value(args, "summary_output", required = TRUE)
+  n_null <- as.integer(get_arg_value(args, "n_null", default = "1000"))
+  seed <- as.integer(get_arg_value(args, "seed", default = "123"))
+
+  raw_events <- load_events_data(input_path)
+  cleaned_events <- preprocess_events_data(raw_events)
+  partner_events <- make_partner_events(cleaned_events)
+  observed_metrics <- compute_observed_metrics(partner_events)
+  null_distribution <- compute_null_distribution(
+    partner_events = partner_events,
+    n_null = n_null,
+    seed = seed
+  )
+  null_summary <- summarise_null_results(observed_metrics, null_distribution)
+
+  summary_payload <- build_preprocess_summary(
+    raw_events = raw_events,
+    cleaned_events = cleaned_events,
+    partner_events = partner_events,
+    input_path = input_path,
+    cleaned_path = cleaned_path,
+    partner_path = partner_path,
+    null_path = null_path,
+    n_null_iterations = n_null,
+    seed = seed
+  )
+
+  write_preprocess_outputs(
+    cleaned_events = cleaned_events,
+    partner_events = partner_events,
+    null_output = null_summary,
+    cleaned_path = cleaned_path,
+    partner_path = partner_path,
+    null_path = null_path,
+    summary_payload = summary_payload,
+    summary_path = summary_path
+  )
+}
+
+if (sys.nframe() == 0) {
+  main()
 }

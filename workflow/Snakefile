@@ -17,8 +17,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rate.config import load_and_validate_config
 from rate.design import ModelSpecError, list_model_names
 from rate.epochs.io import build_epoch_output_paths
-from rate.legacy.fooof_mass.features import list_fooof_epoch_feature_names
-from rate.legacy.fooof_mass.io import build_fooof_epochs_subject_summary_path
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths
 from rate.preprocessing.io import build_preprocessing_output_paths
 from rate.util import read_parquet_dataframe
@@ -52,12 +50,11 @@ def _safe_list_model_names(config, *, section: str) -> tuple[str, ...]:
         return ()
 
 
-GLM_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="glm")
-FOOOF_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="fooof")
-FOOOF_EPOCH_FEATURE_NAMES = tuple(list_fooof_epoch_feature_names(RESOLVED_CONFIG))
 LMEEEG_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg")
-LMEEEG_FOOOF_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg_fooof")
-LMEEEG_FOOOF_TARGET_NAMES = tuple(str(value) for value in (RESOLVED_CONFIG.get("lmeeeg_fooof") or {}).get("targets", []))
+BEHAVIOURAL_RESIDUALS_DIR = f"{OUT_DIR}/stats/behavioural_residuals"
+BEHAVIOURAL_RESIDUALS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/trialwise_residuals.csv"
+BEHAVIOURAL_MODEL_SUMMARY_CSV_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/behavioural_model_summary.csv"
+BEHAVIOURAL_MODEL_SUMMARY_TXT_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/behavioural_model_summary.txt"
 
 
 def _dataset_index_checkpoint_path() -> str:
@@ -188,87 +185,6 @@ def epoch_subject_preprocessing_inputs(wildcards):
     return inputs
 
 
-def glm_row(wildcards):
-    index_path = _dataset_index_checkpoint_path()
-    return _epochs_subject_map(index_path)[str(wildcards.subject_id)]
-
-
-def glm_paths(wildcards):
-    return build_glm_output_paths(RESOLVED_CONFIG, glm_row(wildcards), model_name=str(wildcards.model_name))
-
-
-def glm_stage_inputs(wildcards):
-    index_path = _dataset_index_checkpoint_path()
-    return [
-        str(build_glm_output_paths(RESOLVED_CONFIG, row, model_name=model_name).summary_output_path)
-        for row in _epochs_subject_map(index_path).values()
-        for model_name in GLM_MODEL_NAMES
-    ]
-
-
-def glm_model_weights_inputs(wildcards):
-    index_path = _dataset_index_checkpoint_path()
-    inputs: list[str] = []
-    for row in _epochs_subject_map(index_path).values():
-        for model_name in GLM_MODEL_NAMES:
-            paths = build_glm_output_paths(RESOLVED_CONFIG, row, model_name=model_name)
-            inputs.extend(
-                [
-                    str(paths.summary_output_path),
-                    str(paths.predictor_betas_output_path),
-                    str(paths.times_output_path),
-                    str(paths.channel_names_output_path),
-                ]
-            )
-    return inputs
-
-
-def fooof_model_spec(model_name):
-    return RESOLVED_CONFIG["fooof"]["models"][str(model_name)]
-
-
-def fooof_paths(wildcards):
-    model_name = str(wildcards.model_name)
-    outcome_name = str(fooof_model_spec(model_name).get("outcome", model_name))
-    return build_fooof_mass_output_paths(RESOLVED_CONFIG, epochs_row(wildcards), model_name=model_name, outcome_name=outcome_name)
-
-
-def fooof_epochs_subject_summary(wildcards):
-    return str(build_fooof_epochs_subject_summary_path(RESOLVED_CONFIG, _epochs_subject_map(_dataset_index_checkpoint_path())[str(wildcards.subject_id)]))
-
-
-def fooof_epochs_stage_inputs(wildcards):
-    index_path = _dataset_index_checkpoint_path()
-    return [
-        str(build_fooof_epochs_subject_summary_path(RESOLVED_CONFIG, row))
-        for row in _epochs_subject_map(index_path).values()
-    ]
-
-
-def fooof_stage_inputs(wildcards):
-    index_path = _dataset_index_checkpoint_path()
-    return [
-        str(
-            build_fooof_mass_output_paths(
-                RESOLVED_CONFIG,
-                row,
-                model_name=model_name,
-                outcome_name=str(fooof_model_spec(model_name).get("outcome", model_name)),
-            ).summary_output_path
-        )
-        for row in _epochs_run_map(index_path).values()
-        for model_name in FOOOF_MODEL_NAMES
-    ]
-
-
-def lmeeeg_fooof_stage_inputs(wildcards):
-    return [
-        str(build_lmeeeg_model_output_paths(RESOLVED_CONFIG, config_section="lmeeeg_fooof", target_name=target_name, model_name=model_name).summary_output_path)
-        for target_name in LMEEEG_FOOOF_TARGET_NAMES
-        for model_name in LMEEEG_FOOOF_MODEL_NAMES
-    ]
-
-
 def lmeeeg_stage_inputs(wildcards):
     return [
         str(build_lmeeeg_model_output_paths(RESOLVED_CONFIG, model_name=model_name).summary_output_path)
@@ -280,10 +196,6 @@ include: "rules/dataset.smk"
 include: "rules/preprocessing.smk"
 include: "rules/events.smk"
 include: "rules/epochs.smk"
-if (WORKFLOW_DIR / "rules" / "glm.smk").exists():
-    include: "rules/glm.smk"
-if (WORKFLOW_DIR / "rules" / "fooof_mass.smk").exists():
-    include: "rules/fooof_mass.smk"
 include: "rules/lmeeeg.smk"
 include: "rules/stats.smk"
 include: "rules/figures.smk"

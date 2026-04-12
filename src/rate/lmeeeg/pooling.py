@@ -11,7 +11,7 @@ import pandas as pd
 
 from rate.epochs.io import build_epoch_output_paths
 from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
-from rate.lmeeeg.io import load_lmeeeg_inputs
+from rate.lmeeeg.io import load_lmeeeg_inputs_with_trial_regressors
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays
 from rate.paths import resolve_out_dir
 from rate.util import read_parquet_dataframe
@@ -65,6 +65,7 @@ def load_pooled_lmeeeg_trial_data(
     config_section: str = "lmeeeg",
     target_name: str | None = None,
     model_name: str | None = None,
+    trial_regressors_path: Path | None = None,
 ):
     """Load and concatenate lmeEEG inputs across many dataset rows."""
     pooled_eeg: list[np.ndarray] = []
@@ -72,6 +73,7 @@ def load_pooled_lmeeeg_trial_data(
     reference_channel_names: list[str] | None = None
     reference_times: np.ndarray | None = None
     unique_rows_by_metadata_path: dict[str, Mapping[str, Any]] = {}
+    merge_summaries: list[dict[str, Any]] = []
 
     for row in rows:
         if config_section == "lmeeeg_fooof":
@@ -103,10 +105,15 @@ def load_pooled_lmeeeg_trial_data(
             row.get("run"),
             metadata_path,
         )
-        epochs, metadata_df = load_lmeeeg_inputs(epoch_paths.epochs_output_path, epoch_paths.metadata_output_path)
+        epochs, metadata_df = load_lmeeeg_inputs_with_trial_regressors(
+            epoch_paths.epochs_output_path,
+            epoch_paths.metadata_output_path,
+            trial_regressors_path=trial_regressors_path,
+        )
         for field_name in ("dyad_id", "subject_id", "task", "run"):
             if field_name in row and field_name not in metadata_df.columns:
                 metadata_df.loc[:, field_name] = row[field_name]
+        merge_summaries.append(dict(getattr(metadata_df, "attrs", {}).get("metadata_provenance") or {}))
 
         channel_names = list(epochs.ch_names)
         times = np.asarray(epochs.times, dtype=float)
@@ -140,4 +147,5 @@ def load_pooled_lmeeeg_trial_data(
         config=config,
         config_section=config_section,
         model_name=model_name,
+        metadata_provenance={"sources": merge_summaries},
     )

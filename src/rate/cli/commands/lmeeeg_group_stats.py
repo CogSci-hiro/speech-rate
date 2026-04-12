@@ -34,6 +34,7 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--config-section", default="lmeeeg", help="Config section to analyse (`lmeeeg` or `lmeeeg_fooof`).")
     parser.add_argument("--target", help="Optional target name when running `lmeeeg_fooof` inference.")
     parser.add_argument("--model-name", help="Optional lmeEEG model name filter.")
+    parser.add_argument("--trial-regressors-csv", help="Optional trialwise regressor CSV to merge into epoch metadata before inference refits.")
     parser.add_argument("--output", help="Optional explicit output path.")
     return parser
 
@@ -44,6 +45,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     config_section = str(getattr(args, "config_section", "lmeeeg") or "lmeeeg")
     output_filename = "lmeeeg_group_stats.json" if config_section == "lmeeeg" else f"{config_section}_group_stats.json"
     output_path = Path(args.output) if args.output else resolve_out_dir(config) / "stats" / output_filename
+    trial_regressors_path = Path(args.trial_regressors_csv) if getattr(args, "trial_regressors_csv", None) else None
 
     try:
         rows = select_lmeeeg_rows(
@@ -70,6 +72,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
                 config_section=config_section,
                 target_name=target_name,
                 model_name=model_name,
+                trial_regressors_path=trial_regressors_path,
             )
             for target_name in target_names
             for model_name in model_names
@@ -110,6 +113,7 @@ def _run_one_analysis(
     config_section: str = "lmeeeg",
     target_name: str | None = None,
     model_name: str,
+    trial_regressors_path: Path | None = None,
 ) -> dict[str, Any]:
     LOGGER.info(
         "Preparing pooled lmeEEG inference inputs for section=%s target=%s model=%s",
@@ -123,6 +127,7 @@ def _run_one_analysis(
         config_section=config_section,
         target_name=target_name,
         model_name=model_name,
+        trial_regressors_path=trial_regressors_path,
     )
     LOGGER.info(
         "Refitting pooled lmeEEG section=%s target=%s model=%s for inference with %d filtered trials",

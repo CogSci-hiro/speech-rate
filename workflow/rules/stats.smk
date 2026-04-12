@@ -1,33 +1,89 @@
-GLM_STATS_OUTPUT = f"{OUT_DIR}/stats/glm_group_stats.json"
-FOOOF_MASS_STATS_OUTPUT = f"{OUT_DIR}/stats/fooof_mass_group_stats.json"
+R_ANALYSIS_DIR = f"{OUT_DIR}/stats/r_analysis"
+R_ANALYSIS_PREPROCESS_CLEANED_OUTPUT = f"{R_ANALYSIS_DIR}/cleaned_events.csv"
+R_ANALYSIS_PREPROCESS_PARTNER_OUTPUT = f"{R_ANALYSIS_DIR}/partner_events.csv"
+R_ANALYSIS_PREPROCESS_NULL_OUTPUT = f"{R_ANALYSIS_DIR}/null_summary.csv"
+R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT = f"{R_ANALYSIS_DIR}/preprocess_summary.json"
+R_ANALYSIS_RESULTS_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_results.csv"
+R_ANALYSIS_STAGE = f"{OUT_DIR}/_stage/r_analysis_all.done.json"
 LMEEEG_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_group_stats.json"
-LMEEEG_FOOOF_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_fooof_group_stats.json"
 
 
-if "GLM_STAGE" in globals():
-    rule glm_group_stats:
-        input:
-            glm=GLM_STAGE,
-            stats_config="config/stats.yaml",
-        output:
-            GLM_STATS_OUTPUT,
-        shell:
-            "PYTHONPATH=src python -m rate.cli.main glm-group-stats "
-            "--config config/config.yaml --schema config/schema.json "
-            "--stats-config {input.stats_config} --output {output}"
+rule behavioural_residuals:
+    input:
+        events=EVENTS_OUTPUT,
+        preprocess_script=str(WORKFLOW_DIR / "scripts" / "preprocess.R"),
+        script=str(WORKFLOW_DIR / "scripts" / "build_behavioural_residuals.R"),
+    output:
+        residuals=BEHAVIOURAL_RESIDUALS_OUTPUT,
+        model_summary_csv=BEHAVIOURAL_MODEL_SUMMARY_CSV_OUTPUT,
+        model_summary_txt=BEHAVIOURAL_MODEL_SUMMARY_TXT_OUTPUT,
+    params:
+        prediction_mode="in_sample",
+    shell:
+        "Rscript {input.script} "
+        "--input {input.events} "
+        "--preprocess_script {input.preprocess_script} "
+        "--output {output.residuals} "
+        "--model_summary_csv {output.model_summary_csv} "
+        "--model_summary_txt {output.model_summary_txt} "
+        "--prediction_mode {params.prediction_mode}"
 
 
-if "FOOOF_MASS_STAGE" in globals():
-    rule fooof_mass_group_stats:
-        input:
-            fooof_mass=FOOOF_MASS_STAGE,
-            stats_config="config/stats.yaml",
-        output:
-            FOOOF_MASS_STATS_OUTPUT,
-        shell:
-            "PYTHONPATH=src python -m rate.cli.main fooof-mass-group-stats "
-            "--config config/config.yaml --schema config/schema.json "
-            "--stats-config {input.stats_config} --output {output}"
+rule r_analysis_preprocess:
+    input:
+        events=EVENTS_OUTPUT,
+        script=str(WORKFLOW_DIR / "scripts" / "preprocess.R"),
+    output:
+        cleaned=R_ANALYSIS_PREPROCESS_CLEANED_OUTPUT,
+        partner=R_ANALYSIS_PREPROCESS_PARTNER_OUTPUT,
+        null_summary=R_ANALYSIS_PREPROCESS_NULL_OUTPUT,
+        summary=R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
+    params:
+        n_null=1000,
+        seed=int((RESOLVED_CONFIG.get("project") or {}).get("random_seed", 1234)),
+    shell:
+        "Rscript {input.script} "
+        "--input {input.events} "
+        "--cleaned_output {output.cleaned} "
+        "--partner_output {output.partner} "
+        "--null_output {output.null_summary} "
+        "--summary_output {output.summary} "
+        "--n_null {params.n_null} "
+        "--seed {params.seed}"
+
+
+rule r_analysis_fit:
+    input:
+        events=EVENTS_OUTPUT,
+        preprocess_summary=R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
+        preprocess_script=str(WORKFLOW_DIR / "scripts" / "preprocess.R"),
+        fit_script=str(WORKFLOW_DIR / "scripts" / "fit_lmeeeg.R"),
+    output:
+        results=R_ANALYSIS_RESULTS_OUTPUT,
+    params:
+        n_null=1000,
+        seed=int((RESOLVED_CONFIG.get("project") or {}).get("random_seed", 1234)),
+    shell:
+        "mkdir -p $(dirname {output.results}) && "
+        "Rscript {input.fit_script} "
+        "--input {input.events} "
+        "--preprocess_script {input.preprocess_script} "
+        "--output {output.results} "
+        "--n_null {params.n_null} "
+        "--seed {params.seed}"
+
+
+rule r_analysis_stage:
+    input:
+        R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
+        R_ANALYSIS_RESULTS_OUTPUT,
+    output:
+        R_ANALYSIS_STAGE,
+    shell:
+        "python -c \"from pathlib import Path; "
+        "path = Path(r'{output}'); "
+        "path.parent.mkdir(parents=True, exist_ok=True); "
+        "path.write_text('ok\\n', encoding='utf-8')\""
 
 
 rule lmeeeg_group_stats:
@@ -35,24 +91,11 @@ rule lmeeeg_group_stats:
         lmeeeg=LMEEEG_STAGE,
         stats_config="config/stats.yaml",
         dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
     output:
         LMEEEG_STATS_OUTPUT,
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
         "--config config/config.yaml --schema config/schema.json "
-        "--stats-config {input.stats_config} --dataset-index {input.dataset_index} --output {output}"
-
-
-if "FOOOF_EPOCHS_STAGE" in globals():
-    rule lmeeeg_fooof_group_stats:
-        input:
-            lmeeeg=LMEEEG_FOOOF_STAGE,
-            stats_config="config/stats.yaml",
-            dataset_index=f"{OUT_DIR}/dataset/index.parquet",
-        output:
-            LMEEEG_FOOOF_STATS_OUTPUT,
-        shell:
-            "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
-            "--config config/config.yaml --schema config/schema.json "
-            "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
-            "--config-section lmeeeg_fooof --output {output}"
+        "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
+        "--trial-regressors-csv {input.trial_regressors} --output {output}"

@@ -41,6 +41,7 @@ class LMEEEGResult:
     design_result: Any
     ols_degrees_of_freedom: int
     ols_rank: int
+    metadata_provenance: dict[str, Any] | None = None
 
 
 def fit_lmeeeg_mass_model(
@@ -104,6 +105,7 @@ def fit_lmeeeg_mass_model(
         design_result=trial_data.design_result,
         ols_degrees_of_freedom=int(ols_dof),
         ols_rank=int(ols_rank),
+        metadata_provenance=trial_data.metadata_provenance,
     )
 
 
