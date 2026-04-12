@@ -96,7 +96,7 @@ def test_build_subject_questionnaire_table_rejects_duplicate_subjects(tmp_path: 
         build_subject_questionnaire_table(_config(tmp_path / "out", questionnaire_dir))
 
 
-def test_build_events_table_restores_proximity_columns_and_appends_questionnaires(
+def test_build_events_table_builds_core_rate_columns_and_appends_questionnaires(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -171,13 +171,9 @@ def test_build_events_table_restores_proximity_columns_and_appends_questionnaire
         "self_rate",
         "other_rate",
         "latency",
-        "proximity",
-        "convergence",
         "mean_rate",
         "self_rate_sq",
         "other_rate_sq",
-        "proximity_sq",
-        "convergence_sq",
         "time_within_run",
         "task",
         "duration_s",

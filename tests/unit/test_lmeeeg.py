@@ -270,88 +270,6 @@ def test_lmeeeg_fooof_subject_cli_writes_targeted_outputs(tmp_path: Path) -> Non
     assert summary["n_lmm_failed"] == 0
 
 
-def test_build_lmeeeg_trial_data_backfills_proximity_from_alignment() -> None:
-    config = {
-        "lmeeeg": {
-            "models": {
-                "proximity_effect": {
-                    "formula": "~ proximity + self_rate",
-                    "eligibility": {"not_null": ["proximity", "self_rate"]},
-                    "test_predictors": ["proximity"],
-                    "standardize": ["proximity", "self_rate"],
-                    "random_effect_group": "subject_id",
-                    "random_effect_structure": "random_intercept",
-                }
-            }
-        }
-    }
-    eeg_data = np.arange(4 * 2 * 3, dtype=float).reshape(4, 2, 3)
-    metadata = pd.DataFrame(
-        {
-            "alignment": [-0.5, -0.25, -0.1, -0.05],
-            "self_rate": [3.0, 3.5, 4.0, 4.5],
-            "subject_id": ["sub-001", "sub-001", "sub-002", "sub-002"],
-        }
-    )
-
-    trial_data = build_lmeeeg_trial_data_from_arrays(
-        eeg_data=eeg_data,
-        metadata_df=metadata,
-        channel_names=["Fz", "Cz"],
-        times=np.asarray([0.0, 0.1, 0.2], dtype=float),
-        config=config,
-        model_name="proximity_effect",
-    )
-
-    assert "proximity" in trial_data.trial_metadata.columns
-    assert np.allclose(
-        trial_data.trial_metadata["proximity"].to_numpy(dtype=float),
-        metadata["alignment"].to_numpy(dtype=float),
-    )
-    assert trial_data.design_result.test_predictors == ["proximity"]
-
-
-def test_build_lmeeeg_trial_data_backfills_proximity_sq_from_alignment_sq() -> None:
-    config = {
-        "lmeeeg": {
-            "models": {
-                "proximity_effect": {
-                    "formula": "~ proximity_sq + self_rate",
-                    "eligibility": {"not_null": ["proximity_sq", "self_rate"]},
-                    "test_predictors": ["proximity_sq"],
-                    "standardize": ["proximity_sq", "self_rate"],
-                    "random_effect_group": "subject_id",
-                    "random_effect_structure": "random_intercept",
-                }
-            }
-        }
-    }
-    eeg_data = np.arange(4 * 2 * 3, dtype=float).reshape(4, 2, 3)
-    metadata = pd.DataFrame(
-        {
-            "alignment_sq": [0.25, 0.0625, 0.01, 0.0025],
-            "self_rate": [3.0, 3.5, 4.0, 4.5],
-            "subject_id": ["sub-001", "sub-001", "sub-002", "sub-002"],
-        }
-    )
-
-    trial_data = build_lmeeeg_trial_data_from_arrays(
-        eeg_data=eeg_data,
-        metadata_df=metadata,
-        channel_names=["Fz", "Cz"],
-        times=np.asarray([0.0, 0.1, 0.2], dtype=float),
-        config=config,
-        model_name="proximity_effect",
-    )
-
-    assert "proximity_sq" in trial_data.trial_metadata.columns
-    assert np.allclose(
-        trial_data.trial_metadata["proximity_sq"].to_numpy(dtype=float),
-        metadata["alignment_sq"].to_numpy(dtype=float),
-    )
-    assert trial_data.design_result.test_predictors == ["proximity_sq"]
-
-
 def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
@@ -656,7 +574,7 @@ def test_build_lmeeeg_qc_manifest_falls_back_to_nested_model_dir(tmp_path: Path,
 
 def test_figures_lmeeeg_falls_back_to_stats_outputs_when_lmeeeg_dir_missing(tmp_path: Path, monkeypatch) -> None:
     out_dir = tmp_path / "out"
-    stats_effect_dir = out_dir / "stats" / "lmeeeg" / "convergence_subject_intercept" / "latency"
+    stats_effect_dir = out_dir / "stats" / "lmeeeg" / "other_rate_subject_intercept" / "latency"
     stats_effect_dir.mkdir(parents=True, exist_ok=True)
     observed_path = stats_effect_dir / "observed_statistic.npy"
     corrected_p_path = stats_effect_dir / "corrected_p_values.npy"
@@ -675,7 +593,7 @@ def test_figures_lmeeeg_falls_back_to_stats_outputs_when_lmeeeg_dir_missing(tmp_
         figures_lmeeeg,
         "_load_or_fit_model_payloads",
         lambda config, rows: {
-            "convergence_subject_intercept": {
+            "other_rate_subject_intercept": {
                 "betas": np.asarray([[[0.1, 0.2], [0.3, 0.4]]], dtype=float),
                 "t_values": np.asarray([[[1.0, 2.0], [3.0, 4.0]]], dtype=float),
                 "times": np.asarray([-0.1, 0.0], dtype=float),
@@ -711,9 +629,9 @@ def test_figures_lmeeeg_falls_back_to_stats_outputs_when_lmeeeg_dir_missing(tmp_
     assert {plot["measure"] for plot in manifest["plots"] if "measure" in plot} == {"beta", "t_value"}
     assert any(plot.get("source") == "stats_fallback" for plot in manifest["plots"])
     assert captured_output_stems == [
-        out_dir / "figures" / "lmeeeg" / "betas" / "convergence_subject_intercept" / "latency",
-        out_dir / "figures" / "lmeeeg" / "t_values" / "convergence_subject_intercept" / "latency",
-        out_dir / "figures" / "lmeeeg" / "statistics" / "convergence_subject_intercept" / "latency",
+        out_dir / "figures" / "lmeeeg" / "betas" / "other_rate_subject_intercept" / "latency",
+        out_dir / "figures" / "lmeeeg" / "t_values" / "other_rate_subject_intercept" / "latency",
+        out_dir / "figures" / "lmeeeg" / "statistics" / "other_rate_subject_intercept" / "latency",
     ]
 
 

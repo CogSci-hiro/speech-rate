@@ -80,23 +80,6 @@ def compute_time_within_run(group_df: pd.DataFrame, normalize: bool, method: str
     return (group_df["t_onset"].astype(float) / t_run).clip(lower=0.0, upper=1.0)
 
 
-def compute_proximity(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
-    """Compute proximity = -abs(self_rate - other_rate)."""
-    return -(self_rate.astype(float) - other_rate.astype(float)).abs()
-
-
-def compute_convergence(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
-    """Compute convergence relative to group medians of self_rate and other_rate."""
-    self_vals = self_rate.astype(float)
-    other_vals = other_rate.astype(float)
-    other_median = float(other_vals.median())
-    self_median = float(self_vals.median())
-    denom = other_median - self_median
-    if not np.isfinite(denom) or np.isclose(denom, 0.0):
-        return pd.Series(np.full(len(self_vals), np.nan, dtype=float), index=self_vals.index)
-    return 1.0 - ((other_median - self_vals) / denom).abs()
-
-
 def compute_mean_rate(self_rate: pd.Series, other_rate: pd.Series) -> pd.Series:
     """Compute dyadic mean speaking rate per matched event."""
     return (self_rate.astype(float) + other_rate.astype(float)) / 2.0
@@ -125,13 +108,9 @@ def add_event_rate_features(
         window_s=absdiff_window_s,
         time_lock=matching_time_lock,
     )
-    enriched["proximity"] = compute_proximity(enriched["self_rate"], enriched["other_rate"])
-    enriched["convergence"] = compute_convergence(enriched["self_rate"], enriched["other_rate"])
     enriched["mean_rate"] = compute_mean_rate(enriched["self_rate"], enriched["other_rate"])
     enriched["self_rate_sq"] = enriched["self_rate"] ** 2
     enriched["other_rate_sq"] = enriched["other_rate"] ** 2
-    enriched["proximity_sq"] = enriched["proximity"] ** 2
-    enriched["convergence_sq"] = enriched["convergence"] ** 2
     enriched["time_within_run"] = compute_time_within_run(
         enriched,
         normalize=normalize,
