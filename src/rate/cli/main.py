@@ -27,6 +27,7 @@ _COMMANDS = {
     "fooof-mass-group-stats": "rate.legacy.cli.commands.fooof_mass_group_stats",
     "lmeeeg-subject": "rate.cli.commands.lmeeeg_subject",
     "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
+    "figures-behavioural": "rate.cli.commands.figures_behavioural",
     "figures-glm": "rate.legacy.cli.commands.figures_glm",
     "figures-lmeeeg": "rate.cli.commands.figures_lmeeeg",
     "figures-lmeeeg-fooof": "rate.legacy.cli.commands.figures_lmeeeg_fooof",

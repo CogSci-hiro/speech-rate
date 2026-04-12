@@ -5,6 +5,31 @@ viz:
   qc:
     enabled: true
   figures:
+    behavioural:
+      speech_rate:
+        enabled: true
+        formats: ["png"]
+        min_trials_per_subject: 5
+        histogram_bins: 30
+        point_size: 70
+        dot_center_y: 0.0
+        dot_spread_y: 0.10
+        jitter_sd: 0.012
+        connector_alpha: 0.75
+        dot_alpha: 0.95
+        random_seed: 42
+      subject_slopes:
+        enabled: true
+        formats: ["png"]
+        point_color: "0.25"
+        line_color: "0.35"
+        within_dyad_spacing: 0.8
+        between_dyad_spacing: 1.8
+      personality:
+        enabled: true
+        formats: ["png"]
+        openness_color: "#3B82F6"
+        extraversion_color: "#EF4444"
     glm:
       contrasts: ["speech_rate"]
     fooof:

@@ -75,10 +75,8 @@ BEHAVIOURAL_REQUIRED_COLUMNS <- c(
 BEHAVIOURAL_SUBJECT_COLUMN_CANDIDATES <- c("subject_id", "subject")
 BEHAVIOURAL_TRIAL_ID_COLUMN_CANDIDATES <- c("event_id", "trial_id")
 BEHAVIOURAL_PREDICTION_MODES <- c("in_sample", "leave_one_subject_out")
-BEHAVIOURAL_MODEL_RE_FORMULAS <- list(
-  maximal = "self_rate ~ other_rate + latency + duration_s + time_within_run + run + (1 + other_rate | %s)",
-  intercept_only = "self_rate ~ other_rate + latency + duration_s + time_within_run + run + (1 | %s)"
-)
+BEHAVIOURAL_GATING_MODEL_LABEL <- "gating_residual_other_rate_subject_slope"
+BEHAVIOURAL_GATING_MODEL_FORMULA <- "self_rate ~ other_rate + (1 + other_rate | %s)"
 
 resolve_existing_column <- function(data, candidates, label) {
   matched_columns <- candidates[candidates %in% names(data)]
@@ -126,9 +124,8 @@ validate_behavioural_residual_inputs <- function(data) {
   invisible(TRUE)
 }
 
-make_behavioural_model_formula <- function(subject_column, random_effect_key = c("maximal", "intercept_only")) {
-  random_effect_key <- match.arg(random_effect_key)
-  stats::as.formula(sprintf(BEHAVIOURAL_MODEL_RE_FORMULAS[[random_effect_key]], subject_column))
+make_behavioural_model_formula <- function(subject_column) {
+  stats::as.formula(sprintf(BEHAVIOURAL_GATING_MODEL_FORMULA, subject_column))
 }
 
 fit_behavioural_residual_model <- function(data, subject_column = NULL) {
@@ -138,47 +135,14 @@ fit_behavioural_residual_model <- function(data, subject_column = NULL) {
     subject_column <- get_behavioural_model_columns(data)$subject_column
   }
 
-  maximal_formula <- make_behavioural_model_formula(subject_column, random_effect_key = "maximal")
-  intercept_only_formula <- make_behavioural_model_formula(subject_column, random_effect_key = "intercept_only")
-
-  maximal_fit <- tryCatch(
-    lmerTest::lmer(formula = maximal_formula, data = data, REML = FALSE),
-    error = identity
-  )
-
-  if (inherits(maximal_fit, "error")) {
-    warning(sprintf(
-      "Behavioural residual model with random slope failed (%s). Falling back to random intercept only.",
-      maximal_fit$message
-    ))
-    fallback_fit <- lmerTest::lmer(formula = intercept_only_formula, data = data, REML = FALSE)
-    return(list(
-      model = fallback_fit,
-      formula = intercept_only_formula,
-      singular_fit = isTRUE(lme4::isSingular(fallback_fit, tol = 1e-4)),
-      fallback_used = TRUE,
-      fallback_reason = sprintf("maximal_fit_error: %s", maximal_fit$message)
-    ))
-  }
-
-  if (isTRUE(lme4::isSingular(maximal_fit, tol = 1e-4))) {
-    warning(
-      "Behavioural residual model random-slope fit was singular. Falling back to random intercept only."
-    )
-    fallback_fit <- lmerTest::lmer(formula = intercept_only_formula, data = data, REML = FALSE)
-    return(list(
-      model = fallback_fit,
-      formula = intercept_only_formula,
-      singular_fit = isTRUE(lme4::isSingular(fallback_fit, tol = 1e-4)),
-      fallback_used = TRUE,
-      fallback_reason = "maximal_fit_singular"
-    ))
-  }
+  gating_formula <- make_behavioural_model_formula(subject_column)
+  gating_fit <- lmerTest::lmer(formula = gating_formula, data = data, REML = FALSE)
 
   list(
-    model = maximal_fit,
-    formula = maximal_formula,
-    singular_fit = FALSE,
+    model = gating_fit,
+    formula = gating_formula,
+    model_label = BEHAVIOURAL_GATING_MODEL_LABEL,
+    singular_fit = isTRUE(lme4::isSingular(gating_fit, tol = 1e-4)),
     fallback_used = FALSE,
     fallback_reason = NA_character_
   )
@@ -205,6 +169,7 @@ build_behavioural_model_summary <- function(model_fit, analysis_data, subject_co
 
   fixed_effects %>%
     mutate(
+      model_label = model_fit$model_label,
       formula = paste(deparse(model_fit$formula), collapse = " "),
       singular_fit = isTRUE(model_fit$singular_fit),
       fallback_used = isTRUE(model_fit$fallback_used),
@@ -215,6 +180,7 @@ build_behavioural_model_summary <- function(model_fit, analysis_data, subject_co
     ) %>%
     relocate(
       .data$formula,
+      .data$model_label,
       .data$prediction_mode,
       .data$singular_fit,
       .data$fallback_used,
@@ -222,6 +188,61 @@ build_behavioural_model_summary <- function(model_fit, analysis_data, subject_co
       .data$n_observations,
       .data$n_subjects
     )
+}
+
+extract_behavioural_subject_slopes <- function(model_fit, analysis_data, subject_column) {
+  random_effects <- lme4::ranef(model_fit$model, condVar = TRUE)
+  subject_effects <- random_effects[[subject_column]]
+  if (is.null(subject_effects) || !"other_rate" %in% colnames(subject_effects)) {
+    stop(
+      sprintf("Subject-level random slope `other_rate` not available for grouping column `%s`.", subject_column),
+      call. = FALSE
+    )
+  }
+
+  posterior_variance <- attr(subject_effects, "postVar")
+  if (is.null(posterior_variance) || length(dim(posterior_variance)) != 3L) {
+    stop("Unable to extract posterior variance for subject-level random effects.", call. = FALSE)
+  }
+
+  slope_index <- match("other_rate", colnames(subject_effects))
+  if (is.na(slope_index)) {
+    stop("Unable to locate `other_rate` slope index in subject random effects.", call. = FALSE)
+  }
+
+  fixed_effects <- lme4::fixef(model_fit$model)
+  fixed_slope <- unname(fixed_effects[["other_rate"]])
+  if (is.null(fixed_slope) || length(fixed_slope) == 0L || is.na(fixed_slope)) {
+    stop("Unable to extract fixed-effect slope for `other_rate`.", call. = FALSE)
+  }
+
+  subject_ids <- rownames(subject_effects)
+  random_slopes <- as.numeric(subject_effects[, "other_rate"])
+  random_ses <- vapply(
+    seq_along(subject_ids),
+    function(index) {
+      variance_value <- posterior_variance[slope_index, slope_index, index]
+      sqrt(as.numeric(variance_value))
+    },
+    numeric(1)
+  )
+
+  dyad_lookup <- analysis_data %>%
+    distinct(across(all_of(c(subject_column, "dyad_id")))) %>%
+    mutate(across(all_of(subject_column), as.character))
+
+  tibble::tibble(
+    subject_id = as.character(subject_ids),
+    slope = fixed_slope + random_slopes,
+    se = random_ses,
+    fixed_slope = fixed_slope,
+    random_slope = random_slopes
+  ) %>%
+    left_join(
+      dyad_lookup,
+      by = setNames(subject_column, "subject_id")
+    ) %>%
+    relocate(.data$subject_id, .data$dyad_id, .data$slope, .data$se)
 }
 
 format_behavioural_model_summary_text <- function(model_fit, analysis_data, subject_column, prediction_mode) {
@@ -243,6 +264,7 @@ format_behavioural_model_summary_text <- function(model_fit, analysis_data, subj
   paste(
     c(
       sprintf("formula: %s", paste(deparse(model_fit$formula), collapse = " ")),
+      sprintf("model_label: %s", model_fit$model_label),
       sprintf("prediction_mode: %s", prediction_mode),
       sprintf("singular_fit: %s", isTRUE(model_fit$singular_fit)),
       sprintf("fallback_used: %s", isTRUE(model_fit$fallback_used)),
@@ -262,6 +284,12 @@ compute_behavioural_residuals <- function(
 ) {
   prediction_mode <- match.arg(prediction_mode, choices = BEHAVIOURAL_PREDICTION_MODES)
   validate_behavioural_residual_inputs(data)
+  if (prediction_mode != "in_sample") {
+    stop(
+      "The gating residual analysis requires in-sample fitted values so predictions include subject-level random effects.",
+      call. = FALSE
+    )
+  }
 
   resolved_columns <- get_behavioural_model_columns(data)
   subject_column <- resolved_columns$subject_column
@@ -284,44 +312,14 @@ compute_behavioural_residuals <- function(
     subject_column = subject_column
   )
 
-  if (prediction_mode == "in_sample") {
-    analysis_data$predicted_self_rate <- as.numeric(stats::fitted(model_fit$model))
-  } else {
-    if (dplyr::n_distinct(analysis_data[[subject_column]]) < 2L) {
-      stop(
-        "Leave-one-subject-out prediction requires at least two subjects in the behavioural analysis data.",
-        call. = FALSE
-      )
-    }
-    held_out_predictions <- purrr::map_dfr(
-      unique(analysis_data[[subject_column]]),
-      function(held_out_subject) {
-        training_data <- analysis_data %>% filter(.data[[subject_column]] != held_out_subject)
-        testing_data <- analysis_data %>% filter(.data[[subject_column]] == held_out_subject)
-
-        fold_fit <- fit_behavioural_residual_model(
-          data = training_data,
-          subject_column = subject_column
-        )
-        tibble(
-          .row_id = testing_data$.row_id,
-          predicted_self_rate = as.numeric(stats::predict(
-            fold_fit$model,
-            newdata = testing_data,
-            re.form = NA,
-            allow.new.levels = TRUE
-          ))
-        )
-      }
-    )
-    analysis_data <- analysis_data %>%
-      left_join(held_out_predictions, by = ".row_id")
-  }
+  analysis_data$predicted_self_rate <- as.numeric(stats::fitted(model_fit$model))
 
   assert_unique_key(analysis_data, ".row_id", "behavioural analysis data")
 
   analysis_data <- analysis_data %>%
     mutate(
+      residual_model_label = model_fit$model_label,
+      residual_model_formula = paste(deparse(model_fit$formula), collapse = " "),
       residual_signed = self_rate - predicted_self_rate,
       residual_abs = abs(residual_signed),
       residual_prediction_mode = prediction_mode
@@ -331,6 +329,8 @@ compute_behavioural_residuals <- function(
     select(
       .row_id,
       predicted_self_rate,
+      residual_model_label,
+      residual_model_formula,
       residual_signed,
       residual_abs,
       residual_prediction_mode
@@ -352,6 +352,11 @@ compute_behavioural_residuals <- function(
     augmented_data = augmented_data,
     analysis_data = analysis_data %>% select(-.row_id, -.source_row_id),
     model_fit = model_fit,
+    subject_slopes = extract_behavioural_subject_slopes(
+      model_fit = model_fit,
+      analysis_data = analysis_data,
+      subject_column = subject_column
+    ),
     summary_table = build_behavioural_model_summary(
       model_fit = model_fit,
       analysis_data = analysis_data,
@@ -418,7 +423,22 @@ preprocess_events_data <- function(raw_events) {
     ungroup() %>%
     group_by(subject_id) %>%
     mutate(
-      subject_mean_rate = mean(self_rate, na.rm = TRUE)
+      subject_mean_rate = mean(self_rate, na.rm = TRUE),
+      self_rate_baseline_median = if (all(is.na(self_rate))) NA_real_ else stats::median(self_rate, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    group_by(dyad_id) %>%
+    mutate(
+      other_rate_baseline_median = purrr::map_dbl(subject_id, function(current_subject_id) {
+        partner_baseline_values <- unique(self_rate_baseline_median[subject_id != current_subject_id])
+        partner_baseline_values <- partner_baseline_values[!is.na(partner_baseline_values)]
+
+        if (length(partner_baseline_values) == 1L) {
+          return(partner_baseline_values[[1]])
+        }
+
+        NA_real_
+      })
     ) %>%
     ungroup() %>%
     group_by(dyad_id) %>%
@@ -427,12 +447,21 @@ preprocess_events_data <- function(raw_events) {
     ) %>%
     ungroup() %>%
     mutate(
+      median_diff_log = dplyr::if_else(
+        !is.na(self_rate_baseline_median) &
+          !is.na(other_rate_baseline_median) &
+          self_rate_baseline_median > 0 &
+          other_rate_baseline_median > 0,
+        abs(log(self_rate_baseline_median / other_rate_baseline_median)),
+        NA_real_
+      ),
       valid_dyad_for_partner_analysis = n_subjects_in_dyad >= 2,
       has_partner_observation = !is.na(other_rate),
       has_latency = !is.na(latency),
       run_z = safe_zscore(run),
       time_within_run_z = safe_zscore(time_within_run),
       other_rate_z = safe_zscore(other_rate),
+      median_diff_log_z = safe_zscore(median_diff_log),
       self_rate_z = safe_zscore(self_rate),
       latency_z = safe_zscore(latency),
       self_rate_lag1_z = safe_zscore(self_rate_lag1)

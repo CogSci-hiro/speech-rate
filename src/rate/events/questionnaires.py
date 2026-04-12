@@ -13,20 +13,23 @@ from rate.dataset.discover import normalize_subject_id
 LOGGER = logging.getLogger(__name__)
 
 LIKEABILITY_COLUMNS = ("subject_id", "Score")
-PERSONALITY_COLUMNS = (
+PERSONALITY_INPUT_COLUMNS = (
     "subject_id",
     "extraversion",
     "agreeableness",
-    "conscienciousness",
+    "conscientiousness",
     "neuroticism",
     "openness",
 )
+PERSONALITY_LEGACY_ALIASES = {
+    "conscienciousness": "conscientiousness",
+}
 QUESTIONNAIRE_OUTPUT_COLUMNS = (
     "subject_id",
     "likeability",
     "extraversion",
     "agreeableness",
-    "conscienciousness",
+    "conscientiousness",
     "neuroticism",
     "openness",
 )
@@ -101,8 +104,9 @@ def load_personality_table(path: Path) -> pd.DataFrame:
         Subject-level table with normalized personality columns.
     """
     frame = _load_csv(path)
-    _require_columns(frame, path=path, required_columns=PERSONALITY_COLUMNS)
-    normalized = _normalize_questionnaire_subject_ids(frame.loc[:, PERSONALITY_COLUMNS], path=path)
+    frame = frame.rename(columns=PERSONALITY_LEGACY_ALIASES)
+    _require_columns(frame, path=path, required_columns=PERSONALITY_INPUT_COLUMNS)
+    normalized = _normalize_questionnaire_subject_ids(frame.loc[:, PERSONALITY_INPUT_COLUMNS], path=path)
     return normalized
 
 

@@ -64,7 +64,7 @@ def test_build_subject_questionnaire_table_normalizes_ids(tmp_path: Path) -> Non
     _write_csv(
         questionnaire_dir / "personality.csv",
         """
-        subject_id,q1,q2,q3,q4,q5,q6,q7,q8,q9,q10,extraversion,agreeableness,conscienciousness,neuroticism,openness
+        subject_id,q1,q2,q3,q4,q5,q6,q7,q8,q9,q10,extraversion,agreeableness,conscientiousness,neuroticism,openness
         001,3,2,4,2,3,2,3,2,4,1,4,4,7,7,3
         002,3,2,4,2,3,2,3,2,4,1,5,6,7,2,8
         """,
@@ -78,7 +78,7 @@ def test_build_subject_questionnaire_table_normalizes_ids(tmp_path: Path) -> Non
         "likeability",
         "extraversion",
         "agreeableness",
-        "conscienciousness",
+        "conscientiousness",
         "neuroticism",
         "openness",
     ]
@@ -89,7 +89,7 @@ def test_build_subject_questionnaire_table_rejects_duplicate_subjects(tmp_path: 
     _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15\nsub-001,16")
     _write_csv(
         questionnaire_dir / "personality.csv",
-        "subject_id,extraversion,agreeableness,conscienciousness,neuroticism,openness\n001,4,4,7,7,3",
+        "subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness\n001,4,4,7,7,3",
     )
 
     with pytest.raises(QuestionnaireError, match="Duplicate questionnaire subject_id rows"):
@@ -150,7 +150,7 @@ def test_build_events_table_builds_core_rate_columns_and_appends_questionnaires(
     _write_csv(
         questionnaire_dir / "personality.csv",
         """
-        subject_id,extraversion,agreeableness,conscienciousness,neuroticism,openness
+        subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness
         001,4,4,7,7,3
         003,5,6,7,2,8
         """,
@@ -185,7 +185,7 @@ def test_build_events_table_builds_core_rate_columns_and_appends_questionnaires(
         "annotations_path",
     }
     assert required_columns.issubset(set(events_df.columns))
-    assert {"likeability", "extraversion", "agreeableness", "conscienciousness", "neuroticism", "openness"}.issubset(
+    assert {"likeability", "extraversion", "agreeableness", "conscientiousness", "neuroticism", "openness"}.issubset(
         set(events_df.columns)
     )
     assert len(events_df) == 4
@@ -211,7 +211,7 @@ def test_build_events_table_requires_annotation_columns(tmp_path: Path) -> None:
     _write_csv(tmp_path / "questionnaires" / "likeability.csv", "subject_id,Score\n001,15")
     _write_csv(
         tmp_path / "questionnaires" / "personality.csv",
-        "subject_id,extraversion,agreeableness,conscienciousness,neuroticism,openness\n001,4,4,7,7,3",
+        "subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness\n001,4,4,7,7,3",
     )
 
     dataset_index_df = pd.DataFrame(
@@ -252,7 +252,7 @@ def test_build_events_table_shifts_annotation_times_by_raw_anchor_event(
     _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15")
     _write_csv(
         questionnaire_dir / "personality.csv",
-        "subject_id,extraversion,agreeableness,conscienciousness,neuroticism,openness\n001,4,4,7,7,3",
+        "subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness\n001,4,4,7,7,3",
     )
     raw_path = tmp_path / "sub-001_raw.fif"
     raw_path.write_text("", encoding="utf-8")
@@ -278,3 +278,18 @@ def test_build_events_table_shifts_annotation_times_by_raw_anchor_event(
 
     assert events_df["t_onset"].tolist() == pytest.approx([2.5, 3.5])
     assert events_df["t_offset"].tolist() == pytest.approx([3.2, 4.1])
+
+
+def test_build_subject_questionnaire_table_accepts_legacy_conscienciousness_column(tmp_path: Path) -> None:
+    questionnaire_dir = tmp_path / "questionnaires"
+    _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15")
+    _write_csv(
+        questionnaire_dir / "personality.csv",
+        "subject_id,extraversion,agreeableness,conscienciousness,neuroticism,openness\n001,4,4,7,7,3",
+    )
+
+    table = build_subject_questionnaire_table(_config(tmp_path / "out", questionnaire_dir))
+
+    assert "conscientiousness" in table.columns
+    assert "conscienciousness" not in table.columns
+    assert table.loc[0, "conscientiousness"] == 7

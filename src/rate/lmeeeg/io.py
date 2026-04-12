@@ -22,7 +22,11 @@ TRIAL_REGRESSOR_REQUIRED_COLUMNS = (
     "residual_signed",
     "residual_abs",
 )
-TRIAL_REGRESSOR_OPTIONAL_COLUMNS = ("residual_prediction_mode",)
+TRIAL_REGRESSOR_OPTIONAL_COLUMNS = (
+    "residual_model_label",
+    "residual_model_formula",
+    "residual_prediction_mode",
+)
 TRIAL_REGRESSOR_MERGE_KEY_PRIORITY = ("event_id", "subject_id", "task", "run")
 
 

@@ -45,14 +45,18 @@ get_arg_value <- function(args, name, default = NULL, required = FALSE) {
 # ==============================================================================
 
 make_residual_output_table <- function(augmented_data, trial_id_column = NULL) {
-  key_columns <- c("subject_id", "run", "task", "event_id")
+  key_columns <- c("dyad_id", "subject_id", "run", "task", "event_id")
   present_key_columns <- key_columns[key_columns %in% names(augmented_data)]
 
   selected_columns <- c(
     present_key_columns,
     "self_rate",
     "other_rate",
+    "openness",
+    "extraversion",
     "predicted_self_rate",
+    "residual_model_label",
+    "residual_model_formula",
     "residual_signed",
     "residual_abs",
     "latency",
@@ -74,6 +78,11 @@ make_residual_output_table <- function(augmented_data, trial_id_column = NULL) {
   residual_table
 }
 
+write_csv_output <- function(data, output_path) {
+  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+  readr::write_csv(data, output_path)
+}
+
 write_text_file <- function(text, output_path) {
   dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
   writeLines(text, con = output_path, useBytes = TRUE)
@@ -89,6 +98,7 @@ main <- function() {
   input_path <- get_arg_value(args, "input", required = TRUE)
   preprocess_script_path <- get_arg_value(args, "preprocess_script", required = TRUE)
   output_path <- get_arg_value(args, "output", required = TRUE)
+  subject_slopes_output_path <- get_arg_value(args, "subject_slopes_output", required = TRUE)
   model_summary_csv_path <- get_arg_value(args, "model_summary_csv", required = TRUE)
   model_summary_txt_path <- get_arg_value(args, "model_summary_txt", required = TRUE)
   prediction_mode <- get_arg_value(args, "prediction_mode", default = "in_sample")
@@ -107,9 +117,9 @@ main <- function() {
     trial_id_column = residual_results$trial_id_column
   )
 
-  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
-  readr::write_csv(residual_table, output_path)
-  readr::write_csv(residual_results$summary_table, model_summary_csv_path)
+  write_csv_output(residual_table, output_path)
+  write_csv_output(residual_results$subject_slopes, subject_slopes_output_path)
+  write_csv_output(residual_results$summary_table, model_summary_csv_path)
   write_text_file(residual_results$summary_text, model_summary_txt_path)
 }
 
