@@ -12,16 +12,31 @@ lmeeeg:
       eligibility:
         not_null:
           - "other_rate"
-          - "self_rate"
         min_values:
-          self_n_syllables: 3
           other_n_syllables: 3
-          self_ipu_duration: 0.10
           other_ipu_duration: 0.10
       test_predictors:
         - "other_rate"
       standardize:
         - "other_rate"
+        - "latency"
+        - "duration_s"
+        - "time_within_run"
+      random_effect_group: "subject_id"
+      random_effect_structure: "random_intercept"
+
+    self_rate_effect:
+      formula: "~ self_rate + latency + duration_s + time_within_run + run"
+      eligibility:
+        not_null:
+          - "self_rate"
+        min_values:
+          self_n_syllables: 3
+          self_ipu_duration: 0.10
+      test_predictors:
+        - "self_rate"
+      standardize:
+        - "self_rate"
         - "latency"
         - "duration_s"
         - "time_within_run"
@@ -44,28 +59,6 @@ lmeeeg:
         - "residual_signed"
       standardize:
         - "residual_signed"
-        - "latency"
-        - "duration_s"
-        - "time_within_run"
-      random_effect_group: "subject_id"
-      random_effect_structure: "random_intercept"
-
-    residual_abs_effect:
-      formula: "~ residual_abs + latency + duration_s + time_within_run + run"
-      eligibility:
-        not_null:
-          - "residual_abs"
-          - "self_rate"
-          - "other_rate"
-        min_values:
-          self_n_syllables: 3
-          other_n_syllables: 3
-          self_ipu_duration: 0.10
-          other_ipu_duration: 0.10
-      test_predictors:
-        - "residual_abs"
-      standardize:
-        - "residual_abs"
         - "latency"
         - "duration_s"
         - "time_within_run"
