@@ -26,6 +26,12 @@ rule lmeeeg_all:
         LMEEEG_STATS_OUTPUT
 
 
+rule lmeeeg_induced_all:
+    input:
+        LMEEEG_INDUCED_STAGE,
+        LMEEEG_INDUCED_STATS_OUTPUT
+
+
 rule r_analysis_all:
     input:
         R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
@@ -33,7 +39,13 @@ rule r_analysis_all:
         R_ANALYSIS_STAGE
 
 
-_figures_all_inputs = [BEHAVIOURAL_FIGURES_OUTPUT, LMEEEG_QC_FIGURES_OUTPUT]
+_figures_all_inputs = [
+    BEHAVIOURAL_FIGURES_OUTPUT,
+    LMEEEG_QC_FIGURES_OUTPUT,
+    LMEEEG_INFERENCE_FIGURES_OUTPUT,
+    LMEEEG_INDUCED_QC_FIGURES_OUTPUT,
+    LMEEEG_INDUCED_INFERENCE_FIGURES_OUTPUT,
+]
 
 
 rule figures_all:
@@ -51,6 +63,21 @@ rule qc_lmeeeg_plots_all:
         LMEEEG_QC_FIGURES_OUTPUT
 
 
+rule qc_lmeeeg_induced_plots_all:
+    input:
+        LMEEEG_INDUCED_QC_FIGURES_OUTPUT
+
+
+rule inference_lmeeeg_plots_all:
+    input:
+        LMEEEG_INFERENCE_FIGURES_OUTPUT
+
+
+rule inference_lmeeeg_induced_plots_all:
+    input:
+        LMEEEG_INDUCED_INFERENCE_FIGURES_OUTPUT
+
+
 rule all:
     input:
         PREPROCESSING_STAGE,
@@ -58,6 +85,7 @@ rule all:
         EPOCHS_STAGE,
         MARGIN_EPOCHS_STAGE,
         LMEEEG_STATS_OUTPUT,
+        LMEEEG_INDUCED_STATS_OUTPUT,
         R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
         R_ANALYSIS_RESULTS_OUTPUT,
         R_ANALYSIS_STAGE

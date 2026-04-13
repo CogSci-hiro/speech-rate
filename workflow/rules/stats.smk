@@ -6,6 +6,7 @@ R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT = f"{R_ANALYSIS_DIR}/preprocess_summary.jso
 R_ANALYSIS_RESULTS_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_results.csv"
 R_ANALYSIS_STAGE = f"{OUT_DIR}/_stage/r_analysis_all.done.json"
 LMEEEG_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_group_stats.json"
+LMEEEG_INDUCED_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_induced_group_stats.json"
 
 
 rule behavioural_residuals:
@@ -99,5 +100,21 @@ rule lmeeeg_group_stats:
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
         "--config config/config.yaml --schema config/schema.json "
+        "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
+        "--trial-regressors-csv {input.trial_regressors} --output {output}"
+
+
+rule lmeeeg_induced_group_stats:
+    input:
+        lmeeeg=LMEEEG_INDUCED_STAGE,
+        stats_config="config/stats.yaml",
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
+    output:
+        LMEEEG_INDUCED_STATS_OUTPUT,
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
+        "--config config/config.yaml --schema config/schema.json "
+        "--config-section lmeeeg_induced "
         "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
         "--trial-regressors-csv {input.trial_regressors} --output {output}"

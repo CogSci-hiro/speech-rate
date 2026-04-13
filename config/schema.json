@@ -48,6 +48,7 @@
     "glm": {"type": "object"},
     "fooof": {"type": "object"},
     "lmeeeg": {"type": "object"},
+    "lmeeeg_induced": {"type": "object"},
     "debug": {
       "type": "object",
       "properties": {

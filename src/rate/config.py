@@ -26,6 +26,7 @@ MODULAR_COMPUTE_FILES = {
     "glm": "glm.yaml",
     "fooof": "fooof.yaml",
     "lmeeeg": "lmeeeg.yaml",
+    "lmeeeg_induced": "lmeeeg_induced.yaml",
     "lmeeeg_fooof": "lmeeeg_fooof.yaml",
 }
 
@@ -113,7 +114,7 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
     exclude_value.setdefault("dyads", [])
     exclude_value.setdefault("dyad_runs", [])
 
-    for section_name in ("preprocessing", "epochs", "margin_epochs", "glm", "fooof", "lmeeeg", "lmeeeg_fooof"):
+    for section_name in ("preprocessing", "epochs", "margin_epochs", "glm", "fooof", "lmeeeg", "lmeeeg_induced", "lmeeeg_fooof"):
         section_value = resolved.setdefault(section_name, {})
         if not isinstance(section_value, dict):
             raise ConfigValidationError(f"`{section_name}` must be a mapping.")

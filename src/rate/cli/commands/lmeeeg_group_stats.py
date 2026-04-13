@@ -15,6 +15,7 @@ import yaml
 from lmeeeg import permute_fixed_effect
 from rate.cli.commands._workflow_common import add_common_config_arguments
 from rate.design import get_predictor_column_indices, list_model_names
+from rate.lmeeeg.induced import resolve_target_names, section_supports_targets
 from rate.lmeeeg.mass_model import fit_lmeeeg_backend_result
 from rate.lmeeeg.pooling import load_pooled_lmeeeg_trial_data, select_lmeeeg_rows
 from rate.paths import ensure_parent_dir, resolve_out_dir
@@ -31,8 +32,8 @@ def add_subparser(subparsers) -> ArgumentParser:
     parser.add_argument("--subject-id", help="Optional subject identifier filter.")
     parser.add_argument("--task", help="Optional task filter.")
     parser.add_argument("--run", help="Optional run filter.")
-    parser.add_argument("--config-section", default="lmeeeg", help="Config section to analyse (`lmeeeg` or `lmeeeg_fooof`).")
-    parser.add_argument("--target", help="Optional target name when running `lmeeeg_fooof` inference.")
+    parser.add_argument("--config-section", default="lmeeeg", help="Config section to analyse.")
+    parser.add_argument("--target", help="Optional target name when running a target-specific lmeEEG section.")
     parser.add_argument("--model-name", help="Optional lmeEEG model name filter.")
     parser.add_argument("--trial-regressors-csv", help="Optional trialwise regressor CSV to merge into epoch metadata before inference refits.")
     parser.add_argument("--output", help="Optional explicit output path.")
@@ -56,7 +57,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
             run=args.run,
         )
         model_names = [str(args.model_name)] if args.model_name else list_model_names(config, section=config_section)
-        target_names = _resolve_target_names(config, config_section=config_section, target_name=getattr(args, "target", None))
+        target_names = resolve_target_names(config, config_section=config_section, target_name=getattr(args, "target", None))
         LOGGER.info(
             "Running lmeEEG inference for section=%s across %d model(s), %d target(s), and %d selected dataset rows",
             config_section,
@@ -195,22 +196,6 @@ def _run_one_analysis(
     return analysis_summary
 
 
-def _resolve_target_names(
-    config: Mapping[str, Any],
-    *,
-    config_section: str,
-    target_name: str | None,
-) -> list[str | None]:
-    if config_section != "lmeeeg_fooof":
-        return [None]
-    if target_name:
-        return [str(target_name)]
-    targets = [str(value) for value in (config.get("lmeeeg_fooof") or {}).get("targets", [])]
-    if not targets:
-        raise ValueError("No `lmeeeg_fooof.targets` were configured for target-specific inference.")
-    return targets
-
-
 def _resolve_effects(trial_data) -> list[tuple[str, str]]:
     effects: list[tuple[str, str]] = []
     for predictor_name in trial_data.design_result.test_predictors:
@@ -326,12 +311,12 @@ def _write_inference_outputs(
     times: np.ndarray,
 ) -> dict[str, Any]:
     out_dir = resolve_out_dir(config)
-    if config_section == "lmeeeg_fooof":
+    if section_supports_targets(config, config_section=config_section):
         if target_name is None:
             raise ValueError("`target_name` is required when writing target-specific lmeEEG inference outputs.")
-        effect_dir = out_dir / "stats" / "lmeeeg_fooof" / _safe_token(target_name) / str(model_name) / _safe_token(effect_name)
+        effect_dir = out_dir / "stats" / str(config_section) / _safe_token(target_name) / str(model_name) / _safe_token(effect_name)
     else:
-        effect_dir = out_dir / "stats" / "lmeeeg" / str(model_name) / _safe_token(effect_name)
+        effect_dir = out_dir / "stats" / str(config_section) / str(model_name) / _safe_token(effect_name)
     observed_path = effect_dir / "observed_statistic.npy"
     corrected_p_path = effect_dir / "corrected_p_values.npy"
     null_path = effect_dir / "null_distribution.npy"

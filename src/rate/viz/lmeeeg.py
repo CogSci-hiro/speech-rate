@@ -212,6 +212,7 @@ def build_lmeeeg_inference_manifest(
             formats=formats,
             dpi=dpi,
             line_width=line_width,
+            significance_mask=significance_mask,
         )
         corrected_p_stem = out_dir / "figures" / figure_subdir / model_name / f"{_sanitize_token(effect_name)}_corrected_p"
         corrected_p_paths = plot_joint_model_weights(

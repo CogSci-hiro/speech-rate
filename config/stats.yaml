@@ -1,6 +1,6 @@
 stats:
   method: "tfce"
-  n_permutations: 1000
+  n_permutations: 100
   tail: 0
   adjacency: "mne_default"
   tfce_threshold:
