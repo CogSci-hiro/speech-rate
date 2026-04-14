@@ -11,7 +11,7 @@ lmeeeg_induced:
     - "alpha"
 
   extraction:
-    method: "morlet"
+    method: "hilbert"
     bands:
       theta:
         fmin: 4.0

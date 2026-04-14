@@ -1,5 +1,7 @@
 LMEEEG_STAGE = f"{OUT_DIR}/_stage/lmeeeg_all.done.json"
 LMEEEG_INDUCED_STAGE = f"{OUT_DIR}/_stage/lmeeeg_induced_all.done.json"
+LMEEEG_VARIANCE_PARTITION_STAGE = f"{OUT_DIR}/_stage/lmeeeg_variance_partition_all.done.json"
+LMEEEG_VARIANCE_PARTITION_ROOT = str(build_variance_partition_fit_output_paths(RESOLVED_CONFIG).root_dir)
 
 
 rule lmeeeg_fit:
@@ -81,6 +83,36 @@ rule lmeeeg_induced_stage:
         lmeeeg_induced_stage_inputs,
     output:
         LMEEEG_INDUCED_STAGE,
+    shell:
+        "python -c \"from pathlib import Path; "
+        "path = Path(r'{output}'); "
+        "path.parent.mkdir(parents=True, exist_ok=True); "
+        "path.write_text('ok\\n', encoding='utf-8')\""
+
+
+rule lmeeeg_variance_partition_fit:
+    input:
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        config_path="config/config.yaml",
+        schema_path="config/schema.json",
+        epochs_stage=EPOCHS_STAGE,
+        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
+    output:
+        table=f"{LMEEEG_VARIANCE_PARTITION_ROOT}/variance_partition.parquet",
+        channel_names=f"{LMEEEG_VARIANCE_PARTITION_ROOT}/channel_names.json",
+        times=f"{LMEEEG_VARIANCE_PARTITION_ROOT}/times.npy",
+        summary=f"{LMEEEG_VARIANCE_PARTITION_ROOT}/summary.json",
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main lmeeeg-variance-partition-fit "
+        "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
+        "--trial-regressors-csv {input.trial_regressors}"
+
+
+rule lmeeeg_variance_partition_stage:
+    input:
+        lmeeeg_variance_partition_stage_inputs,
+    output:
+        LMEEEG_VARIANCE_PARTITION_STAGE,
     shell:
         "python -c \"from pathlib import Path; "
         "path = Path(r'{output}'); "

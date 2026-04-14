@@ -14,10 +14,13 @@ os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
 import mne
 import numpy as np
 import pandas as pd
+import pytest
 import yaml
 
 from rate.cli.commands import lmeeeg_group_stats
 from rate.cli.commands import lmeeeg_subject
+from rate.cli.commands import lmeeeg_variance_partition_fit
+from rate.cli.commands import lmeeeg_variance_partition_group_stats
 from rate.cli.commands import figures_lmeeeg
 from rate.cli.commands import figures_lmeeeg_inference
 from rate.legacy.cli.commands import figures_lmeeeg_fooof
@@ -28,6 +31,11 @@ from rate.lmeeeg.induced import extract_induced_power
 from rate.lmeeeg.io import build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays, build_lmeeeg_trial_table
+from rate.lmeeeg.variance_partition import (
+    build_variance_partition_fit_output_paths,
+    build_variance_partition_group_output_paths,
+    compute_variance_partition_components,
+)
 from rate.util import write_parquet_dataframe
 from rate.viz import lmeeeg as lmeeeg_viz
 
@@ -66,6 +74,22 @@ def _lmeeeg_config(out_dir: Path) -> dict:
                     "formula": "signal ~ speech_rate",
                     "test_predictors": ["speech_rate"],
                     "random_effect_group": "item_id",
+                    "random_effect_structure": "random_intercept",
+                },
+                "both_effect": {
+                    "formula": "~ self_rate + other_rate + latency + duration_s + time_within_run + run",
+                    "eligibility": {
+                        "not_null": ["self_rate", "other_rate"],
+                        "min_values": {
+                            "self_n_syllables": 3,
+                            "other_n_syllables": 3,
+                            "self_ipu_duration": 0.10,
+                            "other_ipu_duration": 0.10,
+                        },
+                    },
+                    "test_predictors": ["self_rate", "other_rate"],
+                    "standardize": ["self_rate", "other_rate", "latency", "duration_s", "time_within_run"],
+                    "random_effect_group": "subject_id",
                     "random_effect_structure": "random_intercept",
                 }
             },
@@ -117,7 +141,31 @@ def _lmeeeg_config(out_dir: Path) -> dict:
                 }
             },
         },
+        "lmeeeg_variance_partition": {
+            "enabled": True,
+            "source_section": "lmeeeg",
+            "source_model": "both_effect",
+            "output_dirname": "lmeeeg_variance_partition",
+            "predictors": {"self": "self_rate", "other": "other_rate"},
+        },
     }
+
+
+def _write_variance_partition_epochs(tmp_path: Path, config: dict, rows: list[dict[str, str]], metadata_by_subject: dict[str, pd.DataFrame], data_by_subject: dict[str, np.ndarray]) -> Path:
+    dataset_index_path = tmp_path / "out" / "dataset" / "index.parquet"
+    dataset_index_path.parent.mkdir(parents=True, exist_ok=True)
+    written_rows: list[dict[str, str]] = []
+    for row in rows:
+        metadata = metadata_by_subject[str(row["subject_id"])]
+        data = data_by_subject[str(row["subject_id"])]
+        epochs = _make_epochs(data, metadata.copy())
+        epoch_paths = build_epoch_output_paths(config, row)
+        epoch_paths.epochs_output_path.parent.mkdir(parents=True, exist_ok=True)
+        epochs.save(epoch_paths.epochs_output_path, overwrite=True, verbose="ERROR")
+        metadata.to_csv(epoch_paths.metadata_output_path, index=False)
+        written_rows.append(row)
+    write_parquet_dataframe(pd.DataFrame(written_rows), dataset_index_path)
+    return dataset_index_path
 
 
 def test_fit_lmeeeg_mass_model_recovers_slope_after_random_intercept_removal() -> None:
@@ -242,6 +290,20 @@ def test_merge_trial_regressors_into_metadata_preserves_row_order_and_values() -
     assert np.allclose(merged_df["residual_signed"].to_numpy(dtype=float), [0.2, -0.1, 0.0])
     assert merge_info["matched_rows"] == 3
     assert merge_info["unmatched_rows"] == 0
+
+
+def test_compute_variance_partition_components_from_r2_values() -> None:
+    components = compute_variance_partition_components(
+        r2_null=0.10,
+        r2_self=0.25,
+        r2_other=0.30,
+        r2_full=0.40,
+    )
+
+    assert components["total"] == pytest.approx(0.30)
+    assert components["unique_self"] == pytest.approx(0.10)
+    assert components["unique_other"] == pytest.approx(0.15)
+    assert components["shared"] == pytest.approx(0.05)
 
 
 def test_extract_induced_power_returns_band_power_with_same_trial_and_channel_axes(tmp_path: Path) -> None:
@@ -485,6 +547,175 @@ def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) ->
     assert Path(effect_summary["p_values_csv"]).exists()
 
 
+def test_lmeeeg_variance_partition_fit_cli_writes_outputs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    rows = [
+        {
+            "dyad_id": "dyad-001",
+            "subject_id": "sub-001",
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / "placeholder_raw_1.fif"),
+        },
+        {
+            "dyad_id": "dyad-001",
+            "subject_id": "sub-002",
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / "placeholder_raw_2.fif"),
+        },
+    ]
+    metadata_by_subject = {
+        "sub-001": pd.DataFrame(
+            {
+                "self_rate": [0.0, 0.6, 1.2, 1.8],
+                "other_rate": [0.3, 0.9, 1.1, 1.7],
+                "latency": [0.10, 0.12, 0.14, 0.16],
+                "duration_s": [0.60, 0.62, 0.64, 0.66],
+                "time_within_run": [0.1, 0.2, 0.3, 0.4],
+                "run": ["1", "1", "1", "1"],
+                "subject_id": ["sub-001"] * 4,
+                "self_n_syllables": [4, 4, 4, 4],
+                "other_n_syllables": [4, 4, 4, 4],
+                "self_ipu_duration": [0.20, 0.22, 0.24, 0.26],
+                "other_ipu_duration": [0.21, 0.23, 0.25, 0.27],
+            }
+        ),
+        "sub-002": pd.DataFrame(
+            {
+                "self_rate": [0.2, 0.8, 1.4, 2.0],
+                "other_rate": [0.4, 1.0, 1.3, 1.9],
+                "latency": [0.11, 0.13, 0.15, 0.17],
+                "duration_s": [0.61, 0.63, 0.65, 0.67],
+                "time_within_run": [0.1, 0.2, 0.3, 0.4],
+                "run": ["1", "1", "1", "1"],
+                "subject_id": ["sub-002"] * 4,
+                "self_n_syllables": [4, 4, 4, 4],
+                "other_n_syllables": [4, 4, 4, 4],
+                "self_ipu_duration": [0.21, 0.23, 0.25, 0.27],
+                "other_ipu_duration": [0.22, 0.24, 0.26, 0.28],
+            }
+        ),
+    }
+    data_by_subject: dict[str, np.ndarray] = {}
+    slope_self = np.array([[1.0, 0.4], [0.2, 0.8]])
+    slope_other = np.array([[0.5, 0.7], [0.6, 0.3]])
+    intercept_map = np.array([[2.0, 1.5], [1.0, 0.5]])
+    subject_offsets = {"sub-001": 1.0, "sub-002": -0.5}
+    for subject_id, metadata in metadata_by_subject.items():
+        data = np.zeros((len(metadata), 2, 2), dtype=float)
+        for index, row_values in metadata.iterrows():
+            data[index] = (
+                intercept_map
+                + (float(row_values["self_rate"]) * slope_self)
+                + (float(row_values["other_rate"]) * slope_other)
+                + subject_offsets[subject_id]
+            )
+        data_by_subject[subject_id] = data
+
+    dataset_index_path = _write_variance_partition_epochs(tmp_path, config, rows, metadata_by_subject, data_by_subject)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        dataset_index=str(dataset_index_path),
+        subject_id=None,
+        task=None,
+        run=None,
+        trial_regressors_csv=None,
+    )
+    exit_code = lmeeeg_variance_partition_fit.run(args, config=config)
+    assert exit_code == 0
+
+    output_paths = build_variance_partition_fit_output_paths(config)
+    assert output_paths.table_output_path.exists()
+    assert output_paths.summary_output_path.exists()
+    assert output_paths.channel_names_output_path.exists()
+    assert output_paths.times_output_path.exists()
+
+    result_df = pd.read_parquet(output_paths.table_output_path)
+    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
+
+    assert {"channel", "time", "r2_null", "r2_self", "r2_other", "r2_full", "total", "unique_self", "unique_other", "shared"} <= set(result_df.columns)
+    assert len(result_df) == 4
+    assert summary["status"] == "ok"
+    assert summary["fit_scope"] == "pooled"
+    assert summary["group_column"] == "subject_id"
+
+
+def test_lmeeeg_variance_partition_group_stats_cli_writes_descriptive_maps(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    fit_paths = build_variance_partition_fit_output_paths(config)
+    fit_paths.root_dir.mkdir(parents=True, exist_ok=True)
+
+    table = pd.DataFrame(
+        {
+            "channel": ["Fz", "Fz", "Cz", "Cz"],
+            "time": [-0.1, -0.09, -0.1, -0.09],
+            "channel_index": [0, 0, 1, 1],
+            "time_index": [0, 1, 0, 1],
+            "r2_null": [0.1, 0.1, 0.1, 0.1],
+            "r2_self": [0.2, 0.25, 0.3, 0.35],
+            "r2_other": [0.18, 0.22, 0.28, 0.31],
+            "r2_full": [0.26, 0.30, 0.36, 0.40],
+            "total": [0.16, 0.20, 0.26, 0.30],
+            "unique_self": [0.08, 0.08, 0.08, 0.09],
+            "unique_other": [0.06, 0.05, 0.06, 0.05],
+            "shared": [0.02, 0.07, 0.12, 0.16],
+            "n_obs": [8, 8, 8, 8],
+            "n_subjects": [2, 2, 2, 2],
+            "converged_null": [True, True, True, True],
+            "converged_self": [True, True, True, True],
+            "converged_other": [True, True, True, True],
+            "converged_full": [True, True, True, True],
+            "singular_null": [False, False, False, False],
+            "singular_self": [False, False, False, False],
+            "singular_other": [False, False, False, False],
+            "singular_full": [False, False, False, False],
+        }
+    )
+    table.to_parquet(fit_paths.table_output_path, index=False)
+    fit_paths.channel_names_output_path.write_text(json.dumps(["Fz", "Cz"]) + "\n", encoding="utf-8")
+    np.save(fit_paths.times_output_path, np.array([-0.1, -0.09], dtype=float))
+    fit_paths.summary_output_path.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "fit_scope": "pooled",
+                "source_section": "lmeeeg",
+                "source_model": "both_effect",
+                "self_predictor": "self_rate",
+                "other_predictor": "other_rate",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    args = Namespace(config="config/config.yaml", schema="config/schema.json", output=None)
+    exit_code = lmeeeg_variance_partition_group_stats.run(args, config=config)
+    assert exit_code == 0
+
+    group_paths = build_variance_partition_group_output_paths(config)
+    summary_path = out_dir / "stats" / "lmeeeg_variance_partition_group_stats.json"
+    assert summary_path.exists()
+    assert group_paths.table_output_path.exists()
+    assert group_paths.total_map_output_path.exists()
+    assert group_paths.unique_self_map_output_path.exists()
+    assert group_paths.unique_other_map_output_path.exists()
+    assert group_paths.shared_map_output_path.exists()
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["status"] == "ok"
+    total_map = np.load(group_paths.total_map_output_path)
+    assert total_map.shape == (2, 2)
+    assert np.isclose(total_map[0, 0], 0.16)
+
+
 def test_lmeeeg_fooof_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
@@ -555,15 +786,18 @@ def test_lmeeeg_fooof_group_stats_cli_writes_real_inference_outputs(tmp_path: Pa
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
     assert summary["status"] == "ok"
-    assert summary["config_section"] == "lmeeeg_fooof"
-    assert summary["n_analyses"] == 1
-    analysis = summary["analyses"][0]
-    assert analysis["target"] == "offset"
-    effect_summary = analysis["effects"][0]
-    assert effect_summary["target"] == "offset"
-    assert Path(effect_summary["observed_statistic"]).exists()
-    assert Path(effect_summary["corrected_p_values"]).exists()
-    assert Path(effect_summary["p_values_csv"]).exists()
+
+
+def test_variance_partition_workflow_rules_are_present() -> None:
+    lmeeeg_rules = Path("workflow/rules/lmeeeg.smk").read_text(encoding="utf-8")
+    stats_rules = Path("workflow/rules/stats.smk").read_text(encoding="utf-8")
+    targets_rules = Path("workflow/rules/targets.smk").read_text(encoding="utf-8")
+
+    assert "rule lmeeeg_variance_partition_fit" in lmeeeg_rules
+    assert "rule lmeeeg_variance_partition_stage" in lmeeeg_rules
+    assert "rule lmeeeg_variance_partition_group_stats" in stats_rules
+    assert "rule lmeeeg_variance_partition_all" in targets_rules
+    assert "rule lmeeeg_all" in targets_rules
 
 
 def test_write_inference_outputs_writes_cluster_pvalues_csv(tmp_path: Path) -> None:

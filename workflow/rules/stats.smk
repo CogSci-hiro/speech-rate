@@ -7,6 +7,8 @@ R_ANALYSIS_RESULTS_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_results.csv"
 R_ANALYSIS_STAGE = f"{OUT_DIR}/_stage/r_analysis_all.done.json"
 LMEEEG_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_group_stats.json"
 LMEEEG_INDUCED_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_induced_group_stats.json"
+LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_variance_partition_group_stats.json"
+LMEEEG_VARIANCE_PARTITION_GROUP_DIR = str(build_variance_partition_group_output_paths(RESOLVED_CONFIG).group_dir)
 
 
 rule behavioural_residuals:
@@ -118,3 +120,23 @@ rule lmeeeg_induced_group_stats:
         "--config-section lmeeeg_induced "
         "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
         "--trial-regressors-csv {input.trial_regressors} --output {output}"
+
+
+rule lmeeeg_variance_partition_group_stats:
+    input:
+        lmeeeg=LMEEEG_VARIANCE_PARTITION_STAGE,
+        config_path="config/config.yaml",
+        schema_path="config/schema.json",
+    output:
+        summary=LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT,
+        table=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/descriptive_maps.parquet",
+        channel_names=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/channel_names.json",
+        times=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/times.npy",
+        total_map=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/total.npy",
+        unique_self_map=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/unique_self.npy",
+        unique_other_map=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/unique_other.npy",
+        shared_map=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/shared.npy",
+        group_summary=f"{LMEEEG_VARIANCE_PARTITION_GROUP_DIR}/summary.json",
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main lmeeeg-variance-partition-group-stats "
+        "--config {input.config_path} --schema {input.schema_path} --output {output.summary}"

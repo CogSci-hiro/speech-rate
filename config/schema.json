@@ -49,6 +49,7 @@
     "fooof": {"type": "object"},
     "lmeeeg": {"type": "object"},
     "lmeeeg_induced": {"type": "object"},
+    "lmeeeg_variance_partition": {"type": "object"},
     "debug": {
       "type": "object",
       "properties": {

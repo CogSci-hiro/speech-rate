@@ -1,0 +1,106 @@
+decoding:
+  enabled: true
+  analysis_name: decoding_temporal_generalisation
+  output_dir: decoding
+  sfreq: 32
+  random_state: 42
+
+  input:
+    epochs_section: epochs
+    events_table: null
+
+  time_window:
+    tmin_s: null
+    tmax_s: null
+
+  channels:
+    picks: eeg
+    include: []
+    exclude: []
+
+  controls:
+    - latency
+    - duration_s
+    - time_within_run
+    - run
+
+  targets:
+    self_rate:
+      column: self_rate
+    other_rate:
+      column: other_rate
+
+  eeg_residualisation:
+    random_effect: subject_id
+    controls:
+      - latency
+      - duration_s
+      - time_within_run
+      - run
+
+  target_residualisation:
+    random_effect: subject_id
+    controls:
+      - latency
+      - duration_s
+      - time_within_run
+      - run
+
+  cv:
+    n_splits: 10
+    group_column: subject_id
+    shuffle: true
+    random_state: 42
+
+  nested_cv:
+    enabled: true
+    inner_n_splits: 4
+    selection_metric: mean_diagonal_pearson_r
+    select_single_alpha_per_outer_fold: true
+
+  estimator:
+    name: ridge
+    save_alpha_scores: true
+    alpha_grid:
+      - 0.001
+      - 0.01
+      - 0.1
+      - 1.0
+      - 10.0
+      - 100.0
+      - 1000.0
+
+  scoring:
+    name: pearson_r
+
+  stats:
+    enabled: true
+    n_permutations: 100
+    random_state: 42
+    permutation_scheme: within_subject
+    n_jobs: 1
+
+    tfce:
+      enabled: true
+      h_power: 2.0
+      e_power: 0.5
+      h_start: 0.0
+      dh: 0.1
+      tail: positive
+
+  models:
+    - name: self_temporal_generalisation
+      train_target: self_rate
+      test_target: self_rate
+
+    - name: other_temporal_generalisation
+      train_target: other_rate
+      test_target: other_rate
+
+    - name: cross_other_to_self
+      train_target: other_rate
+      test_target: self_rate
+
+    - name: cross_self_to_other
+      train_target: self_rate
+      test_target: other_rate

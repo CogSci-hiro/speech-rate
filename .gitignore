@@ -14,3 +14,5 @@ docs/_build/
 project_snapshot.md
 legacy
 rate.egg-info
+.tmp
+.venv

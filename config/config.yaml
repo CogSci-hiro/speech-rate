@@ -13,12 +13,3 @@ paths:
   ica_dir: "/Users/hiro/Datasets/working/hyperscanning/precomputed_ica"
   annotations_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/annotations"
   questionnaire_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/questionnaire"
-
-# Main entry-point config.
-# Analysis sections are merged from sibling modular files:
-#   dataset.yaml
-#   preprocessing.yaml
-#   epochs.yaml
-#   glm.yaml
-#   fooof.yaml
-#   lmeeeg.yaml

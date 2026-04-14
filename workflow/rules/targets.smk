@@ -32,6 +32,22 @@ rule lmeeeg_induced_all:
         LMEEEG_INDUCED_STATS_OUTPUT
 
 
+rule lmeeeg_variance_partition_all:
+    input:
+        LMEEEG_VARIANCE_PARTITION_STAGE,
+        LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT
+
+
+rule decoding_all:
+    input:
+        DECODING_STAGE
+
+
+rule decoding_stats_all:
+    input:
+        DECODING_STATS_STAGE
+
+
 rule r_analysis_all:
     input:
         R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
