@@ -80,6 +80,7 @@ rule decoding_figures_all:
         DECODING_FIGURES_OUTPUT
 
 
+
 rule qc_lmeeeg_plots_all:
     input:
         LMEEEG_QC_FIGURES_OUTPUT
