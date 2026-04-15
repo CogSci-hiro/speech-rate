@@ -30,6 +30,10 @@ viz:
         formats: ["png"]
         openness_color: "#3B82F6"
         extraversion_color: "#EF4444"
+    decoding:
+      diag_ymin: -0.1
+      diag_ymax: 0.5
+      p_threshold: 0.05
     glm:
       contrasts: ["speech_rate"]
     fooof:

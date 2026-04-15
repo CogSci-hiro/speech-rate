@@ -57,6 +57,7 @@ rule r_analysis_all:
 
 _figures_all_inputs = [
     BEHAVIOURAL_FIGURES_OUTPUT,
+    DECODING_FIGURES_OUTPUT,
     LMEEEG_QC_FIGURES_OUTPUT,
     LMEEEG_INFERENCE_FIGURES_OUTPUT,
     LMEEEG_INDUCED_QC_FIGURES_OUTPUT,
@@ -72,6 +73,11 @@ rule figures_all:
 rule behavioural_figures_all:
     input:
         BEHAVIOURAL_FIGURES_OUTPUT
+
+
+rule decoding_figures_all:
+    input:
+        DECODING_FIGURES_OUTPUT
 
 
 rule qc_lmeeeg_plots_all:

@@ -32,6 +32,7 @@ _COMMANDS = {
     "decode-temporal-generalisation": "rate.cli.commands.decode_temporal_generalisation",
     "decode-temporal-generalisation-stats": "rate.cli.commands.decode_temporal_generalisation_stats",
     "figures-behavioural": "rate.cli.commands.figures_behavioural",
+    "figures-decoding": "rate.cli.commands.figures_decoding",
     "figures-glm": "rate.legacy.cli.commands.figures_glm",
     "figures-lmeeeg": "rate.cli.commands.figures_lmeeeg",
     "figures-lmeeeg-fooof": "rate.legacy.cli.commands.figures_lmeeeg_fooof",

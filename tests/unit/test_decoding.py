@@ -13,13 +13,16 @@ import mne
 import numpy as np
 import pandas as pd
 import yaml
+from argparse import Namespace
 
+from rate.cli.commands import figures_decoding
 from rate.decoding.config import load_decoding_config
 from rate.decoding.io import build_decoding_model_output_paths
 from rate.decoding.pipeline import _residualise_target, resolve_ridge_alphas, run_decoding_model
 from rate.decoding.stats import compute_tfce_2d, permute_decoding_targets, run_decoding_model_stats
 from rate.epochs.io import build_epoch_output_paths
 from rate.util import write_parquet_dataframe
+from rate.viz.decoding import build_decoding_manifest
 
 
 def _write_yaml(path: Path, payload: dict) -> None:
@@ -371,3 +374,144 @@ def test_cross_condition_permutation_leaves_test_target_fixed() -> None:
     assert np.array_equal(perm_test, prepared.test_target_residuals)
     assert set(perm_train[:2]) == {1.0, 2.0}
     assert set(perm_train[2:]) == {3.0, 4.0}
+
+
+def test_build_decoding_manifest_writes_combined_plot(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    decoding_config = _decoding_config()
+    manifest_path = out_dir / "figures" / "decoding" / "figure_manifest.json"
+    times = np.asarray([-0.1, 0.0, 0.1], dtype=float)
+    p_values = np.asarray(
+        [
+            [1.0, 0.04, 1.0],
+            [1.0, 0.01, 1.0],
+            [1.0, 1.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    for model_index, model_cfg in enumerate(decoding_config["models"], start=1):
+        output_paths = build_decoding_model_output_paths(
+            {"paths": {"out_dir": str(out_dir)}},
+            decoding_config,
+            model_name=str(model_cfg["name"]),
+        )
+        output_paths.scores_output_path.parent.mkdir(parents=True, exist_ok=True)
+        alpha_scores = np.asarray(
+            [
+                [
+                    [0.02 * model_index, 0.01, 0.0],
+                    [0.01, 0.03 * model_index, 0.01],
+                    [0.0, 0.01, 0.02 * model_index],
+                ],
+                [
+                    [0.08 * model_index, 0.02, 0.01],
+                    [0.02, 0.12 * model_index, 0.03],
+                    [0.01, 0.03, 0.09 * model_index],
+                ],
+            ],
+            dtype=float,
+        )
+        np.save(output_paths.alpha_scores_output_path, alpha_scores)
+        np.save(output_paths.scores_output_path, alpha_scores[1])
+        np.save(output_paths.fold_scores_output_path, np.stack([alpha_scores[1], alpha_scores[1] * 0.9], axis=0))
+        np.save(output_paths.best_alphas_output_path, np.asarray([1.0, 1.0], dtype=float))
+        np.save(output_paths.times_output_path, times)
+        np.save(output_paths.tg_p_fwer_output_path, p_values)
+
+    manifest = build_decoding_manifest(
+        out_dir=out_dir,
+        decoding_config=decoding_config,
+        manifest_path=manifest_path,
+        figure_config={"diag_ymin": -0.05, "diag_ymax": 0.6},
+        formats=("png",),
+        dpi=72,
+    )
+
+    assert manifest["status"] == "ok"
+    assert manifest["plot_count"] == 1
+    assert manifest_path.exists()
+
+    plot = manifest["plots"][0]
+    assert plot["plot_name"] == "temporal_generalisation_summary"
+    assert plot["diag_ylim"] == [-0.05, 0.6]
+    assert len(plot["files"]) == 1
+    assert Path(plot["files"][0]).exists()
+    assert [model["model_name"] for model in plot["models"]] == [
+        "self_temporal_generalisation",
+        "cross_other_to_self",
+    ]
+    assert all(model["selected_alpha"] == 1.0 for model in plot["models"])
+    assert all(model["alpha_selection_source"] == "alpha_scores_mean_diagonal" for model in plot["models"])
+
+
+def test_figures_decoding_cli_writes_manifest(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    decoding_cfg_path = tmp_path / "decoding.yaml"
+    viz_config_path = tmp_path / "viz.yaml"
+    _write_yaml(tmp_path / "decoding.yaml", {"decoding": _decoding_config()})
+    viz_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "viz": {
+                    "formats": ["png"],
+                    "dpi": 72,
+                    "figures": {
+                        "decoding": {
+                            "diag_ymin": -0.05,
+                            "diag_ymax": 0.6,
+                        }
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    for model_index, model_cfg in enumerate(_decoding_config()["models"], start=1):
+        output_paths = build_decoding_model_output_paths(
+            {"paths": {"out_dir": str(out_dir)}},
+            _decoding_config(),
+            model_name=str(model_cfg["name"]),
+        )
+        output_paths.scores_output_path.parent.mkdir(parents=True, exist_ok=True)
+        matrix = np.asarray(
+            [
+                [0.05 * model_index, 0.01],
+                [0.02, 0.08 * model_index],
+            ],
+            dtype=float,
+        )
+        np.save(output_paths.scores_output_path, matrix)
+        np.save(output_paths.fold_scores_output_path, np.stack([matrix, matrix * 0.95], axis=0))
+        np.save(output_paths.alpha_scores_output_path, np.stack([matrix * 0.6, matrix], axis=0))
+        np.save(output_paths.best_alphas_output_path, np.asarray([1.0, 1.0], dtype=float))
+        np.save(output_paths.times_output_path, np.asarray([-0.05, 0.05], dtype=float))
+        np.save(output_paths.tg_p_fwer_output_path, np.asarray([[1.0, 0.04], [1.0, 1.0]], dtype=float))
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        viz_config=str(viz_config_path),
+        decoding_config=str(decoding_cfg_path),
+        output=None,
+    )
+    exit_code = figures_decoding.run(args, config={"paths": {"out_dir": str(out_dir)}})
+
+    assert exit_code == 0
+    manifest_path = out_dir / "figures" / "decoding" / "figure_manifest.json"
+    assert manifest_path.exists()
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["plot_count"] == 1
+    assert manifest["plots"][0]["plot_name"] == "temporal_generalisation_summary"
+
+
+def test_decoding_figure_workflow_rules_are_present() -> None:
+    figures_rules = Path("workflow/rules/figures.smk").read_text(encoding="utf-8")
+    targets_rules = Path("workflow/rules/targets.smk").read_text(encoding="utf-8")
+
+    assert "rule figures_decoding" in figures_rules
+    assert "DECODING_FIGURES_OUTPUT" in figures_rules
+    assert "rule decoding_figures_all" in targets_rules
+    assert "DECODING_FIGURES_OUTPUT" in targets_rules
