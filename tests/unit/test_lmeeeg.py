@@ -28,7 +28,7 @@ from rate.cli.commands import figures_lmeeeg
 from rate.cli.commands import figures_lmeeeg_inference
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths, build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
-from rate.lmeeeg.similarity import build_similarity_output_paths
+from rate.lmeeeg.similarity import _compute_tfce_1d, build_similarity_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
 from rate.lmeeeg.variance_partition import (
@@ -605,10 +605,25 @@ def test_lmeeeg_similarity_cli_writes_outputs(tmp_path: Path) -> None:
     assert summary["input"]["predictor_a"] == "other_rate"
     assert summary["input"]["predictor_b"] == "self_rate"
     assert summary["whole_map_similarity"]["pearson"]["p_value"] is not None
+    assert summary["time_resolved_topography"]["correction"] == "tfce"
     assert set(summary_table["metric"]) >= {"pearson", "cosine", "mean_signed_difference", "mean_absolute_difference", "rms_difference"}
     assert difference_map.shape == (2, 3)
     assert time_curve.shape == (3,)
     assert np.isclose(summary["whole_map_difference"]["mean_signed_difference"], float(np.mean(difference_map)))
+
+
+def test_compute_tfce_1d_boosts_contiguous_timepoints() -> None:
+    tfce = _compute_tfce_1d(
+        np.asarray([0.0, 1.0, 1.0, 0.4], dtype=float),
+        h_power=2.0,
+        e_power=0.5,
+        h_start=0.0,
+        dh=0.1,
+    )
+
+    assert tfce.shape == (4,)
+    assert tfce[1] > tfce[3]
+    assert tfce[2] > tfce[3]
 
 
 def test_figures_lmeeeg_variance_partition_cli_writes_manifest(tmp_path: Path) -> None:

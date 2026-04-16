@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.stats import gaussian_kde
 
 from rate.viz.theme import apply_theme, get_role_palette, make_dyad_palette
 
@@ -102,13 +103,16 @@ def _build_combined_behavioural_plot(
         .sort_values(["dyad_id", subject_col])
         .reset_index(drop=True)
     )
-
-    valid_dyads = [str(dyad) for dyad in subject_summary["dyad_id"].dropna().astype(str).unique().tolist()]
-    dyad_to_color = _build_dyad_palette(valid_dyads, theme_config=theme)
     slope_dataframe, ordered_slope_df, dyad_slope_summary = _prepare_subject_slopes(
         subject_slopes_path=subject_slopes_path,
         plot_config=subject_slopes_cfg,
     )
+    valid_dyads = _collect_valid_dyads(
+        subject_summary=subject_summary,
+        slope_dataframe=slope_dataframe,
+        dyad_column=str(subject_slopes_cfg.get("dyad_col", "dyad_id")),
+    )
+    dyad_to_color = _build_dyad_palette(valid_dyads, theme_config=theme)
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
     ax_hist, ax_subject, ax_slope = axes
@@ -116,7 +120,7 @@ def _build_combined_behavioural_plot(
     ax_hist.hist(
         data[rate_col].to_numpy(dtype=float),
         bins=histogram_bins,
-        color=str(speech_rate_cfg.get("histogram_color", palette["self"])),
+        color=str(speech_rate_cfg.get("histogram_color", theme["colors"]["neutral"])),
         edgecolor="none",
         linewidth=0.0,
     )
@@ -124,72 +128,18 @@ def _build_combined_behavioural_plot(
     ax_hist.set_xlabel("Self speech rate")
     ax_hist.set_ylabel("Count")
 
-    for dyad_id, dyad_df in subject_summary.groupby("dyad_id", dropna=True):
-        dyad_df = dyad_df.sort_values("median_rate").reset_index(drop=True)
-        dyad_key = str(dyad_id)
-        color = dyad_to_color[dyad_key]
-
-        if len(dyad_df) == 1:
-            base_y_positions = np.array([dot_center_y], dtype=float)
-        else:
-            base_y_positions = np.linspace(
-                dot_center_y - (dot_spread_y / 2.0),
-                dot_center_y + (dot_spread_y / 2.0),
-                len(dyad_df),
-            )
-
-        y_positions = base_y_positions + rng.normal(loc=0.0, scale=jitter_sd, size=len(dyad_df))
-        median_rates = dyad_df["median_rate"].to_numpy(dtype=float)
-
-        if len(dyad_df) >= 2:
-            order = np.argsort(median_rates)
-            ax_subject.plot(
-                median_rates[order],
-                y_positions[order],
-                color=color,
-                linewidth=2.0,
-                alpha=connector_alpha,
-                zorder=2,
-            )
-
-        ax_subject.scatter(
-            median_rates,
-            y_positions,
-            s=point_size,
-            color=[color],
-            edgecolor="white",
-            linewidth=0.9,
-            alpha=dot_alpha,
-            zorder=3,
-        )
-
-    ax_subject.set_title("B. Subject median speech rates by dyad")
-    ax_subject.set_xlabel("Median self speech rate")
-    ax_subject.set_ylabel("")
-    ax_subject.set_yticks([])
-    ax_subject.set_ylim(dot_center_y - dot_spread_y - 0.08, dot_center_y + dot_spread_y + 0.08)
-
-    if valid_dyads:
-        legend_handles = [
-            plt.Line2D(
-                [0],
-                [0],
-                color=dyad_to_color[dyad],
-                marker="o",
-                linestyle="-",
-                linewidth=2.0,
-                markersize=7,
-                label=dyad,
-            )
-            for dyad in valid_dyads
-        ]
-        ax_subject.legend(
-            handles=legend_handles,
-            title="Dyad ID",
-            bbox_to_anchor=(1.02, 1.0),
-            loc="upper left",
-            frameon=False,
-        )
+    _plot_subject_median_rainplot(
+        ax=ax_subject,
+        subject_summary=subject_summary,
+        dyad_to_color=dyad_to_color,
+        point_size=point_size,
+        dot_center_y=dot_center_y,
+        dot_spread_y=dot_spread_y,
+        jitter_sd=jitter_sd,
+        connector_alpha=connector_alpha,
+        dot_alpha=dot_alpha,
+        rng=rng,
+    )
 
     plot_grouped_subject_slopes(
         ax=ax_slope,
@@ -202,6 +152,8 @@ def _build_combined_behavioural_plot(
         line_color=str(subject_slopes_cfg.get("line_color", palette["other"])),
         within_dyad_spacing=float(subject_slopes_cfg.get("within_dyad_spacing", 0.8)),
         between_dyad_spacing=float(subject_slopes_cfg.get("between_dyad_spacing", 1.8)),
+        dyad_to_color=dyad_to_color,
+        show_legend=True,
     )
 
     fig.tight_layout()
@@ -242,6 +194,17 @@ def _build_dyad_palette(
     return make_dyad_palette(tuple(valid_dyads), theme_config=theme_config)
 
 
+def _collect_valid_dyads(
+    *,
+    subject_summary: pd.DataFrame,
+    slope_dataframe: pd.DataFrame,
+    dyad_column: str,
+) -> list[str]:
+    subject_dyads = subject_summary["dyad_id"].dropna().astype(str).tolist()
+    slope_dyads = slope_dataframe[dyad_column].dropna().astype(str).tolist()
+    return list(dict.fromkeys(subject_dyads + slope_dyads))
+
+
 def _prepare_subject_slopes(
     *,
     subject_slopes_path: Path,
@@ -273,6 +236,8 @@ def plot_grouped_subject_slopes(
     line_color: str = "0.35",
     within_dyad_spacing: float = 0.8,
     between_dyad_spacing: float = 1.8,
+    dyad_to_color: Mapping[str, tuple[float, float, float]] | None = None,
+    show_legend: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Plot grouped subject-wise slopes with 95% confidence intervals."""
     ordered_plot_df, dyad_summary = _order_grouped_subject_slopes(
@@ -291,19 +256,21 @@ def plot_grouped_subject_slopes(
     ordered_plot_df["y_position"] = y_positions
 
     for _, row in ordered_plot_df.iterrows():
+        dyad_key = str(row[dyad_column])
+        row_color = dyad_to_color.get(dyad_key, point_color) if dyad_to_color is not None else point_color
         ax.hlines(
             y=float(row["y_position"]),
             xmin=float(row["slope"]) - (1.96 * float(row["se"])),
             xmax=float(row["slope"]) + (1.96 * float(row["se"])),
             linewidth=1.5,
-            color=line_color,
+            color=row_color,
             alpha=0.9,
         )
         ax.scatter(
             float(row["slope"]),
             float(row["y_position"]),
             s=35,
-            color=point_color,
+            color=row_color,
             alpha=0.95,
             zorder=3,
         )
@@ -322,7 +289,131 @@ def plot_grouped_subject_slopes(
     ax.set_ylabel("Subjects grouped by dyad")
     ax.set_yticks([])
 
+    if show_legend and dyad_to_color:
+        legend_handles = [
+            plt.Line2D(
+                [0],
+                [0],
+                color=dyad_to_color[str(dyad_id)],
+                marker="o",
+                linestyle="-",
+                linewidth=1.8,
+                markersize=6,
+                label=str(dyad_id),
+            )
+            for dyad_id in dyad_summary[dyad_column].tolist()
+            if str(dyad_id) in dyad_to_color
+        ]
+        if legend_handles:
+            ax.legend(handles=legend_handles, title="Dyad ID", loc="best", frameon=False)
+
     return ordered_plot_df, dyad_summary
+
+
+def _plot_subject_median_rainplot(
+    *,
+    ax: plt.Axes,
+    subject_summary: pd.DataFrame,
+    dyad_to_color: Mapping[str, tuple[float, float, float]],
+    point_size: float,
+    dot_center_y: float,
+    dot_spread_y: float,
+    jitter_sd: float,
+    connector_alpha: float,
+    dot_alpha: float,
+    rng: np.random.Generator,
+) -> None:
+    ordered_dyads = (
+        subject_summary.groupby("dyad_id", as_index=False)
+        .agg(dyad_median_rate=("median_rate", "median"))
+        .sort_values("dyad_median_rate")
+        ["dyad_id"]
+        .astype(str)
+        .tolist()
+    )
+
+    kde_height = max(dot_spread_y * 4.0, 0.32)
+    rain_offset = max(dot_spread_y * 1.6, 0.18)
+    y_tick_positions: list[float] = []
+    x_min = float(subject_summary["median_rate"].min())
+    x_max = float(subject_summary["median_rate"].max())
+    x_padding = max((x_max - x_min) * 0.08, 0.1)
+
+    for dyad_index, dyad_id in enumerate(ordered_dyads):
+        base_y = float(dyad_index)
+        y_tick_positions.append(base_y)
+        dyad_df = (
+            subject_summary[subject_summary["dyad_id"].astype(str) == dyad_id]
+            .sort_values("median_rate")
+            .reset_index(drop=True)
+        )
+        color = dyad_to_color[dyad_id]
+        median_rates = dyad_df["median_rate"].to_numpy(dtype=float)
+
+        if len(median_rates) >= 2 and np.ptp(median_rates) > 0:
+            x_grid = np.linspace(median_rates.min() - x_padding, median_rates.max() + x_padding, 256)
+            density = gaussian_kde(median_rates)(x_grid)
+            density = (density / np.max(density)) * kde_height
+            ax.fill_between(
+                x_grid,
+                base_y,
+                base_y + density,
+                color=color,
+                alpha=0.28,
+                linewidth=0.0,
+                zorder=1,
+            )
+            ax.plot(x_grid, base_y + density, color=color, linewidth=1.2, alpha=0.95, zorder=2)
+        else:
+            ax.vlines(
+                float(median_rates[0]),
+                ymin=base_y,
+                ymax=base_y + (kde_height * 0.5),
+                color=color,
+                linewidth=1.2,
+                alpha=0.9,
+                zorder=2,
+            )
+
+        if len(dyad_df) == 1:
+            base_y_positions = np.array([base_y - rain_offset + dot_center_y], dtype=float)
+        else:
+            base_y_positions = np.linspace(
+                base_y - rain_offset + dot_center_y - (dot_spread_y / 2.0),
+                base_y - rain_offset + dot_center_y + (dot_spread_y / 2.0),
+                len(dyad_df),
+            )
+
+        y_positions = base_y_positions + rng.normal(loc=0.0, scale=jitter_sd, size=len(dyad_df))
+
+        if len(dyad_df) >= 2:
+            order = np.argsort(median_rates)
+            ax.plot(
+                median_rates[order],
+                y_positions[order],
+                color=color,
+                linewidth=1.8,
+                alpha=connector_alpha,
+                zorder=3,
+            )
+
+        ax.scatter(
+            median_rates,
+            y_positions,
+            s=point_size,
+            color=[color],
+            edgecolor="white",
+            linewidth=0.9,
+            alpha=dot_alpha,
+            zorder=4,
+        )
+
+    ax.set_title("B. Subject median speech rates by dyad")
+    ax.set_xlabel("Median self speech rate")
+    ax.set_ylabel("Dyad")
+    ax.set_yticks(y_tick_positions, ordered_dyads)
+    ax.set_ylim(-0.5, len(ordered_dyads) - 0.5 + kde_height + 0.1)
+    ax.set_xlim(x_min - x_padding, x_max + x_padding)
 
 
 def _order_grouped_subject_slopes(
