@@ -54,7 +54,7 @@ viz:
       use_proportions: false
       epsilon: 1.0e-12
       figure_width: 14
-      figure_height: 3
+      figure_height: 5
       constrained_w_pad: 0.02
       constrained_h_pad: 0.02
       wspace: 0.04
@@ -112,17 +112,20 @@ viz:
       significance_threshold: 0.05
       plotting_tmin_s: -1.0
       plotting_tmax_s: 0.5
-      robust_percentile: 99.0
+      robust_percentile: 99.5
+      manual_vlim: 5
+      hspace: 0.5
+      bottom_topomap_title_pad: -6
       topomap_cmap: "RdBu_r"
       colorbar_label: "Observed t value"
       models:
         self:
-          label: "Unique self"
+          label: "Self"
           model_name: "self_rate_effect"
           effect_name: "self_rate"
           topomap_times_s: [-0.8, -0.4, 0.0]
         other:
-          label: "Unique other"
+          label: "Other"
           model_name: "other_rate_effect"
           effect_name: "other_rate"
           topomap_times_s: [-0.7, -0.5]

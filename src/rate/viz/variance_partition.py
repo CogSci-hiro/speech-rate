@@ -348,19 +348,19 @@ def _add_roi_inset(
     inset_axis.scatter(
         positions[:, 0],
         positions[:, 1],
-        s=8,
+        s=2,
         facecolors=get_theme_color("neutral", theme_config),
         edgecolors=background_color,
-        linewidths=0.3,
+        linewidths=0.15,
         zorder=3,
     )
     inset_axis.scatter(
         positions[:, 0],
         positions[:, 1],
-        s=18,
+        s=5,
         facecolors="none",
-        edgecolors=highlight_color,
-        linewidths=0.6,
+        edgecolors="black",
+        linewidths=0.3,
         zorder=2,
     )
     inset_axis.text(0.0, -1.22, label, ha="center", va="top", fontsize=8.5, fontweight="semibold")
@@ -465,6 +465,7 @@ def _draw_weighted_venn_with_matplotlib_venn(
             label.set_text(region_text)
             label.set_fontsize(11)
             label.set_fontweight("semibold")
+            label.set_color("white")
 
     shared_label = venn_object.get_label_by_id("11")
     if shared_label is not None:
@@ -476,6 +477,7 @@ def _draw_weighted_venn_with_matplotlib_venn(
         if set_label is not None:
             set_label.set_fontsize(12)
             set_label.set_fontweight("semibold")
+            set_label.set_color("white")
     axis.set_title(title, fontsize=14, pad=12)
 
 
@@ -500,11 +502,11 @@ def _draw_weighted_venn_fallback(
     right_center = (0.35, 0.0)
     axis.add_patch(Circle(left_center, self_radius, facecolor=colors["self"], edgecolor=edge_color, linewidth=1.25, alpha=0.35))
     axis.add_patch(Circle(right_center, other_radius, facecolor=colors["other"], edgecolor=edge_color, linewidth=1.25, alpha=0.35))
-    axis.text(left_center[0] - 0.12, 0.0, f"Unique self\n{_format_scientific_mathtext(unique_self_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold")
-    axis.text(right_center[0] + 0.12, 0.0, f"Unique other\n{_format_scientific_mathtext(unique_other_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold")
+    axis.text(left_center[0] - 0.12, 0.0, f"Unique self\n{_format_scientific_mathtext(unique_self_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold", color="white")
+    axis.text(right_center[0] + 0.12, 0.0, f"Unique other\n{_format_scientific_mathtext(unique_other_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold", color="white")
     axis.text(0.0, -0.02, f"Shared\n{_format_scientific_mathtext(shared_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold", color=colors["shared"])
-    axis.text(left_center[0], self_radius + 0.16, "Self", ha="center", va="bottom", fontsize=12, fontweight="semibold")
-    axis.text(right_center[0], other_radius + 0.16, "Other", ha="center", va="bottom", fontsize=12, fontweight="semibold")
+    axis.text(left_center[0], self_radius + 0.16, "Self", ha="center", va="bottom", fontsize=12, fontweight="semibold", color="white")
+    axis.text(right_center[0], other_radius + 0.16, "Other", ha="center", va="bottom", fontsize=12, fontweight="semibold", color="white")
     axis.set_title(title, fontsize=14, pad=12)
     axis.set_xlim(-1.35, 1.35)
     axis.set_ylim(-1.0, 1.1)

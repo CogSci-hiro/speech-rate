@@ -135,6 +135,8 @@ def build_lmeeeg_main_results_manifest(
     marker_edgecolor = str(figure_config.get("significant_marker_edgecolor", get_theme_color("background", theme)))
     marker_linewidth = float(figure_config.get("significant_marker_linewidth", 1.2))
     topomap_cmap = str(figure_config.get("topomap_cmap", "RdBu_r"))
+    top_title_pad = float(figure_config.get("topomap_title_pad", 6.0))
+    bottom_title_pad = float(figure_config.get("bottom_topomap_title_pad", 0.0))
     last_image = None
 
     for index, selected_time_s in enumerate(self_topomap_times_s):
@@ -153,6 +155,7 @@ def build_lmeeeg_main_results_manifest(
             marker_facecolor=marker_facecolor,
             marker_edgecolor=marker_edgecolor,
             marker_linewidth=marker_linewidth,
+            title_pad=top_title_pad,
         )
         _add_time_link(
             figure=figure,
@@ -182,6 +185,7 @@ def build_lmeeeg_main_results_manifest(
             marker_facecolor=marker_facecolor,
             marker_edgecolor=marker_edgecolor,
             marker_linewidth=marker_linewidth,
+            title_pad=bottom_title_pad,
         )
         _add_time_link(
             figure=figure,
@@ -390,6 +394,7 @@ def _draw_topomap_with_significant_markers(
     marker_facecolor: str,
     marker_edgecolor: str,
     marker_linewidth: float,
+    title_pad: float,
 ):
     image, _ = mne.viz.plot_topomap(
         values,
@@ -415,7 +420,7 @@ def _draw_topomap_with_significant_markers(
             linewidths=marker_linewidth,
             zorder=10,
         )
-    axis.set_title(title, fontsize=11)
+    axis.set_title(title, fontsize=11, pad=title_pad)
     return image
 
 
