@@ -745,6 +745,7 @@ def test_write_inference_outputs_writes_cluster_pvalues_csv(tmp_path: Path) -> N
         predictor_name="speech_rate",
         effect_name="speech_rate",
         inference=inference,
+        effect_t_map=np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=float),
         channel_names=["Fz", "Cz"],
         times=np.asarray([0.0, 0.1, 0.2], dtype=float),
     )
@@ -752,6 +753,13 @@ def test_write_inference_outputs_writes_cluster_pvalues_csv(tmp_path: Path) -> N
     csv_path = Path(summary["p_values_csv"])
     csv_df = pd.read_csv(csv_path)
 
+    assert summary["observed_statistic_kind"] == "t_value"
+    assert Path(summary["permutation_observed_statistic"]).exists()
+    np.testing.assert_array_equal(
+        np.load(summary["observed_statistic"]),
+        np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=float),
+    )
+    np.testing.assert_array_equal(np.load(summary["permutation_observed_statistic"]), inference.observed_statistic)
     assert list(csv_df.columns) == ["p_values", "cluster_size", "duration", "spatial_extent"]
     assert csv_df.to_dict(orient="records") == [
         {"p_values": 0.02, "cluster_size": 2, "duration": 0.2, "spatial_extent": 1},
@@ -779,6 +787,7 @@ def test_write_inference_outputs_writes_tfce_pvalues_csv_sorted_by_pvalue(tmp_pa
         predictor_name="speech_rate",
         effect_name="speech_rate",
         inference=inference,
+        effect_t_map=np.asarray([[10.0, 20.0], [30.0, 40.0]], dtype=float),
         channel_names=["Fz", "Cz"],
         times=np.asarray([0.0, 0.1], dtype=float),
     )
@@ -786,6 +795,12 @@ def test_write_inference_outputs_writes_tfce_pvalues_csv_sorted_by_pvalue(tmp_pa
     csv_path = Path(summary["p_values_csv"])
     csv_df = pd.read_csv(csv_path)
 
+    assert summary["observed_statistic_kind"] == "t_value"
+    assert summary["permutation_observed_statistic_kind"] == "tfce_observed_statistic"
+    np.testing.assert_array_equal(
+        np.load(summary["observed_statistic"]),
+        np.asarray([[10.0, 20.0], [30.0, 40.0]], dtype=float),
+    )
     assert list(csv_df.columns) == ["p_values", "channel", "time"]
     assert csv_df.to_dict(orient="records") == [
         {"p_values": 0.01, "channel": "Cz", "time": 0.0},

@@ -112,7 +112,7 @@ viz:
       significance_threshold: 0.05
       plotting_tmin_s: -1.0
       plotting_tmax_s: 0.5
-      robust_percentile: 97.5
+      robust_percentile: 99.0
       topomap_cmap: "RdBu_r"
       colorbar_label: "Observed t value"
       models:

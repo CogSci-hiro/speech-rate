@@ -191,6 +191,7 @@ def build_lmeeeg_inference_manifest(
         channel_names_path = fit_model_dir / "channel_names.json"
         observed_path = Path(str(summary["observed_statistic"]))
         corrected_p_path = Path(str(summary["corrected_p_values"]))
+        observed_label = _format_statistic_label(summary.get("observed_statistic_kind"))
         if not all(path.exists() for path in (times_path, channel_names_path, observed_path, corrected_p_path)):
             continue
 
@@ -208,7 +209,7 @@ def build_lmeeeg_inference_manifest(
             times=times,
             channel_names=channel_names,
             output_stem=observed_stem,
-            title=f"lmeEEG observed statistic | {model_name} | {effect_name}",
+            title=f"lmeEEG {observed_label} | {model_name} | {effect_name}",
             formats=formats,
             dpi=dpi,
             line_width=line_width,
@@ -289,6 +290,7 @@ def build_lmeeeg_qc_manifest_from_stats(
 
         observed_path = Path(str(summary["observed_statistic"]))
         corrected_p_path = Path(str(summary["corrected_p_values"]))
+        observed_label = _format_statistic_label(summary.get("observed_statistic_kind"))
         if not observed_path.exists() or not corrected_p_path.exists():
             continue
 
@@ -308,7 +310,7 @@ def build_lmeeeg_qc_manifest_from_stats(
             times=times,
             channel_names=channel_names,
             output_stem=output_stem,
-            title=f"lmeEEG observed statistic | {model_name} | {effect_name}",
+            title=f"lmeEEG {observed_label} | {model_name} | {effect_name}",
             formats=formats,
             dpi=dpi,
             line_width=line_width,
@@ -334,3 +336,10 @@ def build_lmeeeg_qc_manifest_from_stats(
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
+
+
+def _format_statistic_label(statistic_kind: object) -> str:
+    value = str(statistic_kind or "observed_statistic").strip().lower()
+    if value == "t_value":
+        return "t value"
+    return value.replace("_", " ")

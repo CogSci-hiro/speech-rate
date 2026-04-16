@@ -171,6 +171,7 @@ def _run_one_analysis(
             threshold=threshold,
             adjacency=adjacency,
         )
+        effect_t_map = _extract_effect_t_map(fit_result, effect_name=effect_name)
         outputs.append(
             _write_inference_outputs(
                 config,
@@ -180,6 +181,7 @@ def _run_one_analysis(
                 predictor_name=predictor_name,
                 effect_name=effect_name,
                 inference=inference,
+                effect_t_map=effect_t_map,
                 channel_names=trial_data.channel_names,
                 times=trial_data.times,
             )
@@ -298,6 +300,13 @@ def _resolve_preprocessing_montage_name(config: Mapping[str, Any]) -> str:
     return str(montage_cfg or "standard_1020")
 
 
+def _extract_effect_t_map(fit_result, *, effect_name: str) -> np.ndarray:
+    t_value_maps = getattr(fit_result, "ols_t_values", None)
+    if not isinstance(t_value_maps, Mapping) or effect_name not in t_value_maps:
+        raise ValueError(f"Raw t-value map for lmeEEG effect `{effect_name}` is unavailable.")
+    return np.asarray(t_value_maps[effect_name], dtype=float)
+
+
 def _write_inference_outputs(
     config: Mapping[str, Any],
     *,
@@ -307,6 +316,7 @@ def _write_inference_outputs(
     predictor_name: str,
     effect_name: str,
     inference,
+    effect_t_map: np.ndarray,
     channel_names: list[str],
     times: np.ndarray,
 ) -> dict[str, Any]:
@@ -318,14 +328,30 @@ def _write_inference_outputs(
     else:
         effect_dir = out_dir / "stats" / str(config_section) / str(model_name) / _safe_token(effect_name)
     observed_path = effect_dir / "observed_statistic.npy"
+    permutation_observed_path = effect_dir / "permutation_observed_statistic.npy"
     corrected_p_path = effect_dir / "corrected_p_values.npy"
     null_path = effect_dir / "null_distribution.npy"
     cluster_p_path = effect_dir / "cluster_p_values.npy"
     p_values_csv_path = effect_dir / "p_values.csv"
     metadata_path = effect_dir / "summary.json"
 
+    observed_map = np.asarray(effect_t_map, dtype=float)
+    permutation_observed_map = np.asarray(inference.observed_statistic, dtype=float)
+    expected_shape = (len(channel_names), int(times.shape[0]))
+    if observed_map.shape != expected_shape:
+        raise ValueError(
+            "effect_t_map shape does not match provided channel/time axes: "
+            f"{observed_map.shape} != {expected_shape}"
+        )
+    if permutation_observed_map.shape != expected_shape:
+        raise ValueError(
+            "inference.observed_statistic shape does not match provided channel/time axes: "
+            f"{permutation_observed_map.shape} != {expected_shape}"
+        )
+
     ensure_parent_dir(metadata_path)
-    np.save(observed_path, np.asarray(inference.observed_statistic, dtype=float))
+    np.save(observed_path, observed_map)
+    np.save(permutation_observed_path, permutation_observed_map)
     np.save(corrected_p_path, np.asarray(inference.corrected_p_values, dtype=float))
     np.save(null_path, np.asarray(inference.null_distribution, dtype=float))
     np.save(cluster_p_path, np.asarray([] if inference.cluster_p_values is None else inference.cluster_p_values, dtype=float))
@@ -343,11 +369,16 @@ def _write_inference_outputs(
         "effect": effect_name,
         "correction": str(inference.correction),
         "backend_metadata": dict(inference.backend_metadata),
-        "observed_shape": list(np.asarray(inference.observed_statistic).shape),
+        "observed_shape": list(observed_map.shape),
         "corrected_p_shape": list(np.asarray(inference.corrected_p_values).shape),
         "n_significant_p_lt_0_05": int(np.count_nonzero(significant_mask)),
         "min_corrected_p": float(np.nanmin(np.asarray(inference.corrected_p_values, dtype=float))),
         "observed_statistic": str(observed_path),
+        "observed_statistic_kind": "t_value",
+        "permutation_observed_statistic": str(permutation_observed_path),
+        "permutation_observed_statistic_kind": str(
+            dict(inference.backend_metadata).get("statistic", f"{str(inference.correction)}_observed_statistic")
+        ),
         "corrected_p_values": str(corrected_p_path),
         "null_distribution": str(null_path),
         "cluster_p_values": str(cluster_p_path),
