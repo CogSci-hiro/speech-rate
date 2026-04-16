@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "speech-rate mass-univariate config",
   "type": "object",
-  "required": ["paths", "dataset", "preprocessing", "epochs", "glm", "fooof", "lmeeeg"],
+  "required": ["paths", "dataset", "preprocessing", "epochs", "glm", "lmeeeg"],
   "properties": {
     "paths": {
       "type": "object",
@@ -12,7 +12,6 @@
         "bids_dir": {"type": "string", "minLength": 1},
         "ica_dir": {"type": "string", "minLength": 1},
         "annotations_dir": {"type": "string", "minLength": 1},
-        "questionnaire_dir": {"type": "string", "minLength": 1},
         "logs_dir": {"type": "string", "minLength": 1}
       },
       "additionalProperties": true
@@ -31,25 +30,16 @@
           }
         },
         "missing_runs": {"type": "array"},
-        "exclude": {"type": "object"},
-        "questionnaires": {
-          "type": "object",
-          "properties": {
-            "likeability_filename": {"type": "string", "minLength": 1},
-            "personality_filename": {"type": "string", "minLength": 1}
-          },
-          "additionalProperties": true
-        }
+        "exclude": {"type": "object"}
       },
       "additionalProperties": true
     },
     "preprocessing": {"type": "object"},
     "epochs": {"type": "object"},
     "glm": {"type": "object"},
-    "fooof": {"type": "object"},
     "lmeeeg": {"type": "object"},
-    "lmeeeg_induced": {"type": "object"},
     "lmeeeg_variance_partition": {"type": "object"},
+    "similarity": {"type": "object"},
     "debug": {
       "type": "object",
       "properties": {

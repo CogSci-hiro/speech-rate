@@ -24,11 +24,9 @@ MODULAR_COMPUTE_FILES = {
     "epochs": "epochs.yaml",
     "margin_epochs": "margin_epochs.yaml",
     "glm": "glm.yaml",
-    "fooof": "fooof.yaml",
     "lmeeeg": "lmeeeg.yaml",
-    "lmeeeg_induced": "lmeeeg_induced.yaml",
-    "lmeeeg_fooof": "lmeeeg_fooof.yaml",
     "lmeeeg_variance_partition": "lmeeeg.yaml",
+    "similarity": "similarity.yaml",
 }
 
 
@@ -120,11 +118,9 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
         "epochs",
         "margin_epochs",
         "glm",
-        "fooof",
         "lmeeeg",
-        "lmeeeg_induced",
-        "lmeeeg_fooof",
         "lmeeeg_variance_partition",
+        "similarity",
     ):
         section_value = resolved.setdefault(section_name, {})
         if not isinstance(section_value, dict):

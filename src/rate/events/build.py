@@ -11,13 +11,6 @@ import pandas as pd
 from rate.events.features import SUPPORTED_MATCHING_TIME_LOCKS, SUPPORTED_TIME_METHODS, add_event_rate_features
 from rate.events.io import EventsTableError, load_ipu_annotations
 from rate.preprocessing.events import find_run_anchor_event_from_file
-from rate.events.questionnaires import (
-    QUESTIONNAIRE_OUTPUT_COLUMNS,
-    QuestionnaireError,
-    build_subject_questionnaire_table,
-    log_questionnaire_coverage,
-    summarize_questionnaire_coverage,
-)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,8 +46,7 @@ BASE_EVENTS_COLUMNS = [
     "other_ipu_duration",
     "annotations_path",
 ]
-QUESTIONNAIRE_COLUMNS = [column for column in QUESTIONNAIRE_OUTPUT_COLUMNS if column != "subject_id"]
-EVENTS_OUTPUT_COLUMNS = [*BASE_EVENTS_COLUMNS, *QUESTIONNAIRE_COLUMNS]
+EVENTS_OUTPUT_COLUMNS = list(BASE_EVENTS_COLUMNS)
 
 
 def _extract_events_config(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -214,50 +206,17 @@ def _assign_deterministic_event_ids(events_df: pd.DataFrame) -> pd.DataFrame:
     return sorted_df
 
 
-def _merge_questionnaires(events_df: pd.DataFrame, config: Mapping[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
-    try:
-        questionnaire_df = build_subject_questionnaire_table(config)
-    except QuestionnaireError as exc:
-        raise EventsTableError(str(exc)) from exc
-
-    merged = events_df.merge(
-        questionnaire_df,
-        how="left",
-        on="subject_id",
-        validate="many_to_one",
-    )
-    if len(merged) != len(events_df):
-        raise EventsTableError("Questionnaire merge changed the number of event rows.")
-
-    coverage_summary = summarize_questionnaire_coverage(
-        events_subject_ids=set(events_df["subject_id"].dropna().astype(str)),
-        questionnaire_subject_ids=set(questionnaire_df["subject_id"].dropna().astype(str)),
-    )
-    log_questionnaire_coverage(coverage_summary)
-    missing_value_counts = {
-        column: int(merged[column].isna().sum())
-        for column in QUESTIONNAIRE_COLUMNS
-    }
-    summary = {
-        "event_row_count": int(len(merged)),
-        "questionnaire_columns": QUESTIONNAIRE_COLUMNS,
-        "missing_value_counts": missing_value_counts,
-        **coverage_summary,
-    }
-    return merged, summary
-
-
 def build_events_table(config: Mapping[str, Any], dataset_index_df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Build canonical events table from dataset index rows, then append questionnaires."""
+    """Build canonical events table from dataset index rows."""
     events_cfg = _extract_events_config(config)
     _validate_matching_config(events_cfg)
     if dataset_index_df.empty:
-        return pd.DataFrame(columns=EVENTS_OUTPUT_COLUMNS), {"event_row_count": 0, "questionnaire_columns": QUESTIONNAIRE_COLUMNS}
+        return pd.DataFrame(columns=EVENTS_OUTPUT_COLUMNS), {"event_row_count": 0}
 
     rows = dataset_index_df.copy()
     rows = rows[rows["status"] == "ok"].reset_index(drop=True)
     if rows.empty:
-        return pd.DataFrame(columns=EVENTS_OUTPUT_COLUMNS), {"event_row_count": 0, "questionnaire_columns": QUESTIONNAIRE_COLUMNS}
+        return pd.DataFrame(columns=EVENTS_OUTPUT_COLUMNS), {"event_row_count": 0}
 
     built_frames: list[pd.DataFrame] = []
     for dataset_row in rows.to_dict(orient="records"):
@@ -273,5 +232,5 @@ def build_events_table(config: Mapping[str, Any], dataset_index_df: pd.DataFrame
         base_events_df = _assign_deterministic_event_ids(base_events_df)
         base_events_df = base_events_df[BASE_EVENTS_COLUMNS]
 
-    merged_df, summary = _merge_questionnaires(base_events_df, config)
-    return merged_df[EVENTS_OUTPUT_COLUMNS], summary
+    summary = {"event_row_count": int(len(base_events_df))}
+    return base_events_df[EVENTS_OUTPUT_COLUMNS], summary

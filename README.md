@@ -7,7 +7,7 @@ The subject-level `lmeEEG` fitting stage is backed by the external [`lmeeeg`](ht
 ## Active Workflow
 
 - Main config entry point: `config/config.yaml`
-- Modular analysis configs: `config/dataset.yaml`, `config/preprocessing.yaml`, `config/epochs.yaml`, `config/glm.yaml`, `config/fooof.yaml`, `config/lmeeeg.yaml`, `config/stats.yaml`, `config/viz.yaml`
+- Modular analysis configs: `config/dataset.yaml`, `config/preprocessing.yaml`, `config/epochs.yaml`, `config/glm.yaml`, `config/lmeeeg.yaml`, `config/stats.yaml`, `config/viz.yaml`
 - CLI entry point: `src/rate/cli/main.py`
 - Snakemake entry point: `workflow/Snakefile`
 
@@ -16,7 +16,6 @@ The current scaffold is intentionally light. Commands and rules create valid pla
 ## Analysis Directions
 
 - ERP/fMRI-style mass-univariate regression on eligible epochs
-- Sliding-window FOOOF feature extraction followed by subject-level regression
 - Optional `lmeEEG` trial preparation and group-level inference
 
 ## Legacy TRF Code

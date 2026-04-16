@@ -2,7 +2,7 @@ decoding:
   enabled: true
   analysis_name: decoding_temporal_generalisation
   output_dir: decoding
-  sfreq: 32
+  sfreq: 4
   random_state: 42
 
   input:
@@ -47,7 +47,7 @@ decoding:
       - run
 
   cv:
-    n_splits: 10
+    n_splits: 5
     group_column: subject_id
     shuffle: true
     random_state: 42
@@ -76,13 +76,15 @@ decoding:
     random_state: 42
     permutation_scheme: within_subject
     n_jobs: 1
+    permutation_alpha_mode: retune_per_permutation # retune_per_permutationfixed_alpha
+    fixed_alpha_source: median_observed_outer_folds
 
     tfce:
       enabled: true
       h_power: 2.0
       e_power: 0.5
       h_start: 0.0
-      dh: 0.1
+      dh: 0.001
       tail: positive
 
   models:

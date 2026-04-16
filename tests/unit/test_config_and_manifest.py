@@ -25,8 +25,8 @@ def _minimal_config(out_dir: Path) -> dict:
         "preprocessing": {},
         "epochs": {},
         "glm": {},
-        "fooof": {},
         "lmeeeg": {},
+        "similarity": {},
     }
 
 
@@ -58,7 +58,6 @@ def test_schema_rejects_missing_required_key(tmp_path: Path) -> None:
         "preprocessing": {},
         "epochs": {},
         "glm": {},
-        "fooof": {},
     }
     _write_yaml(cfg_path, payload)
 
@@ -92,16 +91,16 @@ def test_modular_compute_files_attach_mass_univariate_sections(tmp_path: Path) -
     _write_yaml(tmp_path / "epochs.yaml", {"epochs": {"metadata_source": "Epochs.metadata"}})
     _write_yaml(tmp_path / "margin_epochs.yaml", {"margin_epochs": {"tmin_s": -0.6, "tmax_s": 0.7}})
     _write_yaml(tmp_path / "glm.yaml", {"glm": {"regressors": ["speech_rate"]}})
-    _write_yaml(tmp_path / "fooof.yaml", {"fooof": {"window_s": 1.0}})
     _write_yaml(tmp_path / "lmeeeg.yaml", {"lmeeeg": {"enabled": False}})
-    _write_yaml(tmp_path / "lmeeeg_induced.yaml", {"lmeeeg_induced": {"targets": ["theta", "alpha"]}})
+    _write_yaml(tmp_path / "similarity.yaml", {"similarity": {"enabled": True, "analysis_name": "other_vs_self"}})
 
     resolved = load_and_validate_config(cfg_path, schema_path=Path("config/schema.json"))
 
     assert resolved["preprocessing"]["downsample_hz"] == pytest.approx(128.0)
     assert resolved["glm"]["regressors"] == ["speech_rate"]
     assert resolved["margin_epochs"]["tmin_s"] == pytest.approx(-0.6)
-    assert resolved["lmeeeg_induced"]["targets"] == ["theta", "alpha"]
+    assert resolved["lmeeeg"]["enabled"] is False
+    assert resolved["similarity"]["analysis_name"] == "other_vs_self"
 
 
 def test_manifest_written(tmp_path: Path) -> None:

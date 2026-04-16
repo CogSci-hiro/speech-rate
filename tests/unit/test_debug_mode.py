@@ -15,12 +15,11 @@ def _write_yaml(path: Path, payload: dict) -> None:
 
 def _minimal_config(out_dir: Path) -> dict:
     return {
-        "paths": {"out_dir": str(out_dir)},
+        "paths": {"out_dir": str(out_dir), "ica_dir": str(out_dir / "ica")},
         "dataset": {},
         "preprocessing": {},
         "epochs": {},
         "glm": {},
-        "fooof": {},
         "lmeeeg": {},
     }
 

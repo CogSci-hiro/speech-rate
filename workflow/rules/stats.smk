@@ -6,7 +6,7 @@ R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT = f"{R_ANALYSIS_DIR}/preprocess_summary.jso
 R_ANALYSIS_RESULTS_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_results.csv"
 R_ANALYSIS_STAGE = f"{OUT_DIR}/_stage/r_analysis_all.done.json"
 LMEEEG_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_group_stats.json"
-LMEEEG_INDUCED_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_induced_group_stats.json"
+SIMILARITY_STATS_OUTPUT = str(build_similarity_output_paths(RESOLVED_CONFIG).summary_output_path)
 LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_variance_partition_group_stats.json"
 LMEEEG_VARIANCE_PARTITION_GROUP_DIR = str(build_variance_partition_group_output_paths(RESOLVED_CONFIG).group_dir)
 
@@ -106,21 +106,17 @@ rule lmeeeg_group_stats:
         "--trial-regressors-csv {input.trial_regressors} --output {output}"
 
 
-rule lmeeeg_induced_group_stats:
+rule lmeeeg_similarity:
     input:
-        lmeeeg=LMEEEG_INDUCED_STAGE,
-        stats_config="config/stats.yaml",
-        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
-        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
+        lmeeeg=LMEEEG_STAGE,
+        config_path="config/config.yaml",
+        schema_path="config/schema.json",
+        similarity_config="config/similarity.yaml",
     output:
-        LMEEEG_INDUCED_STATS_OUTPUT,
+        summary=SIMILARITY_STATS_OUTPUT,
     shell:
-        "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
-        "--config config/config.yaml --schema config/schema.json "
-        "--config-section lmeeeg_induced "
-        "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
-        "--trial-regressors-csv {input.trial_regressors} --output {output}"
-
+        "PYTHONPATH=src python -m rate.cli.main lmeeeg-similarity "
+        "--config {input.config_path} --schema {input.schema_path}"
 
 rule lmeeeg_variance_partition_group_stats:
     input:

@@ -373,6 +373,7 @@ def _run_temporal_generalisation(
     show_progress: bool,
     save_alpha_scores: bool = False,
     alpha_scores_output_path=None,
+    fixed_alpha: float | None = None,
 ) -> TemporalGeneralizationResult:
     estimator_name = str(estimator_config.get("name", "ridge"))
     if estimator_name != "ridge":
@@ -412,15 +413,21 @@ def _run_temporal_generalisation(
         for fold_idx, (train_indices, test_indices) in enumerate(fold_indices):
             y_train = train_targets[train_indices]
             y_test = test_targets[test_indices]
-            best_alpha = _select_outer_fold_alpha(
-                eeg_data[train_indices],
-                y_train,
-                outer_train_groups=np.asarray(groups)[train_indices],
-                estimator_config=estimator_config,
-                cv_config=cv_config,
-                nested_cv_config=nested_cv_config,
-                scoring_config=scoring_config,
-            )
+            if fixed_alpha is not None:
+                # Permutation inference may optionally condition on a fixed observed-run alpha
+                # to avoid re-running inner CV in every permutation. The observed decoding run
+                # still uses nested CV and should keep `fixed_alpha=None`.
+                best_alpha = float(fixed_alpha)
+            else:
+                best_alpha = _select_outer_fold_alpha(
+                    eeg_data[train_indices],
+                    y_train,
+                    outer_train_groups=np.asarray(groups)[train_indices],
+                    estimator_config=estimator_config,
+                    cv_config=cv_config,
+                    nested_cv_config=nested_cv_config,
+                    scoring_config=scoring_config,
+                )
             estimator = GeneralizingEstimator(
                 _build_ridge_estimator(float(best_alpha)),
                 scoring=scorer,

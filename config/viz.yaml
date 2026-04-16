@@ -1,7 +1,22 @@
 viz:
   formats: ["png", "pdf"]
   dpi: 300
-  style: "default"
+  theme:
+    name: "paper"
+    colors:
+      self: "#8C2D2D"
+      other: "#1F4E79"
+      shared: "#2F6B3B"
+      neutral: "#4B5563"
+      grid: "#D7DCE2"
+      spine: "#9CA3AF"
+      reference: "#6B7280"
+      background: "#FFFFFF"
+    rcparams:
+      font.family: "serif"
+      font.serif: ["STIX Two Text", "STIXGeneral", "DejaVu Serif"]
+      mathtext.fontset: "stix"
+      axes.titleweight: "semibold"
   qc:
     enabled: true
   figures:
@@ -11,6 +26,7 @@ viz:
         formats: ["png"]
         min_trials_per_subject: 5
         histogram_bins: 30
+        histogram_color: "#8C2D2D"
         point_size: 70
         dot_center_y: 0.0
         dot_spread_y: 0.10
@@ -21,20 +37,90 @@ viz:
       subject_slopes:
         enabled: true
         formats: ["png"]
-        point_color: "0.25"
-        line_color: "0.35"
+        point_color: "#1F4E79"
+        line_color: "#1F4E79"
         within_dyad_spacing: 0.8
         between_dyad_spacing: 1.8
-      personality:
-        enabled: true
-        formats: ["png"]
-        openness_color: "#3B82F6"
-        extraversion_color: "#EF4444"
     decoding:
-      diag_ymin: -0.1
-      diag_ymax: 0.5
+      diag_auto: true
+      diag_pad_fraction: 0.02
+      diag_min_half_range: 0.015
+      matrix_limit_percentile: 98.5
+      contour_linewidth: 1.5
       p_threshold: 0.05
+    decoding_results:
+      p_threshold: 0.05
+    variance_partition:
+      use_proportions: false
+      epsilon: 1.0e-12
+      figure_width: 14
+      figure_height: 8
+      rois:
+        anterior:
+          - "Fp1"
+          - "Fp2"
+          - "AF3"
+          - "AF4"
+          - "AF7"
+          - "AF8"
+          - "Fz"
+          - "F1"
+          - "F2"
+          - "F3"
+          - "F4"
+          - "F5"
+          - "F6"
+          - "F7"
+          - "F8"
+          - "FCz"
+          - "FC1"
+          - "FC2"
+          - "FC3"
+          - "FC4"
+          - "FC5"
+          - "FC6"
+        posterior:
+          - "CPz"
+          - "CP1"
+          - "CP2"
+          - "CP3"
+          - "CP4"
+          - "CP5"
+          - "CP6"
+          - "Pz"
+          - "P1"
+          - "P2"
+          - "P3"
+          - "P4"
+          - "P5"
+          - "P6"
+          - "P7"
+          - "P8"
+          - "POz"
+          - "PO3"
+          - "PO4"
+          - "PO7"
+          - "PO8"
+          - "Oz"
+          - "O1"
+          - "O2"
+    lmeeeg_main_results:
+      significance_threshold: 0.05
+      plotting_tmin_s: -1.0
+      plotting_tmax_s: 0.5
+      robust_percentile: 97.5
+      topomap_cmap: "RdBu_r"
+      colorbar_label: "Observed t value"
+      models:
+        self:
+          label: "Unique self"
+          model_name: "self_rate_effect"
+          effect_name: "self_rate"
+          topomap_times_s: [-0.8, -0.4, 0.0]
+        other:
+          label: "Unique other"
+          model_name: "other_rate_effect"
+          effect_name: "other_rate"
+          topomap_times_s: [-0.7, -0.5]
     glm:
       contrasts: ["speech_rate"]
-    fooof:
-      features: ["offset", "exponent", "theta_power", "alpha_power"]

@@ -15,9 +15,9 @@ import yaml
 from lmeeeg import permute_fixed_effect
 from rate.cli.commands._workflow_common import add_common_config_arguments
 from rate.design import get_predictor_column_indices, list_model_names
-from rate.lmeeeg.induced import resolve_target_names, section_supports_targets
 from rate.lmeeeg.mass_model import fit_lmeeeg_backend_result
 from rate.lmeeeg.pooling import load_pooled_lmeeeg_trial_data, select_lmeeeg_rows
+from rate.lmeeeg.targets import resolve_target_names, section_supports_targets
 from rate.paths import ensure_parent_dir, resolve_out_dir
 
 LOGGER = logging.getLogger(__name__)

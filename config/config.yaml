@@ -12,4 +12,3 @@ paths:
   bids_dir: "/Users/hiro/Datasets/hyperscanning-bids"
   ica_dir: "/Users/hiro/Datasets/working/hyperscanning/precomputed_ica"
   annotations_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/annotations"
-  questionnaire_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/questionnaire"

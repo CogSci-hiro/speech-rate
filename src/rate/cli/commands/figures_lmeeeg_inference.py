@@ -11,8 +11,8 @@ from typing import Any, Mapping
 import yaml
 
 from rate.cli.commands._workflow_common import add_common_config_arguments
-from rate.lmeeeg.induced import resolve_target_names, section_supports_targets
 from rate.paths import resolve_out_dir
+from rate.lmeeeg.targets import resolve_target_names, section_supports_targets
 from rate.viz.lmeeeg import build_lmeeeg_inference_manifest
 
 LOGGER = logging.getLogger(__name__)

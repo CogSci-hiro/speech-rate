@@ -12,17 +12,12 @@ def test_build_arg_parser_registers_mass_univariate_commands() -> None:
     assert "epoch-subject" in commands
     assert "glm-subject" in commands
     assert "glm-group-stats" in commands
-    assert "fooof-epochs-subject" in commands
-    assert "fooof-mass-subject" in commands
-    assert "fooof-mass-group-stats" in commands
     assert "lmeeeg-subject" in commands
     assert "lmeeeg-group-stats" in commands
+    assert "lmeeeg-similarity" in commands
     assert "figures-behavioural" in commands
     assert "figures-decoding" in commands
     assert "figures-glm" in commands
     assert "figures-lmeeeg" in commands
-    assert "figures-lmeeeg-fooof" in commands
     assert "figures-lmeeeg-inference" in commands
-    assert "figures-lmeeeg-fooof-inference" in commands
     assert "model-weights-glm" in commands
-    assert "figures-fooof" in commands

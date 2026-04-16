@@ -14,7 +14,6 @@ from rate.design import (
     load_model_spec,
     ModelSpecError,
 )
-from rate.legacy.fooof_mass.glm import prepare_fooof_mass_design
 from rate.legacy.glm.fit import prepare_glm_design
 from rate.lmeeeg.trial_data import prepare_lmeeeg_design
 
@@ -233,23 +232,11 @@ def test_downstream_adapters_use_shared_design_layer() -> None:
     )
     config = {
         "glm": {"formulas": {"subject_level": "signal ~ speech_rate"}, "regressors": ["speech_rate"]},
-        "fooof": {
-            "models": {
-                "theta_cf_other_rate": {
-                    "formula": "theta_cf ~ other_rate",
-                    "test_predictors": ["other_rate"],
-                }
-            }
-        },
         "lmeeeg": {"fixed_effects": ["speech_rate"]},
     }
 
     glm_result = prepare_glm_design(metadata, config, model_name="subject_level")
     assert glm_result.column_names == ["Intercept", "speech_rate"]
-
-    fooof_metadata = pd.DataFrame({"theta_cf": [5.0, 6.0], "other_rate": [1.0, 2.0]})
-    fooof_result = prepare_fooof_mass_design(fooof_metadata, config, model_name="theta_cf_other_rate")
-    assert fooof_result.column_names == ["Intercept", "other_rate"]
 
     lmeeeg_result = prepare_lmeeeg_design(metadata, config)
     assert lmeeeg_result.column_names == ["Intercept", "speech_rate"]

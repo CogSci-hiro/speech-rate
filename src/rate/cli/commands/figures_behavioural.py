@@ -36,6 +36,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     viz_cfg = _load_viz_config(Path(args.viz_config))
     viz_section = dict(viz_cfg.get("viz") or {})
     behavioural_viz_section = dict(((viz_section.get("figures") or {}).get("behavioural")) or {})
+    theme_section = dict(viz_section.get("theme") or {})
 
     manifest = build_behavioural_manifest(
         out_dir=out_dir,
@@ -43,6 +44,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         subject_slopes_path=slopes_path,
         manifest_path=output_path,
         figure_config=behavioural_viz_section,
+        theme_config=theme_section,
         formats=tuple(viz_section.get("formats", ["png", "pdf"])),
         dpi=int(viz_section.get("dpi", 300)),
     )

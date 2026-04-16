@@ -126,6 +126,8 @@ def load_decoding_config(
     stats_cfg.setdefault("random_state", int(resolved["random_state"]))
     stats_cfg.setdefault("permutation_scheme", "within_subject")
     stats_cfg.setdefault("n_jobs", 1)
+    stats_cfg.setdefault("permutation_alpha_mode", "retune_per_permutation")
+    stats_cfg.setdefault("fixed_alpha_source", "median_observed_outer_folds")
     stats_cfg.setdefault("tfce", {})
     if not isinstance(stats_cfg["tfce"], Mapping):
         raise ConfigValidationError("`decoding.stats.tfce` must be a mapping.")
@@ -139,6 +141,14 @@ def load_decoding_config(
     stats_cfg["tfce"] = tfce_cfg
     if str(stats_cfg["permutation_scheme"]) not in {"within_subject", "within_subject_within_run"}:
         raise ConfigValidationError("`decoding.stats.permutation_scheme` must be `within_subject` or `within_subject_within_run`.")
+    if str(stats_cfg["permutation_alpha_mode"]) not in {"retune_per_permutation", "fixed_alpha"}:
+        raise ConfigValidationError(
+            "`decoding.stats.permutation_alpha_mode` must be `retune_per_permutation` or `fixed_alpha`."
+        )
+    if str(stats_cfg["fixed_alpha_source"]) not in {"median_observed_outer_folds"}:
+        raise ConfigValidationError(
+            "`decoding.stats.fixed_alpha_source` must be `median_observed_outer_folds`."
+        )
     if str(tfce_cfg["tail"]) != "positive":
         raise ConfigValidationError("Only `decoding.stats.tfce.tail: positive` is currently supported.")
     resolved["stats"] = stats_cfg

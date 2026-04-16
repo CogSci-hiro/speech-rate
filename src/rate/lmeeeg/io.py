@@ -12,9 +12,8 @@ import numpy as np
 import pandas as pd
 
 from rate.epochs.io import build_epoch_output_paths, read_epochs
-from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
-from rate.lmeeeg.induced import section_supports_targets
 from rate.lmeeeg.mass_model import LMEEEGResult
+from rate.lmeeeg.targets import section_supports_targets
 from rate.paths import ensure_parent_dir, resolve_out_dir
 from rate.util import write_parquet_dataframe
 
@@ -94,20 +93,7 @@ def build_lmeeeg_output_paths(
 ) -> LMEEEGRunPaths:
     """Build canonical input and output paths for one lmeEEG run."""
     out_dir = resolve_out_dir(config)
-    if config_section == "lmeeeg_fooof":
-        if target_name is None:
-            raise ValueError("`target_name` is required when building target-specific lmeEEG paths.")
-        epoch_paths = build_fooof_epoch_feature_paths(config, row, feature_name=target_name)
-        model_dir = (
-            out_dir
-            / _analysis_root_name(config_section)
-            / _sanitize_model_name(target_name)
-            / str(row["subject_id"])
-            / f"task-{row['task']}"
-            / f"run-{row['run']}"
-            / _sanitize_model_name(model_name)
-        )
-    elif section_supports_targets(config, config_section=config_section):
+    if section_supports_targets(config, config_section=config_section):
         if target_name is None:
             raise ValueError("`target_name` is required when building target-specific lmeEEG paths.")
         epoch_paths = build_epoch_output_paths(config, row)
@@ -159,11 +145,7 @@ def build_lmeeeg_model_output_paths(
 ) -> LMEEEGModelPaths:
     """Build canonical output paths for one pooled lmeEEG model fit."""
     out_dir = resolve_out_dir(config)
-    if config_section == "lmeeeg_fooof":
-        if target_name is None:
-            raise ValueError("`target_name` is required when building target-specific pooled lmeEEG paths.")
-        model_dir = out_dir / _analysis_root_name(config_section) / _sanitize_model_name(target_name) / _sanitize_model_name(model_name)
-    elif section_supports_targets(config, config_section=config_section):
+    if section_supports_targets(config, config_section=config_section):
         if target_name is None:
             raise ValueError("`target_name` is required when building target-specific pooled lmeEEG paths.")
         model_dir = out_dir / _analysis_root_name(config_section) / _sanitize_model_name(target_name) / _sanitize_model_name(model_name)

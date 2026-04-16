@@ -13,11 +13,6 @@ suppressPackageStartupMessages({
 # ==============================================================================
 
 DEFAULT_CONTROL_CANDIDATES <- c("latency", "duration_s", "time_within_run", "run")
-DEFAULT_BIG_FIVE_CANDIDATES <- c(
-  "openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism",
-  "big5_openness", "big5_conscientiousness", "big5_extraversion", "big5_agreeableness", "big5_neuroticism",
-  "bfi_openness", "bfi_conscientiousness", "bfi_extraversion", "bfi_agreeableness", "bfi_neuroticism"
-)
 
 # ==============================================================================
 # Argument parsing
@@ -55,19 +50,6 @@ get_arg_value <- function(args, name, default = NULL, required = FALSE) {
   }
   default
 }
-
-parse_optional_csv_list <- function(x) {
-  if (is.null(x) || is.na(x) || x == "") {
-    return(character(0))
-  }
-  str_split(x, pattern = ",", simplify = FALSE)[[1]] %>%
-    str_trim() %>%
-    discard(~ .x == "")
-}
-
-# ==============================================================================
-# General helpers
-# ==============================================================================
 
 safe_as_numeric <- function(x) {
   suppressWarnings(as.numeric(x))
@@ -116,26 +98,6 @@ load_preprocessed_data <- function(input_path, preprocess_script_path) {
     cleaned_events = cleaned_events,
     partner_events = partner_events
   )
-}
-
-# ==============================================================================
-# Variable selection
-# ==============================================================================
-
-select_personality_columns <- function(data, requested_personality_columns = character(0)) {
-  if (length(requested_personality_columns) > 0L) {
-    found_columns <- requested_personality_columns[requested_personality_columns %in% names(data)]
-    missing_columns <- setdiff(requested_personality_columns, found_columns)
-    if (length(missing_columns) > 0L) {
-      warning(sprintf(
-        "Requested personality columns not found and will be skipped: %s",
-        paste(missing_columns, collapse = ", ")
-      ))
-    }
-    return(found_columns)
-  }
-
-  unique(DEFAULT_BIG_FIVE_CANDIDATES[DEFAULT_BIG_FIVE_CANDIDATES %in% names(data)])
 }
 
 resolve_dyad_diff_column <- function(data, requested_dyad_diff_col = NULL) {
@@ -380,32 +342,6 @@ run_core_analyses <- function(partner_events) {
   bind_rows(results)
 }
 
-run_personality_analyses <- function(partner_events, personality_columns) {
-  if (length(personality_columns) == 0L) {
-    return(tibble())
-  }
-
-  results <- map_dfr(personality_columns, function(personality_column) {
-    bind_rows(
-      run_single_lmm_analysis(
-        data = partner_events,
-        model_id = sprintf("self_rate_by_%s", personality_column),
-        model_family = "personality_self_rate",
-        outcome_name = "self_rate",
-        predictor_name = personality_column,
-        random_effect_terms = c("(1 | subject_id)", "(1 | dyad_id)"),
-        note = "Big Five main effect on self-rate"
-      )
-      
-    )
-  })
-
-  self_rate_mask <- results$analysis_family == "personality_self_rate"
-  results$fdr_p_value <- NA_real_
-  results$fdr_p_value[self_rate_mask] <- p.adjust(results$lrt_p_value[self_rate_mask], method = "fdr")
-  results
-}
-
 # ==============================================================================
 # Main
 # ==============================================================================
@@ -416,7 +352,6 @@ main <- function() {
   input_path <- get_arg_value(args, "input", required = TRUE)
   preprocess_script_path <- get_arg_value(args, "preprocess_script", required = TRUE)
   output_path <- get_arg_value(args, "output", required = TRUE)
-  personality_cols <- parse_optional_csv_list(get_arg_value(args, "personality_cols", default = NULL))
 
   loaded_data <- load_preprocessed_data(
     input_path = input_path,
@@ -425,19 +360,10 @@ main <- function() {
 
   partner_events <- loaded_data$partner_events
   ensure_columns_exist(partner_events, c("subject_id", "dyad_id", "self_rate", "other_rate", "latency", "run", "time_within_run"))
-  personality_columns <- select_personality_columns(partner_events, requested_personality_columns = personality_cols)
 
   core_results <- run_core_analyses(partner_events = partner_events)
 
-  personality_results <- run_personality_analyses(
-    partner_events = partner_events,
-    personality_columns = personality_columns
-  )
-
-  combined_results <- bind_rows(
-    core_results,
-    personality_results
-  ) %>%
+  combined_results <- core_results %>%
     mutate(
       fdr_p_value = if ("fdr_p_value" %in% names(.)) fdr_p_value else NA_real_
     ) %>%
@@ -446,7 +372,6 @@ main <- function() {
         analysis_family == "null_test" ~ "null",
         analysis_family == "core" ~ "core",
         analysis_family == "dyad_difference" ~ "dyad_diff",
-        str_detect(analysis_family, "^personality") ~ "personality",
         TRUE ~ "other"
       )
     ) %>%

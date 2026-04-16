@@ -26,10 +26,9 @@ rule lmeeeg_all:
         LMEEEG_STATS_OUTPUT
 
 
-rule lmeeeg_induced_all:
+rule similarity_all:
     input:
-        LMEEEG_INDUCED_STAGE,
-        LMEEEG_INDUCED_STATS_OUTPUT
+        SIMILARITY_STATS_OUTPUT
 
 
 rule lmeeeg_variance_partition_all:
@@ -58,10 +57,11 @@ rule r_analysis_all:
 _figures_all_inputs = [
     BEHAVIOURAL_FIGURES_OUTPUT,
     DECODING_FIGURES_OUTPUT,
+    DECODING_RESULTS_FIGURES_OUTPUT,
     LMEEEG_QC_FIGURES_OUTPUT,
     LMEEEG_INFERENCE_FIGURES_OUTPUT,
-    LMEEEG_INDUCED_QC_FIGURES_OUTPUT,
-    LMEEEG_INDUCED_INFERENCE_FIGURES_OUTPUT,
+    LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT,
+    LMEEEG_VARIANCE_PARTITION_FIGURES_OUTPUT,
 ]
 
 
@@ -80,25 +80,28 @@ rule decoding_figures_all:
         DECODING_FIGURES_OUTPUT
 
 
+rule decoding_results_figures_all:
+    input:
+        DECODING_RESULTS_FIGURES_OUTPUT
+
+
+rule lmeeeg_main_results_figures_all:
+    input:
+        LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT
+
+
+rule lmeeeg_variance_partition_figures_all:
+    input:
+        LMEEEG_VARIANCE_PARTITION_FIGURES_OUTPUT
+
 
 rule qc_lmeeeg_plots_all:
     input:
         LMEEEG_QC_FIGURES_OUTPUT
 
-
-rule qc_lmeeeg_induced_plots_all:
-    input:
-        LMEEEG_INDUCED_QC_FIGURES_OUTPUT
-
-
 rule inference_lmeeeg_plots_all:
     input:
         LMEEEG_INFERENCE_FIGURES_OUTPUT
-
-
-rule inference_lmeeeg_induced_plots_all:
-    input:
-        LMEEEG_INDUCED_INFERENCE_FIGURES_OUTPUT
 
 
 rule all:
@@ -108,7 +111,6 @@ rule all:
         EPOCHS_STAGE,
         MARGIN_EPOCHS_STAGE,
         LMEEEG_STATS_OUTPUT,
-        LMEEEG_INDUCED_STATS_OUTPUT,
         R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
         R_ANALYSIS_RESULTS_OUTPUT,
         R_ANALYSIS_STAGE

@@ -1,4 +1,14 @@
-"""Permutation-based TFCE inference for temporal-generalisation matrices."""
+"""Permutation-based TFCE inference for temporal-generalisation matrices.
+
+The default permutation path re-runs nested alpha selection inside each
+permutation. That remains the most principled option because it propagates
+hyperparameter-selection uncertainty into the null distribution.
+
+An optional shortcut is also supported for computationally heavy analyses:
+permutations may condition on a single alpha chosen from the observed decoding
+run. This yields a conditional null for a fixed decoder regularisation, which
+is faster but slightly less conservative than full per-permutation retuning.
+"""
 
 from __future__ import annotations
 
@@ -37,10 +47,11 @@ def run_decoding_model_stats(
         dataset_index=dataset_index,
     )
     output_paths = build_decoding_model_output_paths(config, decoding_config, model_name=model_name)
+    observed_tg_result = None
     if output_paths.scores_output_path.exists():
         observed_matrix = np.load(output_paths.scores_output_path)
     else:
-        observed_matrix = _run_temporal_generalisation(
+        observed_tg_result = _run_temporal_generalisation(
             prepared.eeg_residuals,
             prepared.train_target_residuals,
             prepared.test_target_residuals,
@@ -53,7 +64,22 @@ def run_decoding_model_stats(
             model_name=prepared.model_name,
             show_progress=show_progress,
             save_alpha_scores=False,
-        ).mean_scores
+        )
+        observed_matrix = observed_tg_result.mean_scores
+
+    observed_best_alphas: np.ndarray | None = None
+    if output_paths.best_alphas_output_path.exists():
+        observed_best_alphas = np.asarray(np.load(output_paths.best_alphas_output_path), dtype=float)
+    elif observed_tg_result is not None:
+        observed_best_alphas = np.asarray(observed_tg_result.best_alphas, dtype=float)
+
+    permutation_alpha_mode = str(stats_cfg.get("permutation_alpha_mode", "retune_per_permutation"))
+    fixed_alpha_source = str(stats_cfg.get("fixed_alpha_source", "median_observed_outer_folds"))
+    fixed_permutation_alpha = _resolve_permutation_fixed_alpha(
+        observed_best_alphas,
+        permutation_alpha_mode=permutation_alpha_mode,
+        fixed_alpha_source=fixed_alpha_source,
+    )
     tfce_params = dict(stats_cfg.get("tfce") or {})
 
     observed_tfce = compute_tfce_2d(
@@ -68,6 +94,7 @@ def run_decoding_model_stats(
         prepared,
         decoding_config=decoding_config,
         stats_config=stats_cfg,
+        fixed_alpha=fixed_permutation_alpha,
         show_progress=show_progress,
     )
     p_fwer = _compute_fwer_p_values(observed_tfce, null_max_tfce)
@@ -94,6 +121,9 @@ def run_decoding_model_stats(
         "scoring_metric": str((decoding_config.get("scoring") or {}).get("name", "pearson_r")),
         "permutation_count": int(stats_cfg.get("n_permutations", 1000)),
         "permutation_scheme": str(stats_cfg.get("permutation_scheme", "within_subject")),
+        "permutation_alpha_mode": permutation_alpha_mode,
+        "fixed_alpha_source": fixed_alpha_source if permutation_alpha_mode == "fixed_alpha" else None,
+        "fixed_alpha": float(fixed_permutation_alpha) if fixed_permutation_alpha is not None else None,
         "tfce": {
             "enabled": bool(tfce_params.get("enabled", True)),
             "h_power": float(tfce_params.get("h_power", 2.0)),
@@ -107,6 +137,11 @@ def run_decoding_model_stats(
         "n_subjects": int(prepared.metadata_df[str((decoding_config.get("cv") or {}).get("group_column", "subject_id"))].nunique()),
         "n_splits": int((decoding_config.get("cv") or {}).get("n_splits", 5)),
         "decoder": dict(prepared.summary["estimator"]),
+        "permutation_inference_notes": _permutation_inference_notes(
+            permutation_alpha_mode=permutation_alpha_mode,
+            fixed_alpha_source=fixed_alpha_source,
+            fixed_alpha=fixed_permutation_alpha,
+        ),
         "residualisation_description": {
             "eeg": prepared.summary["eeg_residualisation"],
             "targets": prepared.summary["target_residualisation"],
@@ -156,6 +191,7 @@ def _compute_null_max_tfce(
     *,
     decoding_config: Mapping[str, Any],
     stats_config: Mapping[str, Any],
+    fixed_alpha: float | None,
     show_progress: bool,
 ) -> np.ndarray:
     n_permutations = int(stats_config.get("n_permutations", 1000))
@@ -190,6 +226,7 @@ def _compute_null_max_tfce(
                 model_name=f"{prepared.model_name} perm {permutation_idx + 1}",
                 show_progress=False,
                 save_alpha_scores=False,
+                fixed_alpha=fixed_alpha,
             ).mean_scores
             permuted_tfce = compute_tfce_2d(
                 permuted_scores,
@@ -206,6 +243,61 @@ def _compute_null_max_tfce(
         if show_progress:
             progress.stop()
     return null_max
+
+
+def _resolve_permutation_fixed_alpha(
+    observed_best_alphas: np.ndarray | None,
+    *,
+    permutation_alpha_mode: str,
+    fixed_alpha_source: str,
+) -> float | None:
+    """Resolve the optional fixed alpha used only for permutation inference.
+
+    `retune_per_permutation` is the gold-standard option because it re-runs
+    nested CV inside every permutation. `fixed_alpha` is a computational
+    shortcut that conditions the null on a single observed-run regularisation
+    choice and therefore may slightly underestimate uncertainty.
+    """
+    if permutation_alpha_mode == "retune_per_permutation":
+        return None
+    if permutation_alpha_mode != "fixed_alpha":
+        raise ValueError(f"Unsupported decoding permutation alpha mode `{permutation_alpha_mode}`.")
+    if observed_best_alphas is None:
+        raise ValueError(
+            "Fixed-alpha decoding permutations require observed outer-fold alphas from the observed decoding run."
+        )
+    observed_best_alphas = np.asarray(observed_best_alphas, dtype=float)
+    finite_alphas = observed_best_alphas[np.isfinite(observed_best_alphas)]
+    if finite_alphas.size == 0:
+        raise ValueError("Observed decoding outer-fold alphas are empty or non-finite; cannot run fixed-alpha permutations.")
+    if fixed_alpha_source == "median_observed_outer_folds":
+        return float(np.median(finite_alphas))
+    raise ValueError(f"Unsupported decoding fixed alpha source `{fixed_alpha_source}`.")
+
+
+def _permutation_inference_notes(
+    *,
+    permutation_alpha_mode: str,
+    fixed_alpha_source: str,
+    fixed_alpha: float | None,
+) -> dict[str, Any]:
+    if permutation_alpha_mode == "retune_per_permutation":
+        return {
+            "summary": "Permutation inference re-runs nested alpha selection inside each permutation.",
+            "methodological_status": "gold_standard",
+            "conditioning": "Null distribution propagates hyperparameter-selection uncertainty.",
+        }
+    return {
+        "summary": (
+            "Permutation inference uses a fixed alpha from the observed decoding run as a computational shortcut "
+            "instead of re-running nested CV inside each permutation."
+        ),
+        "methodological_status": "computational_approximation",
+        "conditioning": "Null distribution is conditional on the chosen regularisation value.",
+        "fixed_alpha_source": fixed_alpha_source,
+        "fixed_alpha": None if fixed_alpha is None else float(fixed_alpha),
+        "caveat": "This shortcut may slightly underestimate uncertainty relative to full per-permutation retuning.",
+    }
 
 
 def permute_decoding_targets(

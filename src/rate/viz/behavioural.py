@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from rate.viz.theme import apply_theme, get_role_palette, make_dyad_palette
+
 
 def build_behavioural_manifest(
     *,
@@ -18,6 +20,7 @@ def build_behavioural_manifest(
     subject_slopes_path: Path | None,
     manifest_path: Path,
     figure_config: Mapping[str, Any] | None = None,
+    theme_config: Mapping[str, Any] | None = None,
     figure_subdir: str = "behavioural",
     formats: Sequence[str] = ("png", "pdf"),
     dpi: int = 300,
@@ -26,7 +29,6 @@ def build_behavioural_manifest(
     figure_config = dict(figure_config or {})
     speech_rate_cfg = dict(figure_config.get("speech_rate") or {})
     subject_slopes_cfg = dict(figure_config.get("subject_slopes") or {})
-    personality_cfg = dict(figure_config.get("personality") or {})
     if subject_slopes_path is None:
         raise ValueError("subject_slopes_path is required for the combined behavioural figure.")
 
@@ -37,7 +39,7 @@ def build_behavioural_manifest(
         figure_subdir=figure_subdir,
         speech_rate_cfg=speech_rate_cfg,
         subject_slopes_cfg=subject_slopes_cfg,
-        personality_cfg=personality_cfg,
+        theme_config=theme_config,
         formats=tuple(speech_rate_cfg.get("formats", formats)),
         dpi=int(speech_rate_cfg.get("dpi", dpi)),
     )
@@ -60,10 +62,12 @@ def _build_combined_behavioural_plot(
     figure_subdir: str,
     speech_rate_cfg: Mapping[str, Any],
     subject_slopes_cfg: Mapping[str, Any],
-    personality_cfg: Mapping[str, Any],
+    theme_config: Mapping[str, Any] | None,
     formats: Sequence[str],
     dpi: int,
 ) -> dict[str, object]:
+    theme = apply_theme(theme_config)
+    palette = get_role_palette(theme)
     subject_col = str(speech_rate_cfg.get("subject_col", "subject_id"))
     dyad_col = str(speech_rate_cfg.get("dyad_col", "dyad_id"))
     rate_col = str(speech_rate_cfg.get("rate_col", "self_rate"))
@@ -100,23 +104,19 @@ def _build_combined_behavioural_plot(
     )
 
     valid_dyads = [str(dyad) for dyad in subject_summary["dyad_id"].dropna().astype(str).unique().tolist()]
-    dyad_to_color = _build_dyad_palette(valid_dyads)
+    dyad_to_color = _build_dyad_palette(valid_dyads, theme_config=theme)
     slope_dataframe, ordered_slope_df, dyad_slope_summary = _prepare_subject_slopes(
         subject_slopes_path=subject_slopes_path,
         plot_config=subject_slopes_cfg,
     )
-    personality_summary = _prepare_personality_summary(
-        residuals_path=residuals_path,
-        plot_config=personality_cfg,
-    )
 
-    fig, axes = plt.subplots(1, 4, figsize=(24, 5.5))
-    ax_hist, ax_subject, ax_slope, ax_personality = axes
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
+    ax_hist, ax_subject, ax_slope = axes
 
     ax_hist.hist(
         data[rate_col].to_numpy(dtype=float),
         bins=histogram_bins,
-        color="0.6",
+        color=str(speech_rate_cfg.get("histogram_color", palette["self"])),
         edgecolor="none",
         linewidth=0.0,
     )
@@ -198,32 +198,11 @@ def _build_combined_behavioural_plot(
         dyad_column=str(subject_slopes_cfg.get("dyad_col", "dyad_id")),
         title="C. Subject-specific other-rate slopes by dyad",
         xlabel="Subject-specific slope estimate",
-        point_color=str(subject_slopes_cfg.get("point_color", "0.25")),
-        line_color=str(subject_slopes_cfg.get("line_color", "0.35")),
+        point_color=str(subject_slopes_cfg.get("point_color", palette["other"])),
+        line_color=str(subject_slopes_cfg.get("line_color", palette["other"])),
         within_dyad_spacing=float(subject_slopes_cfg.get("within_dyad_spacing", 0.8)),
         between_dyad_spacing=float(subject_slopes_cfg.get("between_dyad_spacing", 1.8)),
     )
-
-    _plot_regression_scatter(
-        ax=ax_personality,
-        dataframe=personality_summary,
-        x_column="openness",
-        y_column="median_self_rate",
-        color=str(personality_cfg.get("openness_color", "#3B82F6")),
-        label="Openness",
-    )
-    _plot_regression_scatter(
-        ax=ax_personality,
-        dataframe=personality_summary,
-        x_column="extraversion",
-        y_column="median_self_rate",
-        color=str(personality_cfg.get("extraversion_color", "#EF4444")),
-        label="Extraversion",
-    )
-    ax_personality.set_title("D. Median self-rate vs personality")
-    ax_personality.set_ylabel("Median self speech rate")
-    ax_personality.set_xlabel("Personality score")
-    ax_personality.legend(frameon=False)
 
     fig.tight_layout()
 
@@ -246,7 +225,6 @@ def _build_combined_behavioural_plot(
         "min_trials_per_subject": min_trials_per_subject,
         "ordered_subject_ids": ordered_slope_df[str(subject_slopes_cfg.get("subject_col", "subject_id"))].astype(str).tolist(),
         "ordered_dyads": dyad_slope_summary[str(subject_slopes_cfg.get("dyad_col", "dyad_id"))].astype(str).tolist(),
-        "predictors": ["openness", "extraversion"],
     }
 
 
@@ -256,11 +234,12 @@ def _require_columns(data: pd.DataFrame, required_columns: Sequence[str], *, sou
         raise ValueError(f"Missing required behavioural figure columns in {source_path}: {missing}")
 
 
-def _build_dyad_palette(valid_dyads: Sequence[str]) -> dict[str, tuple[float, float, float]]:
-    if not valid_dyads:
-        return {}
-    cmap = plt.get_cmap("tab20", len(valid_dyads))
-    return {dyad: tuple(cmap(index)[:3]) for index, dyad in enumerate(valid_dyads)}
+def _build_dyad_palette(
+    valid_dyads: Sequence[str],
+    *,
+    theme_config: Mapping[str, Any] | None = None,
+) -> dict[str, tuple[float, float, float]]:
+    return make_dyad_palette(tuple(valid_dyads), theme_config=theme_config)
 
 
 def _prepare_subject_slopes(
@@ -281,32 +260,6 @@ def _prepare_subject_slopes(
         dyad_column=dyad_col,
     )
     return slope_dataframe, ordered_plot_df, dyad_summary
-
-
-def _prepare_personality_summary(
-    *,
-    residuals_path: Path,
-    plot_config: Mapping[str, Any],
-) -> pd.DataFrame:
-    subject_col = str(plot_config.get("subject_col", "subject_id"))
-    rate_col = str(plot_config.get("rate_col", "self_rate"))
-    openness_col = str(plot_config.get("openness_col", "openness"))
-    extraversion_col = str(plot_config.get("extraversion_col", "extraversion"))
-    data = pd.read_csv(residuals_path)
-    _require_columns(data, [subject_col, rate_col, openness_col, extraversion_col], source_path=residuals_path)
-    data = data.dropna(subset=[subject_col, rate_col, openness_col, extraversion_col]).copy()
-    subject_summary = (
-        data.groupby(subject_col, as_index=False)
-        .agg(
-            median_self_rate=(rate_col, "median"),
-            openness=(openness_col, "first"),
-            extraversion=(extraversion_col, "first"),
-        )
-        .reset_index(drop=True)
-    )
-    if subject_summary.empty:
-        raise ValueError("No subject rows available for the personality behavioural figure.")
-    return subject_summary
 
 
 def plot_grouped_subject_slopes(

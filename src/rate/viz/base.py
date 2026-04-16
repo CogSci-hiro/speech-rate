@@ -4,20 +4,10 @@ from typing import Iterable, Optional, Sequence, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+from rate.viz.theme import apply_theme
 
-# Global matplotlib style (set once)
-plt.rcParams.update(
-    {
-        "figure.figsize": (6, 4),
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.titlesize": 12,
-        "axes.labelsize": 11,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-        "legend.frameon": False,
-    }
-)
+
+apply_theme()
 
 
 def save_figure(

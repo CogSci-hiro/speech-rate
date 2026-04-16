@@ -10,19 +10,30 @@ os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
 
 import mne
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
 from argparse import Namespace
 
 from rate.cli.commands import figures_decoding
+from rate.cli.commands import figures_decoding_results
 from rate.decoding.config import load_decoding_config
 from rate.decoding.io import build_decoding_model_output_paths
 from rate.decoding.pipeline import _residualise_target, resolve_ridge_alphas, run_decoding_model
-from rate.decoding.stats import compute_tfce_2d, permute_decoding_targets, run_decoding_model_stats
+from rate.decoding.stats import (
+    _resolve_permutation_fixed_alpha,
+    compute_tfce_2d,
+    permute_decoding_targets,
+    run_decoding_model_stats,
+)
 from rate.epochs.io import build_epoch_output_paths
 from rate.util import write_parquet_dataframe
+from rate.viz.decoding import _DecodingFigurePayload
+from rate.viz.decoding import _infer_diagonal_limits
+from rate.viz.decoding import _plot_generalization
 from rate.viz.decoding import build_decoding_manifest
+from rate.viz.decoding import build_decoding_results_manifest
 
 
 def _write_yaml(path: Path, payload: dict) -> None:
@@ -78,6 +89,8 @@ def _decoding_config() -> dict:
             "random_state": 123,
             "permutation_scheme": "within_subject",
             "n_jobs": 1,
+            "permutation_alpha_mode": "retune_per_permutation",
+            "fixed_alpha_source": "median_observed_outer_folds",
             "tfce": {"enabled": True, "h_power": 2.0, "e_power": 0.5, "h_start": 0.0, "dh": 0.1, "tail": "positive"},
         },
         "models": [
@@ -108,6 +121,8 @@ def test_load_decoding_config_applies_defaults(tmp_path: Path) -> None:
     assert resolved["estimator"]["name"] == "ridge"
     assert resolved["nested_cv"]["selection_metric"] == "mean_diagonal_pearson_r"
     assert resolved["stats"]["permutation_scheme"] == "within_subject"
+    assert resolved["stats"]["permutation_alpha_mode"] == "retune_per_permutation"
+    assert resolved["stats"]["fixed_alpha_source"] == "median_observed_outer_folds"
 
 
 def test_load_decoding_config_accepts_explicit_alpha_grid(tmp_path: Path) -> None:
@@ -139,6 +154,16 @@ def test_resolve_ridge_alphas_supports_explicit_alpha_grid() -> None:
     alphas = resolve_ridge_alphas({"name": "ridge", "alpha_grid": [0.01, 0.1, 1.0]})
 
     assert np.allclose(alphas, np.array([0.01, 0.1, 1.0], dtype=float))
+
+
+def test_resolve_permutation_fixed_alpha_uses_median_outer_fold_alpha() -> None:
+    fixed_alpha = _resolve_permutation_fixed_alpha(
+        np.array([0.1, 1.0, 1.0, 10.0], dtype=float),
+        permutation_alpha_mode="fixed_alpha",
+        fixed_alpha_source="median_observed_outer_folds",
+    )
+
+    assert fixed_alpha == 1.0
 
 
 def test_tfce_2d_boosts_connected_positive_clusters() -> None:
@@ -338,7 +363,79 @@ def test_run_decoding_model_stats_writes_tfce_outputs(tmp_path: Path) -> None:
     assert tg_null.shape == (8,)
     assert np.all((tg_p_fwer >= 0.0) & (tg_p_fwer <= 1.0))
     assert stats_json["permutation_scheme"] == "within_subject"
+    assert stats_json["permutation_alpha_mode"] == "retune_per_permutation"
+    assert stats_json["fixed_alpha"] is None
     assert "no decodable mapping" in stats_json["null_hypothesis"]
+
+
+def test_run_decoding_model_stats_fixed_alpha_uses_observed_outer_fold_median(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    project_config = _project_config(out_dir)
+    decoding_config = _decoding_config()
+    decoding_config["stats"]["permutation_alpha_mode"] = "fixed_alpha"
+    rows: list[dict[str, str]] = []
+    dataset_index_path = out_dir / "dataset" / "index.parquet"
+    signal_map = np.array([[0.9, 0.5, 0.2], [0.1, 0.6, 0.4]], dtype=float)
+
+    for subject_offset, subject_id in enumerate(("sub-001", "sub-002", "sub-003", "sub-004"), start=1):
+        metadata = pd.DataFrame(
+            {
+                "event_id": np.arange(6, dtype=int) + (subject_offset * 100),
+                "subject_id": [subject_id] * 6,
+                "dyad_id": [f"dyad-{subject_offset:03d}"] * 6,
+                "task": ["conversation"] * 6,
+                "run": ["1"] * 6,
+                "latency": [0.1, 0.4, 0.2, 0.35, 0.15, 0.3],
+                "duration_s": [0.4, 0.7, 0.3, 0.8, 0.35, 0.65],
+                "time_within_run": [0.0, 0.9, 0.3, 1.0, 0.2, 0.7],
+                "self_rate": np.array([-1.2, 0.4, 1.3, -0.5, 0.8, 1.6]) + (0.2 * subject_offset),
+                "other_rate": np.array([0.3, -0.7, 0.8, 1.1, -0.2, 0.5]) + (0.1 * subject_offset),
+            }
+        )
+        data = np.zeros((6, 2, 3), dtype=float)
+        for trial_idx, row in metadata.iterrows():
+            nuisance = (0.4 * float(row["latency"])) + (0.15 * float(row["duration_s"])) + (0.12 * subject_offset)
+            data[trial_idx] = (float(row["self_rate"]) * signal_map) + nuisance
+
+        row = {
+            "dyad_id": f"dyad-{subject_offset:03d}",
+            "subject_id": subject_id,
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / f"{subject_id}.fif"),
+        }
+        epoch_paths = build_epoch_output_paths(project_config, row)
+        epoch_paths.epochs_output_path.parent.mkdir(parents=True, exist_ok=True)
+        _make_epochs(data, metadata.copy()).save(epoch_paths.epochs_output_path, overwrite=True, verbose="ERROR")
+        metadata.to_csv(epoch_paths.metadata_output_path, index=False)
+        rows.append(row)
+
+    dataset_index_path.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet_dataframe(pd.DataFrame(rows), dataset_index_path)
+
+    run_decoding_model(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+    )
+    stats_metadata = run_decoding_model_stats(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+    )
+
+    output_paths = build_decoding_model_output_paths(project_config, decoding_config, model_name="self_temporal_generalisation")
+    observed_best_alphas = np.load(output_paths.best_alphas_output_path)
+    stats_json = json.loads(output_paths.tg_stats_metadata_output_path.read_text(encoding="utf-8"))
+
+    assert stats_metadata["permutation_alpha_mode"] == "fixed_alpha"
+    assert stats_metadata["fixed_alpha_source"] == "median_observed_outer_folds"
+    assert stats_metadata["fixed_alpha"] == float(np.median(observed_best_alphas))
+    assert stats_json["permutation_inference_notes"]["methodological_status"] == "computational_approximation"
+    assert "conditional on the chosen regularisation value" in stats_json["permutation_inference_notes"]["conditioning"]
 
 
 def test_cross_condition_permutation_leaves_test_target_fixed() -> None:
@@ -445,6 +542,75 @@ def test_build_decoding_manifest_writes_combined_plot(tmp_path: Path) -> None:
     assert all(model["alpha_selection_source"] == "alpha_scores_mean_diagonal" for model in plot["models"])
 
 
+def test_infer_diagonal_limits_hugs_global_extrema() -> None:
+    payloads = [
+        _DecodingFigurePayload(
+            model_name="self_temporal_generalisation",
+            title="Self rate",
+            color="#000000",
+            times=np.asarray([-0.1, 0.0, 0.1], dtype=float),
+            score_matrix=np.asarray(
+                [
+                    [0.02, 0.00, 0.00],
+                    [0.00, 0.18, 0.00],
+                    [0.00, 0.00, 0.26],
+                ],
+                dtype=float,
+            ),
+            significance_mask=None,
+            selected_alpha=None,
+            alpha_selection_source="mean_scores",
+        ),
+        _DecodingFigurePayload(
+            model_name="cross_other_to_self",
+            title="Other to self",
+            color="#000000",
+            times=np.asarray([-0.1, 0.0, 0.1], dtype=float),
+            score_matrix=np.asarray(
+                [
+                    [-0.03, 0.00, 0.00],
+                    [0.00, 0.14, 0.00],
+                    [0.00, 0.00, 0.21],
+                ],
+                dtype=float,
+            ),
+            significance_mask=None,
+            selected_alpha=None,
+            alpha_selection_source="mean_scores",
+        ),
+    ]
+
+    ymin, ymax = _infer_diagonal_limits(payloads, pad_fraction=0.02, min_half_range=0.015)
+
+    assert np.isclose(ymin, -0.0358)
+    assert np.isclose(ymax, 0.2658)
+
+
+def test_plot_generalization_uses_square_matrix_axes() -> None:
+    fig, ax = plt.subplots(figsize=(4, 3))
+
+    _plot_generalization(
+        ax=ax,
+        times=np.asarray([-0.1, 0.0, 0.1], dtype=float),
+        score_matrix=np.asarray(
+            [
+                [0.02, 0.01, 0.00],
+                [0.01, 0.12, 0.03],
+                [0.00, 0.03, 0.08],
+            ],
+            dtype=float,
+        ),
+        significance_mask=None,
+        show_y_axis=True,
+        abs_limit=0.15,
+    )
+
+    assert ax.get_aspect() == 1.0
+    assert float(ax.get_box_aspect()) == 1.0
+
+    plt.close(fig)
+
+
 def test_figures_decoding_cli_writes_manifest(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     decoding_cfg_path = tmp_path / "decoding.yaml"
@@ -507,11 +673,120 @@ def test_figures_decoding_cli_writes_manifest(tmp_path: Path) -> None:
     assert manifest["plots"][0]["plot_name"] == "temporal_generalisation_summary"
 
 
+def test_build_decoding_results_manifest_writes_per_model_plots(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    decoding_config = _decoding_config()
+    manifest_path = out_dir / "figures" / "decoding_results" / "figure_manifest.json"
+
+    for model_index, model_cfg in enumerate(decoding_config["models"], start=1):
+        output_paths = build_decoding_model_output_paths(
+            {"paths": {"out_dir": str(out_dir)}},
+            decoding_config,
+            model_name=str(model_cfg["name"]),
+        )
+        output_paths.scores_output_path.parent.mkdir(parents=True, exist_ok=True)
+        observed = np.asarray(
+            [
+                [0.05 * model_index, 0.01],
+                [0.02, 0.08 * model_index],
+            ],
+            dtype=float,
+        )
+        np.save(output_paths.scores_output_path, observed)
+        np.save(output_paths.fold_scores_output_path, np.stack([observed, observed * 0.95], axis=0))
+        np.save(output_paths.alpha_scores_output_path, np.stack([observed * 0.6, observed], axis=0))
+        np.save(output_paths.best_alphas_output_path, np.asarray([1.0, 1.0], dtype=float))
+        np.save(output_paths.times_output_path, np.asarray([-0.05, 0.05], dtype=float))
+        np.save(output_paths.tg_matrix_output_path, observed)
+        np.save(output_paths.tg_tfce_output_path, np.asarray([[0.0, 1.5], [0.5, 2.0]], dtype=float))
+        np.save(output_paths.tg_p_fwer_output_path, np.asarray([[1.0, 0.04], [1.0, 1.0]], dtype=float))
+
+    manifest = build_decoding_results_manifest(
+        out_dir=out_dir,
+        decoding_config=decoding_config,
+        manifest_path=manifest_path,
+        figure_config={"p_threshold": 0.05},
+        formats=("png",),
+        dpi=72,
+    )
+
+    assert manifest["status"] == "ok"
+    assert manifest["plot_count"] == 2
+    assert manifest_path.exists()
+    assert {plot["model_name"] for plot in manifest["plots"]} == {
+        "self_temporal_generalisation",
+        "cross_other_to_self",
+    }
+    assert all(plot["plot_name"] == "temporal_generalisation_results" for plot in manifest["plots"])
+    assert all(len(plot["files"]) == 1 for plot in manifest["plots"])
+    assert all(Path(plot["files"][0]).exists() for plot in manifest["plots"])
+
+
+def test_figures_decoding_results_cli_writes_manifest(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    decoding_cfg_path = tmp_path / "decoding.yaml"
+    viz_config_path = tmp_path / "viz.yaml"
+    _write_yaml(decoding_cfg_path, {"decoding": _decoding_config()})
+    viz_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "viz": {
+                    "formats": ["png"],
+                    "dpi": 72,
+                    "figures": {
+                        "decoding_results": {
+                            "p_threshold": 0.05,
+                        }
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    for model_index, model_cfg in enumerate(_decoding_config()["models"], start=1):
+        output_paths = build_decoding_model_output_paths(
+            {"paths": {"out_dir": str(out_dir)}},
+            _decoding_config(),
+            model_name=str(model_cfg["name"]),
+        )
+        output_paths.scores_output_path.parent.mkdir(parents=True, exist_ok=True)
+        observed = np.asarray([[0.05 * model_index, 0.01], [0.02, 0.08 * model_index]], dtype=float)
+        np.save(output_paths.scores_output_path, observed)
+        np.save(output_paths.fold_scores_output_path, np.stack([observed, observed * 0.95], axis=0))
+        np.save(output_paths.alpha_scores_output_path, np.stack([observed * 0.6, observed], axis=0))
+        np.save(output_paths.best_alphas_output_path, np.asarray([1.0, 1.0], dtype=float))
+        np.save(output_paths.times_output_path, np.asarray([-0.05, 0.05], dtype=float))
+        np.save(output_paths.tg_matrix_output_path, observed)
+        np.save(output_paths.tg_tfce_output_path, np.asarray([[0.0, 1.5], [0.5, 2.0]], dtype=float))
+        np.save(output_paths.tg_p_fwer_output_path, np.asarray([[1.0, 0.04], [1.0, 1.0]], dtype=float))
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        viz_config=str(viz_config_path),
+        decoding_config=str(decoding_cfg_path),
+        output=None,
+    )
+    exit_code = figures_decoding_results.run(args, config={"paths": {"out_dir": str(out_dir)}})
+
+    assert exit_code == 0
+    manifest_path = out_dir / "figures" / "decoding_results" / "figure_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["plot_count"] == 2
+    assert {plot["plot_name"] for plot in manifest["plots"]} == {"temporal_generalisation_results"}
+
+
 def test_decoding_figure_workflow_rules_are_present() -> None:
     figures_rules = Path("workflow/rules/figures.smk").read_text(encoding="utf-8")
     targets_rules = Path("workflow/rules/targets.smk").read_text(encoding="utf-8")
 
     assert "rule figures_decoding" in figures_rules
     assert "DECODING_FIGURES_OUTPUT" in figures_rules
+    assert "rule figures_decoding_results" in figures_rules
+    assert "DECODING_RESULTS_FIGURES_OUTPUT" in figures_rules
     assert "rule decoding_figures_all" in targets_rules
     assert "DECODING_FIGURES_OUTPUT" in targets_rules
+    assert "rule decoding_results_figures_all" in targets_rules
+    assert "DECODING_RESULTS_FIGURES_OUTPUT" in targets_rules

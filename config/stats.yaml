@@ -8,5 +8,4 @@ stats:
     step: 0.01
   outputs:
     glm: "stats/glm_group_stats.json"
-    fooof_mass: "stats/fooof_mass_group_stats.json"
     lmeeeg: "stats/lmeeeg_group_stats.json"

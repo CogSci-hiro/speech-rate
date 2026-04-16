@@ -10,9 +10,8 @@ import numpy as np
 import pandas as pd
 
 from rate.epochs.io import build_epoch_output_paths
-from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
-from rate.lmeeeg.induced import extract_induced_power, section_supports_targets
 from rate.lmeeeg.io import load_lmeeeg_inputs_with_trial_regressors
+from rate.lmeeeg.targets import section_supports_targets
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays
 from rate.paths import resolve_out_dir
 from rate.util import read_parquet_dataframe
@@ -77,11 +76,7 @@ def load_pooled_lmeeeg_trial_data(
     merge_summaries: list[dict[str, Any]] = []
 
     for row in rows:
-        if config_section == "lmeeeg_fooof":
-            if target_name is None:
-                raise ValueError("`target_name` is required when loading pooled target-specific lmeEEG trial data.")
-            metadata_path = str(build_fooof_epoch_feature_paths(config, row, feature_name=target_name).metadata_output_path)
-        elif section_supports_targets(config, config_section=config_section):
+        if section_supports_targets(config, config_section=config_section):
             if target_name is None:
                 raise ValueError("`target_name` is required when loading pooled target-specific lmeEEG trial data.")
             metadata_path = str(build_epoch_output_paths(config, row).metadata_output_path)
@@ -97,10 +92,7 @@ def load_pooled_lmeeeg_trial_data(
     )
 
     for row_index, (metadata_path, row) in enumerate(unique_rows_by_metadata_path.items(), start=1):
-        if config_section == "lmeeeg_fooof":
-            epoch_paths = build_fooof_epoch_feature_paths(config, row, feature_name=str(target_name))
-        else:
-            epoch_paths = build_epoch_output_paths(config, row)
+        epoch_paths = build_epoch_output_paths(config, row)
         LOGGER.info(
             "Loading lmeEEG source %d/%d: subject=%s task=%s run=%s file=%s",
             row_index,
@@ -120,18 +112,8 @@ def load_pooled_lmeeeg_trial_data(
                 metadata_df.loc[:, field_name] = row[field_name]
         merge_summaries.append(dict(getattr(metadata_df, "attrs", {}).get("metadata_provenance") or {}))
 
-        if config_section == "lmeeeg_induced":
-            if target_name is None:
-                raise ValueError("`target_name` is required when loading induced lmeEEG trial data.")
-            eeg_data, times = extract_induced_power(
-                epochs,
-                config,
-                config_section=config_section,
-                target_name=str(target_name),
-            )
-        else:
-            eeg_data = epochs.get_data(copy=True)
-            times = np.asarray(epochs.times, dtype=float)
+        eeg_data = epochs.get_data(copy=True)
+        times = np.asarray(epochs.times, dtype=float)
         channel_names = list(epochs.ch_names)
         if reference_channel_names is None:
             reference_channel_names = channel_names

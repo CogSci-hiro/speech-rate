@@ -18,19 +18,19 @@ import pytest
 import yaml
 
 from rate.cli.commands import lmeeeg_group_stats
+from rate.cli.commands import lmeeeg_similarity
 from rate.cli.commands import lmeeeg_subject
 from rate.cli.commands import lmeeeg_variance_partition_fit
 from rate.cli.commands import lmeeeg_variance_partition_group_stats
+from rate.cli.commands import figures_lmeeeg_variance_partition
+from rate.cli.commands import figures_lmeeeg_main_results
 from rate.cli.commands import figures_lmeeeg
 from rate.cli.commands import figures_lmeeeg_inference
-from rate.legacy.cli.commands import figures_lmeeeg_fooof
-from rate.legacy.cli.commands import figures_lmeeeg_fooof_inference
 from rate.epochs.io import build_epoch_output_paths
-from rate.legacy.fooof_mass.io import build_fooof_epoch_feature_paths
-from rate.lmeeeg.induced import extract_induced_power
-from rate.lmeeeg.io import build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
+from rate.lmeeeg.io import build_lmeeeg_model_output_paths, build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
+from rate.lmeeeg.similarity import build_similarity_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
-from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays, build_lmeeeg_trial_table
+from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
 from rate.lmeeeg.variance_partition import (
     build_variance_partition_fit_output_paths,
     build_variance_partition_group_output_paths,
@@ -38,18 +38,13 @@ from rate.lmeeeg.variance_partition import (
 )
 from rate.util import write_parquet_dataframe
 from rate.viz import lmeeeg as lmeeeg_viz
+from rate.viz import lmeeeg_results as lmeeeg_results_viz
 
 
 def _make_epochs(data: np.ndarray, metadata: pd.DataFrame) -> mne.EpochsArray:
     info = mne.create_info(["Fz", "Cz"], sfreq=100.0, ch_types=["eeg", "eeg"])
     events = np.column_stack([np.arange(len(data), dtype=int), np.zeros(len(data), dtype=int), np.ones(len(data), dtype=int)])
     return mne.EpochsArray(data, info, events=events, tmin=-0.1, metadata=metadata, verbose="ERROR")
-
-
-def _make_dense_epochs(data: np.ndarray, metadata: pd.DataFrame, *, sfreq: float = 100.0, tmin: float = -0.5) -> mne.EpochsArray:
-    info = mne.create_info(["Fz", "Cz"], sfreq=sfreq, ch_types=["eeg", "eeg"])
-    events = np.column_stack([np.arange(len(data), dtype=int), np.zeros(len(data), dtype=int), np.ones(len(data), dtype=int)])
-    return mne.EpochsArray(data, info, events=events, tmin=tmin, metadata=metadata, verbose="ERROR")
 
 
 def _lmeeeg_config(out_dir: Path) -> dict:
@@ -76,6 +71,18 @@ def _lmeeeg_config(out_dir: Path) -> dict:
                     "random_effect_group": "item_id",
                     "random_effect_structure": "random_intercept",
                 },
+                "other_rate_effect": {
+                    "formula": "~ other_rate + latency + duration_s + time_within_run + run",
+                    "test_predictors": ["other_rate"],
+                    "random_effect_group": "subject_id",
+                    "random_effect_structure": "random_intercept",
+                },
+                "self_rate_effect": {
+                    "formula": "~ self_rate + latency + duration_s + time_within_run + run",
+                    "test_predictors": ["self_rate"],
+                    "random_effect_group": "subject_id",
+                    "random_effect_structure": "random_intercept",
+                },
                 "both_effect": {
                     "formula": "~ self_rate + other_rate + latency + duration_s + time_within_run + run",
                     "eligibility": {
@@ -94,59 +101,41 @@ def _lmeeeg_config(out_dir: Path) -> dict:
                 }
             },
         },
-        "lmeeeg_fooof": {
-            "backend": "lmeeeg",
-            "random_effects": {"group": "item_id", "structure": "random_intercept"},
-            "targets": ["offset", "exponent"],
-            "models": {
-                "speech_rate_item_intercept": {
-                    "formula": "signal ~ speech_rate",
-                    "test_predictors": ["speech_rate"],
-                    "random_effect_group": "item_id",
-                    "random_effect_structure": "random_intercept",
-                }
-            },
-        },
-        "lmeeeg_induced": {
-            "backend": "lmeeeg",
-            "random_effects": {"group": "item_id", "structure": "random_intercept"},
-            "targets": ["theta", "alpha"],
-            "extraction": {
-                "method": "morlet",
-                "bands": {
-                    "theta": {"fmin": 4.0, "fmax": 7.0},
-                    "alpha": {"fmin": 8.0, "fmax": 12.0},
-                },
-                "morlet": {
-                    "n_freqs": 4,
-                    "n_cycles": 3.0,
-                    "use_fft": True,
-                    "decim": 1,
-                    "zero_mean": True,
-                },
-                "hilbert": {
-                    "l_trans_bandwidth": "auto",
-                    "h_trans_bandwidth": "auto",
-                    "phase": "zero",
-                    "fir_design": "firwin",
-                    "envelope": True,
-                },
-            },
-            "models": {
-                "speech_rate_item_intercept": {
-                    "formula": "signal ~ speech_rate",
-                    "test_predictors": ["speech_rate"],
-                    "random_effect_group": "item_id",
-                    "random_effect_structure": "random_intercept",
-                }
-            },
-        },
         "lmeeeg_variance_partition": {
             "enabled": True,
             "source_section": "lmeeeg",
             "source_model": "both_effect",
             "output_dirname": "lmeeeg_variance_partition",
             "predictors": {"self": "self_rate", "other": "other_rate"},
+        },
+        "similarity": {
+            "enabled": True,
+            "analysis_name": "other_vs_self",
+            "input": {
+                "domain": "lmeeeg",
+                "result_kind": "group_stats",
+                "predictor_a": "other_rate",
+                "predictor_b": "self_rate",
+                "value_field": "beta",
+                "use_unthresholded": True,
+            },
+            "metrics": {
+                "whole_map": ["pearson", "cosine"],
+                "time_resolved_topography": {"enabled": True, "method": "pearson"},
+            },
+            "inferential_test": {
+                "enabled": True,
+                "n_permutations": 64,
+                "random_seed": 7,
+                "null_method": "sign_flip",
+                "tail": "two-sided",
+            },
+            "outputs": {
+                "save_null_distribution": True,
+                "save_time_resolved_curve": True,
+                "save_summary_table": True,
+                "save_difference_map": True,
+            },
         },
     }
 
@@ -304,169 +293,6 @@ def test_compute_variance_partition_components_from_r2_values() -> None:
     assert components["unique_self"] == pytest.approx(0.10)
     assert components["unique_other"] == pytest.approx(0.15)
     assert components["shared"] == pytest.approx(0.05)
-
-
-def test_extract_induced_power_returns_band_power_with_same_trial_and_channel_axes(tmp_path: Path) -> None:
-    config = _lmeeeg_config(tmp_path / "out")
-    metadata = pd.DataFrame(
-        {
-            "speech_rate": np.linspace(0.0, 2.5, 6),
-            "item_id": ["A", "A", "A", "B", "B", "B"],
-        }
-    )
-    times = np.linspace(-0.5, 0.49, 100, dtype=float)
-    theta_wave = np.sin(2.0 * np.pi * 6.0 * times)
-    alpha_wave = np.sin(2.0 * np.pi * 10.0 * times)
-    data = np.zeros((len(metadata), 2, len(times)), dtype=float)
-    for index, speech_rate in enumerate(metadata["speech_rate"].to_numpy(dtype=float)):
-        data[index, 0, :] = (1.0 + speech_rate) * theta_wave
-        data[index, 1, :] = (0.5 + speech_rate) * alpha_wave
-
-    epochs = _make_dense_epochs(data, metadata.copy())
-    induced_power, induced_times = extract_induced_power(epochs, config, config_section="lmeeeg_induced", target_name="theta")
-
-    assert induced_power.shape == (len(metadata), 2, len(times))
-    assert induced_times.shape == (len(times),)
-    assert np.all(np.isfinite(induced_power))
-    assert np.allclose(induced_times, epochs.times)
-
-
-def test_lmeeeg_fooof_subject_cli_writes_targeted_outputs(tmp_path: Path) -> None:
-    out_dir = tmp_path / "out"
-    config = _lmeeeg_config(out_dir)
-    row = {
-        "dyad_id": "dyad-001",
-        "subject_id": "sub-001",
-        "task": "conversation",
-        "run": "1",
-        "status": "ok",
-        "eeg_path": str(tmp_path / "placeholder_raw.fif"),
-    }
-
-    metadata = pd.DataFrame(
-        {
-            "speech_rate": [0.0, 1.0, 2.0, 0.5, 1.5, 2.5],
-            "item_id": ["A", "A", "A", "B", "B", "B"],
-        }
-    )
-    slope_map = np.array([[1.5, -0.5], [0.25, 0.75]])
-    intercept_map = np.array([[2.0, 1.0], [-1.0, 0.5]])
-    group_intercepts = {"A": 4.0, "B": -2.0}
-    data = np.zeros((6, 2, 2), dtype=float)
-    for index, row_values in metadata.iterrows():
-        data[index] = intercept_map + (float(row_values["speech_rate"]) * slope_map) + group_intercepts[str(row_values["item_id"])]
-
-    epochs = _make_epochs(data, metadata.copy())
-    fooof_paths = build_fooof_epoch_feature_paths(config, row, feature_name="offset")
-    epochs_path = fooof_paths.epochs_output_path
-    metadata_path = fooof_paths.metadata_output_path
-    dataset_index_path = tmp_path / "index.parquet"
-    epochs_path.parent.mkdir(parents=True, exist_ok=True)
-    epochs.save(epochs_path, overwrite=True, verbose="ERROR")
-    metadata.to_csv(metadata_path, index=False)
-    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
-
-    args = Namespace(
-        config="config/config.yaml",
-        schema="config/schema.json",
-        dataset_index=str(dataset_index_path),
-        subject_id="sub-001",
-        task="conversation",
-        run="1",
-        config_section="lmeeeg_fooof",
-        target="offset",
-        model_name="speech_rate_item_intercept",
-        epochs_path=str(epochs_path),
-        metadata_path=str(metadata_path),
-        run_all=False,
-        output=None,
-    )
-    exit_code = lmeeeg_subject.run(args, config=config)
-    assert exit_code == 0
-
-    output_paths = build_lmeeeg_output_paths(
-        config,
-        row,
-        config_section="lmeeeg_fooof",
-        target_name="offset",
-        model_name="speech_rate_item_intercept",
-    )
-    assert output_paths.summary_output_path.exists()
-    assert output_paths.betas_output_path.exists()
-
-    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
-    assert summary["status"] == "ok"
-    assert summary["n_trials_used"] == len(metadata)
-
-
-def test_lmeeeg_induced_subject_cli_writes_targeted_outputs(tmp_path: Path) -> None:
-    out_dir = tmp_path / "out"
-    config = _lmeeeg_config(out_dir)
-    row = {
-        "dyad_id": "dyad-001",
-        "subject_id": "sub-001",
-        "task": "conversation",
-        "run": "1",
-        "status": "ok",
-        "eeg_path": str(tmp_path / "placeholder_raw.fif"),
-    }
-
-    metadata = pd.DataFrame(
-        {
-            "speech_rate": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5],
-            "item_id": ["A", "A", "A", "B", "B", "B"],
-        }
-    )
-    times = np.linspace(-0.5, 0.49, 100, dtype=float)
-    theta_wave = np.sin(2.0 * np.pi * 6.0 * times)
-    alpha_wave = np.sin(2.0 * np.pi * 10.0 * times)
-    data = np.zeros((len(metadata), 2, len(times)), dtype=float)
-    for index, row_values in metadata.iterrows():
-        speech_rate = float(row_values["speech_rate"])
-        data[index, 0, :] = (1.0 + speech_rate) * theta_wave
-        data[index, 1, :] = (0.5 + (0.25 * speech_rate)) * alpha_wave
-
-    epochs = _make_dense_epochs(data, metadata.copy())
-    epochs_path = tmp_path / "epochs_induced.fif"
-    metadata_path = tmp_path / "metadata_induced.csv"
-    dataset_index_path = tmp_path / "index.parquet"
-    epochs.save(epochs_path, overwrite=True, verbose="ERROR")
-    metadata.to_csv(metadata_path, index=False)
-    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
-
-    args = Namespace(
-        config="config/config.yaml",
-        schema="config/schema.json",
-        dataset_index=str(dataset_index_path),
-        subject_id="sub-001",
-        task="conversation",
-        run="1",
-        config_section="lmeeeg_induced",
-        target="theta",
-        model_name="speech_rate_item_intercept",
-        epochs_path=str(epochs_path),
-        metadata_path=str(metadata_path),
-        run_all=False,
-        output=None,
-    )
-    exit_code = lmeeeg_subject.run(args, config=config)
-    assert exit_code == 0
-
-    output_paths = build_lmeeeg_output_paths(
-        config,
-        row,
-        config_section="lmeeeg_induced",
-        target_name="theta",
-        model_name="speech_rate_item_intercept",
-        epochs_path=epochs_path,
-        metadata_path=metadata_path,
-    )
-    assert output_paths.summary_output_path.exists()
-    assert output_paths.betas_output_path.exists()
-
-    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
-    assert summary["status"] == "ok"
-    assert summary["n_trials_used"] == len(metadata)
 
 
 def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:
@@ -716,50 +542,119 @@ def test_lmeeeg_variance_partition_group_stats_cli_writes_descriptive_maps(tmp_p
     assert np.isclose(total_map[0, 0], 0.16)
 
 
-def test_lmeeeg_fooof_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) -> None:
+def test_lmeeeg_similarity_cli_writes_outputs(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
-    row = {
-        "dyad_id": "dyad-001",
-        "subject_id": "sub-001",
-        "task": "conversation",
-        "run": "1",
-        "status": "ok",
-        "eeg_path": str(tmp_path / "placeholder_raw.fif"),
-    }
-    metadata = pd.DataFrame(
-        {
-            "speech_rate": [0.0, 1.0, 2.0, 0.5, 1.5, 2.5],
-            "item_id": ["A", "A", "A", "B", "B", "B"],
-        }
+
+    other_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    self_paths = build_lmeeeg_model_output_paths(config, model_name="self_rate_effect")
+    other_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+    self_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    channel_names = ["Fz", "Cz"]
+    times = np.asarray([-0.1, 0.0, 0.1], dtype=float)
+    other_beta = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[1.0, 2.0, 3.0], [0.5, 1.0, 1.5]],
+        ],
+        dtype=float,
     )
-    slope_map = np.array([[1.0, 0.0], [0.5, -0.25]])
-    intercept_map = np.array([[1.0, 1.5], [-0.5, 0.25]])
-    group_intercepts = {"A": 3.0, "B": -1.0}
-    data = np.zeros((6, 2, 2), dtype=float)
-    for index, row_values in metadata.iterrows():
-        data[index] = intercept_map + (float(row_values["speech_rate"]) * slope_map) + group_intercepts[str(row_values["item_id"])]
+    self_beta = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[0.8, 1.9, 3.1], [0.4, 0.9, 1.7]],
+        ],
+        dtype=float,
+    )
 
-    epochs = _make_epochs(data, metadata.copy())
-    fooof_paths = build_fooof_epoch_feature_paths(config, row, feature_name="offset")
-    epochs_path = fooof_paths.epochs_output_path
-    metadata_path = fooof_paths.metadata_output_path
-    dataset_index_path = out_dir / "dataset" / "index.parquet"
-    epochs_path.parent.mkdir(parents=True, exist_ok=True)
-    dataset_index_path.parent.mkdir(parents=True, exist_ok=True)
-    epochs.save(epochs_path, overwrite=True, verbose="ERROR")
-    metadata.to_csv(metadata_path, index=False)
-    write_parquet_dataframe(pd.DataFrame([row]), dataset_index_path)
+    for output_paths, predictor_name, betas in (
+        (other_paths, "other_rate", other_beta),
+        (self_paths, "self_rate", self_beta),
+    ):
+        np.save(output_paths.betas_output_path, betas)
+        np.save(output_paths.t_values_output_path, betas * 2.0)
+        np.save(output_paths.times_output_path, times)
+        output_paths.channel_names_output_path.write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
+        output_paths.column_names_output_path.write_text(json.dumps(["Intercept", predictor_name]) + "\n", encoding="utf-8")
+        output_paths.test_predictors_output_path.write_text(json.dumps([predictor_name]) + "\n", encoding="utf-8")
+        output_paths.summary_output_path.write_text(
+            json.dumps({"status": "ok", "predictor_of_interest": predictor_name}) + "\n",
+            encoding="utf-8",
+        )
 
-    stats_cfg_path = tmp_path / "stats.yaml"
-    stats_cfg_path.write_text(
+    args = Namespace(config="config/config.yaml", schema="config/schema.json")
+    exit_code = lmeeeg_similarity.run(args, config=config)
+    assert exit_code == 0
+
+    output_paths = build_similarity_output_paths(config)
+    assert output_paths.summary_output_path.exists()
+    assert output_paths.summary_table_output_path.exists()
+    assert output_paths.difference_map_output_path.exists()
+    assert output_paths.time_resolved_curve_output_path.exists()
+    assert output_paths.time_resolved_p_values_output_path.exists()
+    assert output_paths.whole_map_null_output_path.exists()
+
+    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
+    summary_table = pd.read_parquet(output_paths.summary_table_output_path)
+    difference_map = np.load(output_paths.difference_map_output_path)
+    time_curve = np.load(output_paths.time_resolved_curve_output_path)
+
+    assert summary["status"] == "ok"
+    assert summary["analysis"] == "lmeeeg_similarity"
+    assert summary["input"]["predictor_a"] == "other_rate"
+    assert summary["input"]["predictor_b"] == "self_rate"
+    assert summary["whole_map_similarity"]["pearson"]["p_value"] is not None
+    assert set(summary_table["metric"]) >= {"pearson", "cosine", "mean_signed_difference", "mean_absolute_difference", "rms_difference"}
+    assert difference_map.shape == (2, 3)
+    assert time_curve.shape == (3,)
+    assert np.isclose(summary["whole_map_difference"]["mean_signed_difference"], float(np.mean(difference_map)))
+
+
+def test_figures_lmeeeg_variance_partition_cli_writes_manifest(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    group_paths = build_variance_partition_group_output_paths(config)
+    group_paths.group_dir.mkdir(parents=True, exist_ok=True)
+
+    write_parquet_dataframe(
+        pd.DataFrame(
+            {
+                "channel": ["Fp1", "Fp1", "Oz", "Oz"],
+                "time": [-0.1, 0.0, -0.1, 0.0],
+                "channel_index": [0, 0, 1, 1],
+                "time_index": [0, 1, 0, 1],
+                "unique_self": [0.04, 0.06, 0.03, 0.05],
+                "unique_other": [0.03, 0.02, 0.04, 0.03],
+                "shared": [0.01, 0.02, 0.05, 0.06],
+            }
+        ),
+        group_paths.table_output_path,
+    )
+
+    viz_config_path = tmp_path / "viz.yaml"
+    viz_config_path.write_text(
         yaml.safe_dump(
             {
-                "stats": {
-                    "method": "maxstat",
-                    "n_permutations": 8,
-                    "tail": 0,
-                    "adjacency": None,
+                "viz": {
+                    "formats": ["png"],
+                    "dpi": 72,
+                    "theme": {
+                        "colors": {
+                            "self": "#8C2D2D",
+                            "other": "#1F4E79",
+                            "shared": "#2F6B3B",
+                        }
+                    },
+                    "figures": {
+                        "variance_partition": {
+                            "use_proportions": False,
+                            "rois": {
+                                "anterior": ["Fp1"],
+                                "posterior": ["Oz"],
+                            },
+                        }
+                    },
                 }
             }
         ),
@@ -769,26 +664,30 @@ def test_lmeeeg_fooof_group_stats_cli_writes_real_inference_outputs(tmp_path: Pa
     args = Namespace(
         config="config/config.yaml",
         schema="config/schema.json",
-        stats_config=str(stats_cfg_path),
-        dataset_index=str(dataset_index_path),
-        subject_id="sub-001",
-        task="conversation",
-        run="1",
-        config_section="lmeeeg_fooof",
-        target="offset",
-        model_name="speech_rate_item_intercept",
+        viz_config=str(viz_config_path),
+        input=str(group_paths.table_output_path),
         output=None,
     )
-    exit_code = lmeeeg_group_stats.run(args, config=config)
+    exit_code = figures_lmeeeg_variance_partition.run(args, config=config)
+
     assert exit_code == 0
+    manifest_path = out_dir / "figures" / "lmeeeg_variance_partition" / "figure_manifest.json"
+    assert manifest_path.exists()
 
-    summary_path = out_dir / "stats" / "lmeeeg_fooof_group_stats.json"
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-
-    assert summary["status"] == "ok"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "ok"
+    assert manifest["plot_count"] == 1
+    plot = manifest["plots"][0]
+    assert plot["plot_name"] == "variance_partition_summary"
+    assert plot["use_proportions"] is False
+    assert plot["rois"]["anterior"] == ["Fp1"]
+    assert plot["rois"]["posterior"] == ["Oz"]
+    assert len(plot["files"]) == 1
+    assert Path(plot["files"][0]).exists()
 
 
 def test_variance_partition_workflow_rules_are_present() -> None:
+    figures_rules = Path("workflow/rules/figures.smk").read_text(encoding="utf-8")
     lmeeeg_rules = Path("workflow/rules/lmeeeg.smk").read_text(encoding="utf-8")
     stats_rules = Path("workflow/rules/stats.smk").read_text(encoding="utf-8")
     targets_rules = Path("workflow/rules/targets.smk").read_text(encoding="utf-8")
@@ -796,7 +695,15 @@ def test_variance_partition_workflow_rules_are_present() -> None:
     assert "rule lmeeeg_variance_partition_fit" in lmeeeg_rules
     assert "rule lmeeeg_variance_partition_stage" in lmeeeg_rules
     assert "rule lmeeeg_variance_partition_group_stats" in stats_rules
+    assert "rule lmeeeg_similarity" in stats_rules
+    assert "rule figures_lmeeeg_main_results" in figures_rules
+    assert "rule figures_lmeeeg_variance_partition" in figures_rules
+    assert "rule similarity_all" in targets_rules
     assert "rule lmeeeg_variance_partition_all" in targets_rules
+    assert "rule lmeeeg_main_results_figures_all" in targets_rules
+    assert "LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT" in targets_rules
+    assert "rule lmeeeg_variance_partition_figures_all" in targets_rules
+    assert "LMEEEG_VARIANCE_PARTITION_FIGURES_OUTPUT" in targets_rules
     assert "rule lmeeeg_all" in targets_rules
 
 
@@ -1006,333 +913,122 @@ def test_figures_lmeeeg_falls_back_to_stats_outputs_when_lmeeeg_dir_missing(tmp_
     ]
 
 
-def test_figures_lmeeeg_fooof_writes_plots_for_each_target(tmp_path: Path, monkeypatch) -> None:
+def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
+    channel_names = ["Fz", "Cz", "Pz", "Oz"]
+    times = np.asarray([-0.8, -0.5, -0.3, 0.0, 0.2], dtype=float)
 
-    viz_config_path = tmp_path / "viz.yaml"
-    viz_config_path.write_text(yaml.safe_dump({"viz": {"formats": ["png"], "dpi": 72}}), encoding="utf-8")
-
-    for target_name in ("offset", "exponent"):
-        stats_effect_dir = out_dir / "stats" / "lmeeeg_fooof" / target_name / "speech_rate_item_intercept" / "speech_rate"
+    for model_name, effect_name, offset in (
+        ("self_rate_effect", "self_rate", 1.0),
+        ("other_rate_effect", "other_rate", 2.0),
+    ):
+        stats_effect_dir = out_dir / "stats" / "lmeeeg" / model_name / effect_name
         stats_effect_dir.mkdir(parents=True, exist_ok=True)
         observed_path = stats_effect_dir / "observed_statistic.npy"
         corrected_p_path = stats_effect_dir / "corrected_p_values.npy"
-        np.save(observed_path, np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float))
-        np.save(corrected_p_path, np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float))
+        observed_map = np.asarray(
+            [
+                [offset, offset + 0.2, offset + 0.4, offset + 0.6, offset + 0.8],
+                [offset + 0.1, offset + 0.3, offset + 0.5, offset + 0.7, offset + 0.9],
+                [offset - 0.2, offset, offset + 0.2, offset + 0.4, offset + 0.6],
+                [offset - 0.1, offset + 0.1, offset + 0.3, offset + 0.5, offset + 0.7],
+            ],
+            dtype=float,
+        )
+        corrected_p = np.asarray(
+            [
+                [0.20, 0.04, 0.30, 0.01, 0.50],
+                [0.10, 0.03, 0.06, 0.02, 0.20],
+                [0.50, 0.10, 0.03, 0.04, 0.60],
+                [0.70, 0.02, 0.08, 0.03, 0.40],
+            ],
+            dtype=float,
+        )
+        np.save(observed_path, observed_map)
+        np.save(corrected_p_path, corrected_p)
         (stats_effect_dir / "summary.json").write_text(
             json.dumps({"observed_statistic": str(observed_path), "corrected_p_values": str(corrected_p_path)}) + "\n",
             encoding="utf-8",
         )
 
-    monkeypatch.setattr(
-        figures_lmeeeg_fooof,
-        "select_lmeeeg_rows",
-        lambda config: [{"subject_id": "sub-001", "task": "conversation", "run": "1"}],
-    )
-    monkeypatch.setattr(
-        figures_lmeeeg_fooof,
-        "_load_or_fit_model_payloads",
-        lambda config, rows, target_name: {
-            "speech_rate_item_intercept": {
-                "betas": np.asarray([[[0.1, 0.2], [0.3, 0.4]]], dtype=float),
-                "t_values": np.asarray([[[1.0, 2.0], [3.0, 4.0]]], dtype=float),
-                "times": np.asarray([-0.1, 0.0], dtype=float),
-                "channel_names": ["Fz", "Cz"],
-                "column_names": ["speech_rate"],
-            }
-        },
-    )
-
-    captured_output_stems: list[Path] = []
-
-    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
-        captured_output_stems.append(output_stem)
-        output_stem.parent.mkdir(parents=True, exist_ok=True)
-        written_path = output_stem.with_suffix(".png")
-        written_path.write_text("stub\n", encoding="utf-8")
-        return [written_path]
-
-    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
-
-    args = Namespace(
-        config="config/config.yaml",
-        schema="config/schema.json",
-        viz_config=str(viz_config_path),
-        output=None,
-    )
-    exit_code = figures_lmeeeg_fooof.run(args, config=config)
-
-    assert exit_code == 0
-    manifest_path = out_dir / "figures" / "lmeeeg_fooof" / "figure_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    assert manifest["plot_count"] == 6
-    assert {plot["target"] for plot in manifest["plots"]} == {"offset", "exponent"}
-    assert {plot["measure"] for plot in manifest["plots"] if "measure" in plot} == {"beta", "t_value"}
-    assert any(plot.get("has_significance_overlay") for plot in manifest["plots"] if plot.get("measure") == "beta")
-    assert any(plot.get("source") == "stats_fallback" for plot in manifest["plots"])
-    assert captured_output_stems == [
-        out_dir / "figures" / "lmeeeg_fooof" / "offset" / "betas" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_fooof" / "offset" / "t_values" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_fooof" / "offset" / "statistics" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_fooof" / "exponent" / "betas" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_fooof" / "exponent" / "t_values" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_fooof" / "exponent" / "statistics" / "speech_rate_item_intercept" / "speech_rate",
-    ]
-
-
-def test_figures_lmeeeg_writes_plots_for_each_induced_target(tmp_path: Path, monkeypatch) -> None:
-    out_dir = tmp_path / "out"
-    config = _lmeeeg_config(out_dir)
+        model_dir = out_dir / "lmeeeg" / model_name
+        model_dir.mkdir(parents=True, exist_ok=True)
+        np.save(model_dir / "times.npy", times)
+        (model_dir / "channel_names.json").write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
 
     viz_config_path = tmp_path / "viz.yaml"
-    viz_config_path.write_text(yaml.safe_dump({"viz": {"formats": ["png"], "dpi": 72}}), encoding="utf-8")
-
-    for target_name in ("theta", "alpha"):
-        stats_effect_dir = out_dir / "stats" / "lmeeeg_induced" / target_name / "speech_rate_item_intercept" / "speech_rate"
-        stats_effect_dir.mkdir(parents=True, exist_ok=True)
-        observed_path = stats_effect_dir / "observed_statistic.npy"
-        corrected_p_path = stats_effect_dir / "corrected_p_values.npy"
-        np.save(observed_path, np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float))
-        np.save(corrected_p_path, np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float))
-        (stats_effect_dir / "summary.json").write_text(
-            json.dumps({"observed_statistic": str(observed_path), "corrected_p_values": str(corrected_p_path)}) + "\n",
-            encoding="utf-8",
-        )
-
-    monkeypatch.setattr(figures_lmeeeg, "select_lmeeeg_rows", lambda config: [{"subject_id": "sub-001", "task": "conversation", "run": "1"}])
-    monkeypatch.setattr(
-        figures_lmeeeg,
-        "_load_or_fit_model_payloads",
-        lambda config, rows, config_section, target_name: {
-            "speech_rate_item_intercept": {
-                "betas": np.asarray([[[0.1, 0.2], [0.3, 0.4]]], dtype=float),
-                "t_values": np.asarray([[[1.0, 2.0], [3.0, 4.0]]], dtype=float),
-                "times": np.asarray([-0.1, 0.0], dtype=float),
-                "channel_names": ["Fz", "Cz"],
-                "column_names": ["speech_rate"],
-            }
-        },
-    )
-
-    captured_output_stems: list[Path] = []
-
-    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
-        captured_output_stems.append(output_stem)
-        output_stem.parent.mkdir(parents=True, exist_ok=True)
-        written_path = output_stem.with_suffix(".png")
-        written_path.write_text("stub\n", encoding="utf-8")
-        return [written_path]
-
-    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
-
-    args = Namespace(
-        config="config/config.yaml",
-        schema="config/schema.json",
-        config_section="lmeeeg_induced",
-        viz_config=str(viz_config_path),
-        output=None,
-    )
-    exit_code = figures_lmeeeg.run(args, config=config)
-
-    assert exit_code == 0
-    manifest_path = out_dir / "figures" / "lmeeeg_induced" / "figure_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["plot_count"] == 6
-    assert {plot["target"] for plot in manifest["plots"]} == {"theta", "alpha"}
-    assert captured_output_stems == [
-        out_dir / "figures" / "lmeeeg_induced" / "theta" / "betas" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_induced" / "theta" / "t_values" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_induced" / "theta" / "statistics" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_induced" / "alpha" / "betas" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_induced" / "alpha" / "t_values" / "speech_rate_item_intercept" / "speech_rate",
-        out_dir / "figures" / "lmeeeg_induced" / "alpha" / "statistics" / "speech_rate_item_intercept" / "speech_rate",
-    ]
-
-
-def test_figures_lmeeeg_fooof_inference_writes_plots_for_each_target(tmp_path: Path, monkeypatch) -> None:
-    out_dir = tmp_path / "out"
-    config = _lmeeeg_config(out_dir)
-    model_name = "speech_rate_item_intercept"
-    effect_name = "speech_rate"
-
-    for target_name in ("offset", "exponent"):
-        target_lmeeeg_dir = out_dir / "lmeeeg_fooof" / target_name / model_name
-        target_stats_dir = out_dir / "stats" / "lmeeeg_fooof" / target_name / model_name / effect_name
-        target_lmeeeg_dir.mkdir(parents=True, exist_ok=True)
-        target_stats_dir.mkdir(parents=True, exist_ok=True)
-
-        np.save(target_lmeeeg_dir / "times.npy", np.asarray([-0.1, 0.0], dtype=float))
-        (target_lmeeeg_dir / "channel_names.json").write_text(json.dumps(["Fz", "Cz"]) + "\n", encoding="utf-8")
-
-        observed_path = target_stats_dir / "observed_statistic.npy"
-        corrected_p_path = target_stats_dir / "corrected_p_values.npy"
-        np.save(observed_path, np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float))
-        np.save(corrected_p_path, np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float))
-        (target_stats_dir / "summary.json").write_text(
-            json.dumps({"observed_statistic": str(observed_path), "corrected_p_values": str(corrected_p_path), "correction": "maxstat"}) + "\n",
-            encoding="utf-8",
-        )
-
-    viz_config_path = tmp_path / "viz.yaml"
-    viz_config_path.write_text(yaml.safe_dump({"viz": {"formats": ["png"], "dpi": 72}}), encoding="utf-8")
-
-    captured_output_stems: list[Path] = []
-
-    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
-        captured_output_stems.append(output_stem)
-        output_stem.parent.mkdir(parents=True, exist_ok=True)
-        written_path = output_stem.with_suffix(".png")
-        written_path.write_text("stub\n", encoding="utf-8")
-        return [written_path]
-
-    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
-
-    args = Namespace(
-        config="config/config.yaml",
-        schema="config/schema.json",
-        viz_config=str(viz_config_path),
-        output=None,
-    )
-    exit_code = figures_lmeeeg_fooof_inference.run(args, config=config)
-
-    assert exit_code == 0
-    manifest_path = out_dir / "figures" / "lmeeeg_fooof_inference" / "figure_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["plot_count"] == 2
-    assert {plot["target"] for plot in manifest["plots"]} == {"offset", "exponent"}
-    assert captured_output_stems == [
-        out_dir / "figures" / "lmeeeg_fooof_inference" / "offset" / model_name / "speech_rate_observed",
-        out_dir / "figures" / "lmeeeg_fooof_inference" / "offset" / model_name / "speech_rate_corrected_p",
-        out_dir / "figures" / "lmeeeg_fooof_inference" / "offset" / model_name / "speech_rate_p005_masked",
-        out_dir / "figures" / "lmeeeg_fooof_inference" / "exponent" / model_name / "speech_rate_observed",
-        out_dir / "figures" / "lmeeeg_fooof_inference" / "exponent" / model_name / "speech_rate_corrected_p",
-        out_dir / "figures" / "lmeeeg_fooof_inference" / "exponent" / model_name / "speech_rate_p005_masked",
-    ]
-
-
-def test_figures_lmeeeg_inference_writes_plots_for_each_induced_target(tmp_path: Path, monkeypatch) -> None:
-    out_dir = tmp_path / "out"
-    config = _lmeeeg_config(out_dir)
-    model_name = "speech_rate_item_intercept"
-    effect_name = "speech_rate"
-
-    for target_name in ("theta", "alpha"):
-        target_lmeeeg_dir = out_dir / "lmeeeg_induced" / target_name / model_name
-        target_stats_dir = out_dir / "stats" / "lmeeeg_induced" / target_name / model_name / effect_name
-        target_lmeeeg_dir.mkdir(parents=True, exist_ok=True)
-        target_stats_dir.mkdir(parents=True, exist_ok=True)
-
-        np.save(target_lmeeeg_dir / "times.npy", np.asarray([-0.1, 0.0], dtype=float))
-        (target_lmeeeg_dir / "channel_names.json").write_text(json.dumps(["Fz", "Cz"]) + "\n", encoding="utf-8")
-
-        observed_path = target_stats_dir / "observed_statistic.npy"
-        corrected_p_path = target_stats_dir / "corrected_p_values.npy"
-        np.save(observed_path, np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float))
-        np.save(corrected_p_path, np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float))
-        (target_stats_dir / "summary.json").write_text(
-            json.dumps({"observed_statistic": str(observed_path), "corrected_p_values": str(corrected_p_path), "correction": "maxstat"}) + "\n",
-            encoding="utf-8",
-        )
-
-    viz_config_path = tmp_path / "viz.yaml"
-    viz_config_path.write_text(yaml.safe_dump({"viz": {"formats": ["png"], "dpi": 72}}), encoding="utf-8")
-
-    captured_output_stems: list[Path] = []
-
-    def fake_plot_joint_model_weights(*args, output_stem: Path, **kwargs) -> list[Path]:
-        captured_output_stems.append(output_stem)
-        output_stem.parent.mkdir(parents=True, exist_ok=True)
-        written_path = output_stem.with_suffix(".png")
-        written_path.write_text("stub\n", encoding="utf-8")
-        return [written_path]
-
-    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
-
-    args = Namespace(
-        config="config/config.yaml",
-        schema="config/schema.json",
-        config_section="lmeeeg_induced",
-        viz_config=str(viz_config_path),
-        output=None,
-    )
-    exit_code = figures_lmeeeg_inference.run(args, config=config)
-
-    assert exit_code == 0
-    manifest_path = out_dir / "figures" / "lmeeeg_induced_inference" / "figure_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["plot_count"] == 2
-    assert {plot["target"] for plot in manifest["plots"]} == {"theta", "alpha"}
-    assert captured_output_stems == [
-        out_dir / "figures" / "lmeeeg_induced_inference" / "theta" / model_name / "speech_rate_observed",
-        out_dir / "figures" / "lmeeeg_induced_inference" / "theta" / model_name / "speech_rate_corrected_p",
-        out_dir / "figures" / "lmeeeg_induced_inference" / "theta" / model_name / "speech_rate_p005_masked",
-        out_dir / "figures" / "lmeeeg_induced_inference" / "alpha" / model_name / "speech_rate_observed",
-        out_dir / "figures" / "lmeeeg_induced_inference" / "alpha" / model_name / "speech_rate_corrected_p",
-        out_dir / "figures" / "lmeeeg_induced_inference" / "alpha" / model_name / "speech_rate_p005_masked",
-    ]
-
-
-def test_build_lmeeeg_inference_manifest_overlays_significance_on_observed_plot(tmp_path: Path, monkeypatch) -> None:
-    out_dir = tmp_path / "out"
-    stats_root = out_dir / "stats" / "lmeeeg_induced" / "theta"
-    lmeeeg_root = out_dir / "lmeeeg_induced" / "theta"
-    model_name = "speech_rate_item_intercept"
-    effect_name = "speech_rate"
-    model_dir = lmeeeg_root / model_name
-    effect_dir = stats_root / model_name / effect_name
-    model_dir.mkdir(parents=True, exist_ok=True)
-    effect_dir.mkdir(parents=True, exist_ok=True)
-
-    times = np.asarray([-0.1, 0.0], dtype=float)
-    observed = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float)
-    corrected_p = np.asarray([[0.04, 0.2], [0.03, 0.5]], dtype=float)
-    np.save(model_dir / "times.npy", times)
-    (model_dir / "channel_names.json").write_text(json.dumps(["Fz", "Cz"]) + "\n", encoding="utf-8")
-    observed_path = effect_dir / "observed_statistic.npy"
-    corrected_p_path = effect_dir / "corrected_p_values.npy"
-    np.save(observed_path, observed)
-    np.save(corrected_p_path, corrected_p)
-    (effect_dir / "summary.json").write_text(
-        json.dumps(
+    viz_config_path.write_text(
+        yaml.safe_dump(
             {
-                "observed_statistic": str(observed_path),
-                "corrected_p_values": str(corrected_p_path),
-                "correction": "maxstat",
+                "viz": {
+                    "formats": ["png"],
+                    "dpi": 72,
+                    "theme": {
+                        "colors": {
+                            "self": "#8C2D2D",
+                            "other": "#1F4E79",
+                            "shared": "#2F6B3B",
+                            "neutral": "#4B5563",
+                            "reference": "#6B7280",
+                            "background": "#FFFFFF",
+                        }
+                    },
+                    "figures": {
+                        "lmeeeg_main_results": {
+                            "significance_threshold": 0.05,
+                            "plotting_tmin_s": -0.8,
+                            "plotting_tmax_s": 0.0,
+                            "models": {
+                                "self": {
+                                    "label": "Unique self",
+                                    "model_name": "self_rate_effect",
+                                    "effect_name": "self_rate",
+                                    "topomap_times_s": [-0.8, 0.0],
+                                },
+                                "other": {
+                                    "label": "Unique other",
+                                    "model_name": "other_rate_effect",
+                                    "effect_name": "other_rate",
+                                    "topomap_times_s": [-0.5],
+                                },
+                            },
+                        }
+                    },
+                }
             }
-        )
-        + "\n",
+        ),
         encoding="utf-8",
     )
 
-    captured_significance_masks: dict[Path, np.ndarray | None] = {}
+    def fake_draw_topomap_with_significant_markers(**kwargs):
+        axis = kwargs["axis"]
+        axis.set_title(str(kwargs["title"]))
+        return axis.imshow(np.zeros((2, 2), dtype=float), vmin=kwargs["vmin"], vmax=kwargs["vmax"], cmap=kwargs["cmap"])
 
-    def fake_plot_joint_model_weights(*args, output_stem: Path, significance_mask=None, **kwargs) -> list[Path]:
-        captured_significance_masks[output_stem] = None if significance_mask is None else np.asarray(significance_mask, dtype=bool)
-        output_stem.parent.mkdir(parents=True, exist_ok=True)
-        written_path = output_stem.with_suffix(".png")
-        written_path.write_text("stub\n", encoding="utf-8")
-        return [written_path]
+    monkeypatch.setattr(lmeeeg_results_viz, "_draw_topomap_with_significant_markers", fake_draw_topomap_with_significant_markers)
 
-    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
-
-    manifest_path = out_dir / "figures" / "lmeeeg_induced_inference" / "figure_manifest.json"
-    manifest = lmeeeg_viz.build_lmeeeg_inference_manifest(
-        out_dir=out_dir,
-        stats_root=stats_root,
-        lmeeeg_root=lmeeeg_root,
-        manifest_path=manifest_path,
-        figure_subdir="lmeeeg_induced_inference/theta",
-        formats=("png",),
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        config_section="lmeeeg",
+        viz_config=str(viz_config_path),
+        output=None,
     )
+    exit_code = figures_lmeeeg_main_results.run(args, config=config)
 
-    expected_mask = corrected_p < 0.05
-    observed_stem = out_dir / "figures" / "lmeeeg_induced_inference" / "theta" / model_name / "speech_rate_observed"
-    corrected_p_stem = out_dir / "figures" / "lmeeeg_induced_inference" / "theta" / model_name / "speech_rate_corrected_p"
-    masked_stem = out_dir / "figures" / "lmeeeg_induced_inference" / "theta" / model_name / "speech_rate_p005_masked"
-
+    assert exit_code == 0
+    manifest_path = out_dir / "figures" / "lmeeeg_main_results" / "figure_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["plot_count"] == 1
-    assert np.array_equal(captured_significance_masks[observed_stem], expected_mask)
-    assert captured_significance_masks[corrected_p_stem] is None
-    assert captured_significance_masks[masked_stem] is None
+    plot = manifest["plots"][0]
+    assert plot["plot_name"] == "lmeeeg_main_results"
+    assert plot["significance_threshold"] == 0.05
+    assert plot["plotting_tmin_s"] == -0.8
+    assert plot["plotting_tmax_s"] == 0.0
+    assert [item["model_name"] for item in plot["models"]] == ["self_rate_effect", "other_rate_effect"]
+    assert plot["models"][0]["topomap_times_s"] == [-0.8, 0.0]
+    assert plot["models"][1]["topomap_times_s"] == [-0.5]
+    assert len(plot["files"]) == 1
+    assert Path(plot["files"][0]).exists()

@@ -52,8 +52,6 @@ make_residual_output_table <- function(augmented_data, trial_id_column = NULL) {
     present_key_columns,
     "self_rate",
     "other_rate",
-    "openness",
-    "extraversion",
     "predicted_self_rate",
     "residual_model_label",
     "residual_model_formula",

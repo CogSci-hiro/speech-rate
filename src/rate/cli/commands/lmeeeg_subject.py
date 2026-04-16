@@ -10,7 +10,6 @@ from typing import Any, Mapping
 
 from rate.cli.commands._workflow_common import add_common_config_arguments
 from rate.design import list_model_names
-from rate.lmeeeg.induced import extract_induced_power
 from rate.lmeeeg.io import (
     build_lmeeeg_model_output_paths,
     build_lmeeeg_output_paths,
@@ -19,7 +18,7 @@ from rate.lmeeeg.io import (
 )
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.pooling import load_pooled_lmeeeg_trial_data, select_lmeeeg_rows
-from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays, build_lmeeeg_trial_table
+from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
 
 LOGGER = logging.getLogger(__name__)
 REQUIRES_CONFIG = True
@@ -74,27 +73,7 @@ def _fit_one_run(
         output_paths.metadata_input_path,
         trial_regressors_path=trial_regressors_path,
     )
-    if config_section == "lmeeeg_induced":
-        if target_name is None:
-            raise ValueError("`target` is required for `lmeeeg_induced` analyses.")
-        eeg_data, times = extract_induced_power(
-            epochs,
-            config,
-            config_section=config_section,
-            target_name=str(target_name),
-        )
-        trial_data = build_lmeeeg_trial_data_from_arrays(
-            eeg_data=eeg_data,
-            metadata_df=metadata_df,
-            channel_names=list(epochs.ch_names),
-            times=times,
-            config=config,
-            config_section=config_section,
-            model_name=model_name,
-            metadata_provenance=getattr(metadata_df, "attrs", {}).get("metadata_provenance"),
-        )
-    else:
-        trial_data = build_lmeeeg_trial_table(epochs, metadata_df, config, config_section=config_section, model_name=model_name)
+    trial_data = build_lmeeeg_trial_table(epochs, metadata_df, config, config_section=config_section, model_name=model_name)
     result = fit_lmeeeg_mass_model(trial_data, config, config_section=config_section, model_name=model_name)
     summary = save_lmeeeg_result(result, output_paths)
     LOGGER.info(

@@ -13,10 +13,10 @@ import yaml
 
 from rate.cli.commands._workflow_common import add_common_config_arguments
 from rate.design import list_model_names
-from rate.lmeeeg.induced import resolve_target_names, section_supports_targets
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.pooling import load_pooled_lmeeeg_trial_data, select_lmeeeg_rows
+from rate.lmeeeg.targets import resolve_target_names, section_supports_targets
 from rate.paths import resolve_out_dir
 from rate.viz.lmeeeg import (
     build_lmeeeg_qc_manifest,

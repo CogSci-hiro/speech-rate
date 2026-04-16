@@ -1,4 +1,4 @@
-"""Unit tests for canonical events building and questionnaire joins."""
+"""Unit tests for canonical events building."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 
 from rate.events import EventsTableError, build_events_table
-from rate.events.questionnaires import QuestionnaireError, build_subject_questionnaire_table
 
 
 def _write_csv(path: Path, text: str) -> None:
@@ -24,17 +23,10 @@ def _write_annotation(path: Path, text: str) -> None:
     _write_csv(path, text)
 
 
-def _config(out_dir: Path, questionnaire_dir: Path) -> dict:
+def _config(out_dir: Path) -> dict:
     return {
         "paths": {
             "out_dir": str(out_dir),
-            "questionnaire_dir": str(questionnaire_dir),
-        },
-        "dataset": {
-            "questionnaires": {
-                "likeability_filename": "likeability.csv",
-                "personality_filename": "personality.csv",
-            }
         },
         "events": {
             "ipu_min_duration_s": 0.3,
@@ -51,58 +43,11 @@ def _config(out_dir: Path, questionnaire_dir: Path) -> dict:
     }
 
 
-def test_build_subject_questionnaire_table_normalizes_ids(tmp_path: Path) -> None:
-    questionnaire_dir = tmp_path / "questionnaires"
-    _write_csv(
-        questionnaire_dir / "likeability.csv",
-        """
-        subject_id,q1,q2,q3,q4,q5,q6,q7,q8,q9,q10,Score
-        001,1,1,1,1,1,1,2,2,4,1,15
-        002,1,1,1,1,1,1,2,2,4,1,10
-        """,
-    )
-    _write_csv(
-        questionnaire_dir / "personality.csv",
-        """
-        subject_id,q1,q2,q3,q4,q5,q6,q7,q8,q9,q10,extraversion,agreeableness,conscientiousness,neuroticism,openness
-        001,3,2,4,2,3,2,3,2,4,1,4,4,7,7,3
-        002,3,2,4,2,3,2,3,2,4,1,5,6,7,2,8
-        """,
-    )
-
-    table = build_subject_questionnaire_table(_config(tmp_path / "out", questionnaire_dir))
-
-    assert list(table["subject_id"]) == ["sub-001", "sub-002"]
-    assert list(table.columns) == [
-        "subject_id",
-        "likeability",
-        "extraversion",
-        "agreeableness",
-        "conscientiousness",
-        "neuroticism",
-        "openness",
-    ]
-
-
-def test_build_subject_questionnaire_table_rejects_duplicate_subjects(tmp_path: Path) -> None:
-    questionnaire_dir = tmp_path / "questionnaires"
-    _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15\nsub-001,16")
-    _write_csv(
-        questionnaire_dir / "personality.csv",
-        "subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness\n001,4,4,7,7,3",
-    )
-
-    with pytest.raises(QuestionnaireError, match="Duplicate questionnaire subject_id rows"):
-        build_subject_questionnaire_table(_config(tmp_path / "out", questionnaire_dir))
-
-
-def test_build_events_table_builds_core_rate_columns_and_appends_questionnaires(
+def test_build_events_table_builds_core_rate_columns(
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     out_dir = tmp_path / "out"
-    questionnaire_dir = tmp_path / "questionnaires"
-    config = _config(out_dir, questionnaire_dir)
+    config = _config(out_dir)
 
     ann_a = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
     ann_b = tmp_path / "annotations" / "sub-002_task-dialogue_run-1_ipu.csv"
@@ -146,17 +91,6 @@ def test_build_events_table_builds_core_rate_columns_and_appends_questionnaires(
         ]
     )
 
-    _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15\n003,12")
-    _write_csv(
-        questionnaire_dir / "personality.csv",
-        """
-        subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness
-        001,4,4,7,7,3
-        003,5,6,7,2,8
-        """,
-    )
-
-    caplog.set_level("WARNING")
     events_df, summary = build_events_table(config, dataset_index_df=dataset_index_df)
 
     required_columns = {
@@ -185,9 +119,6 @@ def test_build_events_table_builds_core_rate_columns_and_appends_questionnaires(
         "annotations_path",
     }
     assert required_columns.issubset(set(events_df.columns))
-    assert {"likeability", "extraversion", "agreeableness", "conscientiousness", "neuroticism", "openness"}.issubset(
-        set(events_df.columns)
-    )
     assert len(events_df) == 4
     assert events_df["event_id"].str.startswith("dyad-001_1_dialogue_ev").all()
     assert events_df["self_rate"].notna().all()
@@ -196,23 +127,13 @@ def test_build_events_table_builds_core_rate_columns_and_appends_questionnaires(
     assert events_df["other_n_syllables"].notna().sum() >= 3
     assert events_df["other_ipu_duration"].notna().sum() >= 3
     assert events_df["time_within_run"].between(0.0, 1.0).all()
-    assert events_df.loc[events_df["subject_id"] == "sub-001", "likeability"].eq(15).all()
-    assert events_df.loc[events_df["subject_id"] == "sub-002", "likeability"].isna().all()
-    assert summary["events_without_questionnaires"] == ["sub-002"]
-    assert summary["questionnaires_without_events"] == ["sub-003"]
-    assert "Questionnaire data missing for 1 event subjects" in caplog.text
-    assert "Questionnaire rows found for 1 subjects not present in events" in caplog.text
+    assert summary == {"event_row_count": 4}
 
 
 def test_build_events_table_requires_annotation_columns(tmp_path: Path) -> None:
-    config = _config(tmp_path / "out", tmp_path / "questionnaires")
+    config = _config(tmp_path / "out")
     ann = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
     _write_annotation(ann, "t_onset,t_offset\n0.0,0.7")
-    _write_csv(tmp_path / "questionnaires" / "likeability.csv", "subject_id,Score\n001,15")
-    _write_csv(
-        tmp_path / "questionnaires" / "personality.csv",
-        "subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness\n001,4,4,7,7,3",
-    )
 
     dataset_index_df = pd.DataFrame(
         [
@@ -237,8 +158,7 @@ def test_build_events_table_shifts_annotation_times_by_raw_anchor_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     out_dir = tmp_path / "out"
-    questionnaire_dir = tmp_path / "questionnaires"
-    config = _config(out_dir, questionnaire_dir)
+    config = _config(out_dir)
 
     ann = tmp_path / "annotations" / "sub-001_task-dialogue_run-1_ipu.csv"
     _write_annotation(
@@ -248,11 +168,6 @@ def test_build_events_table_shifts_annotation_times_by_raw_anchor_event(
         0.0,0.7,4,A
         1.0,1.6,5,A
         """,
-    )
-    _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15")
-    _write_csv(
-        questionnaire_dir / "personality.csv",
-        "subject_id,extraversion,agreeableness,conscientiousness,neuroticism,openness\n001,4,4,7,7,3",
     )
     raw_path = tmp_path / "sub-001_raw.fif"
     raw_path.write_text("", encoding="utf-8")
@@ -278,18 +193,3 @@ def test_build_events_table_shifts_annotation_times_by_raw_anchor_event(
 
     assert events_df["t_onset"].tolist() == pytest.approx([2.5, 3.5])
     assert events_df["t_offset"].tolist() == pytest.approx([3.2, 4.1])
-
-
-def test_build_subject_questionnaire_table_accepts_legacy_conscienciousness_column(tmp_path: Path) -> None:
-    questionnaire_dir = tmp_path / "questionnaires"
-    _write_csv(questionnaire_dir / "likeability.csv", "subject_id,Score\n001,15")
-    _write_csv(
-        questionnaire_dir / "personality.csv",
-        "subject_id,extraversion,agreeableness,conscienciousness,neuroticism,openness\n001,4,4,7,7,3",
-    )
-
-    table = build_subject_questionnaire_table(_config(tmp_path / "out", questionnaire_dir))
-
-    assert "conscientiousness" in table.columns
-    assert "conscienciousness" not in table.columns
-    assert table.loc[0, "conscientiousness"] == 7

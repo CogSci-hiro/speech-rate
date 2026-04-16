@@ -37,8 +37,6 @@ def _write_residuals_csv(path: Path) -> Path:
                 "dyad-002",
             ],
             "self_rate": [4.1, 4.4, 4.6, 3.3, 3.5, 3.7, 5.0, 5.2, 5.3],
-            "openness": [3.0, 3.0, 3.0, 4.2, 4.2, 4.2, 5.1, 5.1, 5.1],
-            "extraversion": [2.5, 2.5, 2.5, 3.7, 3.7, 3.7, 4.8, 4.8, 4.8],
         }
     )
     dataframe.to_csv(path, index=False)
@@ -72,7 +70,6 @@ def test_build_behavioural_manifest_writes_combined_plot(tmp_path: Path) -> None
         figure_config={
             "speech_rate": {"formats": ["png"], "min_trials_per_subject": 3, "random_seed": 1},
             "subject_slopes": {"formats": ["png"]},
-            "personality": {"formats": ["png"]},
         },
         formats=("png",),
         dpi=72,
@@ -88,7 +85,6 @@ def test_build_behavioural_manifest_writes_combined_plot(tmp_path: Path) -> None
     assert plot["n_subjects"] == 3
     assert plot["n_dyads"] == 2
     assert plot["ordered_dyads"] == ["dyad-001", "dyad-002"]
-    assert plot["predictors"] == ["openness", "extraversion"]
     assert len(plot["files"]) == 1
     assert Path(plot["files"][0]).exists()
 
@@ -114,7 +110,6 @@ def test_speech_rate_plot_requires_dyad_column_in_residuals(tmp_path: Path) -> N
             figure_config={
                 "speech_rate": {"formats": ["png"], "min_trials_per_subject": 3},
                 "subject_slopes": {"enabled": False},
-                "personality": {"enabled": False},
             },
             formats=("png",),
             dpi=72,
@@ -145,9 +140,6 @@ def test_figures_behavioural_cli_writes_manifest(tmp_path: Path) -> None:
                                 "min_trials_per_subject": 3,
                             },
                             "subject_slopes": {
-                                "enabled": True,
-                            },
-                            "personality": {
                                 "enabled": True,
                             },
                         }

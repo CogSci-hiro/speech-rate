@@ -13,14 +13,6 @@ rule build_events:
         preprocessing=PREPROCESSING_STAGE,
         config_path="config/config.yaml",
         schema_path="config/schema.json",
-        likeability=lambda wildcards: str(
-            Path(RESOLVED_CONFIG["paths"]["questionnaire_dir"])
-            / RESOLVED_CONFIG.get("dataset", {}).get("questionnaires", {}).get("likeability_filename", "likeability.csv")
-        ),
-        personality=lambda wildcards: str(
-            Path(RESOLVED_CONFIG["paths"]["questionnaire_dir"])
-            / RESOLVED_CONFIG.get("dataset", {}).get("questionnaires", {}).get("personality_filename", "personality.csv")
-        ),
     output:
         events=EVENTS_OUTPUT,
         qc=EVENTS_QC_OUTPUT,
