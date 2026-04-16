@@ -12,6 +12,7 @@ import pytest
 
 from rate.preprocessing.bad_channels import load_bad_channels_from_bids_tsv
 from rate.preprocessing.channels import apply_bids_channel_types
+from rate.preprocessing.io import resolve_channels_tsv_path
 from rate.preprocessing.pipeline import preprocess_run
 
 
@@ -364,6 +365,26 @@ def test_load_bad_channels_from_bids_tsv_allows_no_bad_rows(tmp_path: Path) -> N
 
     assert bads == []
     assert raw.info["bads"] == []
+
+
+def test_resolve_channels_tsv_path_ignores_hidden_mac_files(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    bids_dir = Path(config["paths"]["bids_dir"])
+    visible_path = bids_dir / "sub-001" / "eeg" / "sub-001_task-conversation_run-01_channels.tsv"
+    hidden_path = bids_dir / ".sub-001" / "eeg" / ".sub-001_task-conversation_run-01_channels.tsv"
+    _write_channels_tsv(visible_path, bad_names=["Fz"])
+    _write_channels_tsv(hidden_path, bad_names=["Cz"])
+
+    row = {
+        "dyad_id": "dyad-001",
+        "subject_id": "sub-001",
+        "task": "conversation",
+        "run": "1",
+    }
+
+    resolved = resolve_channels_tsv_path(config, row)
+
+    assert resolved == visible_path
 
 
 def test_interpolate_bad_channels_allows_no_bads_marked() -> None:

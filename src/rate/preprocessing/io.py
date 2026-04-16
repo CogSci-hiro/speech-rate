@@ -94,6 +94,9 @@ def _find_matching_bids_channels_tsv(*, bids_dir: Path, row: Mapping[str, Any]) 
 
     candidates: list[Path] = []
     for path in sorted(bids_dir.rglob("*channels.tsv")):
+        relative_parts = path.relative_to(bids_dir).parts
+        if any(part.startswith(".") for part in relative_parts):
+            continue
         path_text = path.as_posix().lower()
         if subject_id not in path_text:
             continue
