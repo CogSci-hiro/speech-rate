@@ -28,7 +28,15 @@ from rate.cli.commands import figures_lmeeeg
 from rate.cli.commands import figures_lmeeeg_inference
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths, build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
-from rate.lmeeeg.similarity import _compute_tfce_1d, build_similarity_output_paths
+from rate.lmeeeg.similarity import (
+    SimilarityPermutationScheme,
+    _build_similarity_permutation_grouping,
+    _compute_tfce_1d,
+    _generate_similarity_permutation_indices,
+    _permute_similarity_predictor,
+    build_similarity_output_paths,
+    resolve_similarity_settings,
+)
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
 from rate.lmeeeg.variance_partition import (
@@ -141,6 +149,30 @@ def _lmeeeg_config(out_dir: Path) -> dict:
 
 
 def _write_variance_partition_epochs(tmp_path: Path, config: dict, rows: list[dict[str, str]], metadata_by_subject: dict[str, pd.DataFrame], data_by_subject: dict[str, np.ndarray]) -> Path:
+    dataset_index_path = tmp_path / "out" / "dataset" / "index.parquet"
+    dataset_index_path.parent.mkdir(parents=True, exist_ok=True)
+    written_rows: list[dict[str, str]] = []
+    for row in rows:
+        metadata = metadata_by_subject[str(row["subject_id"])]
+        data = data_by_subject[str(row["subject_id"])]
+        epochs = _make_epochs(data, metadata.copy())
+        epoch_paths = build_epoch_output_paths(config, row)
+        epoch_paths.epochs_output_path.parent.mkdir(parents=True, exist_ok=True)
+        epochs.save(epoch_paths.epochs_output_path, overwrite=True, verbose="ERROR")
+        metadata.to_csv(epoch_paths.metadata_output_path, index=False)
+        written_rows.append(row)
+    write_parquet_dataframe(pd.DataFrame(written_rows), dataset_index_path)
+    return dataset_index_path
+
+
+def _write_similarity_epochs(
+    tmp_path: Path,
+    config: dict,
+    rows: list[dict[str, str]],
+    *,
+    metadata_by_subject: dict[str, pd.DataFrame],
+    data_by_subject: dict[str, np.ndarray],
+) -> Path:
     dataset_index_path = tmp_path / "out" / "dataset" / "index.parquet"
     dataset_index_path.parent.mkdir(parents=True, exist_ok=True)
     written_rows: list[dict[str, str]] = []
@@ -610,6 +642,256 @@ def test_lmeeeg_similarity_cli_writes_outputs(tmp_path: Path) -> None:
     assert difference_map.shape == (2, 3)
     assert time_curve.shape == (3,)
     assert np.isclose(summary["whole_map_difference"]["mean_signed_difference"], float(np.mean(difference_map)))
+
+
+def test_resolve_similarity_settings_supports_explicit_refit_inference_config(tmp_path: Path) -> None:
+    config = _lmeeeg_config(tmp_path / "out")
+    config["similarity"] = {
+        "enabled": True,
+        "analysis_name": "other_vs_self_beta",
+        "predictor_a": "other_rate",
+        "predictor_b": "self_rate",
+        "map_type": "beta",
+        "metrics": {
+            "whole_map": ["pearson", "cosine"],
+            "time_resolved_topography": {"enabled": True, "method": "pearson"},
+        },
+        "inference": {
+            "method": "refit_permutation",
+            "n_permutations": 12,
+            "tail": "two-sided",
+            "tfce": {"enabled": True, "e_power": 0.5, "h_power": 2.0, "dh": 0.1},
+            "permutation_scheme": {
+                "kind": "circular_shift_within_subject",
+                "group_by": ["subject_id"],
+                "within_run": True,
+                "random_seed": 42,
+            },
+        },
+    }
+
+    resolved = resolve_similarity_settings(config)
+
+    assert resolved.analysis_name == "other_vs_self_beta"
+    assert resolved.input_settings.predictor_a == "other_rate"
+    assert resolved.input_settings.predictor_b == "self_rate"
+    assert resolved.input_settings.value_field == "beta"
+    assert resolved.inference.method == "refit_permutation"
+    assert resolved.inference.n_permutations == 12
+    assert resolved.inference.permutation_scheme.kind == "circular_shift_within_subject"
+    assert resolved.inference.permutation_scheme.group_by == ("subject_id",)
+    assert resolved.inference.permutation_scheme.within_run is True
+    assert resolved.inference.random_seed == 42
+
+
+def test_similarity_circular_shift_permutation_preserves_within_block_values() -> None:
+    metadata = pd.DataFrame(
+        {
+            "subject_id": ["s1", "s1", "s1", "s2", "s2", "s2"],
+            "run": ["1", "1", "2", "1", "1", "2"],
+            "other_rate": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "self_rate": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+        }
+    )
+    grouping = _build_similarity_permutation_grouping(
+        metadata,
+        scheme=SimilarityPermutationScheme(
+            kind="circular_shift_within_subject",
+            group_by=("subject_id",),
+            within_run=True,
+        ),
+    )
+
+    permutation_indices = _generate_similarity_permutation_indices(
+        n_rows=len(metadata),
+        grouping=grouping,
+        rng=np.random.default_rng(3),
+    )
+    permuted = _permute_similarity_predictor(
+        metadata,
+        predictor_names=("other_rate", "self_rate"),
+        permutation_indices=permutation_indices,
+    )
+
+    assert permutation_indices.shape == (len(metadata),)
+    for group_indices in grouping.group_indices:
+        original_other = metadata.loc[group_indices, "other_rate"].to_numpy(dtype=float)
+        permuted_other = permuted.loc[group_indices, "other_rate"].to_numpy(dtype=float)
+        original_self = metadata.loc[group_indices, "self_rate"].to_numpy(dtype=float)
+        permuted_self = permuted.loc[group_indices, "self_rate"].to_numpy(dtype=float)
+        np.testing.assert_array_equal(np.sort(permuted_other), np.sort(original_other))
+        np.testing.assert_array_equal(np.sort(permuted_self), np.sort(original_self))
+    assert not np.array_equal(
+        permuted.loc[grouping.group_indices[0], "other_rate"].to_numpy(dtype=float),
+        metadata.loc[grouping.group_indices[0], "other_rate"].to_numpy(dtype=float),
+    )
+
+
+def test_lmeeeg_similarity_none_mode_writes_descriptive_outputs_only(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    config["similarity"]["inferential_test"]["enabled"] = False
+
+    other_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    self_paths = build_lmeeeg_model_output_paths(config, model_name="self_rate_effect")
+    other_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+    self_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    channel_names = ["Fz", "Cz"]
+    times = np.asarray([-0.1, 0.0, 0.1], dtype=float)
+    other_beta = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[1.0, 2.0, 3.0], [0.5, 1.0, 1.5]],
+        ],
+        dtype=float,
+    )
+    self_beta = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[0.8, 1.9, 3.1], [0.4, 0.9, 1.7]],
+        ],
+        dtype=float,
+    )
+
+    for output_paths, predictor_name, betas in (
+        (other_paths, "other_rate", other_beta),
+        (self_paths, "self_rate", self_beta),
+    ):
+        np.save(output_paths.betas_output_path, betas)
+        np.save(output_paths.t_values_output_path, betas * 2.0)
+        np.save(output_paths.times_output_path, times)
+        output_paths.channel_names_output_path.write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
+        output_paths.column_names_output_path.write_text(json.dumps(["Intercept", predictor_name]) + "\n", encoding="utf-8")
+        output_paths.test_predictors_output_path.write_text(json.dumps([predictor_name]) + "\n", encoding="utf-8")
+        output_paths.summary_output_path.write_text(
+            json.dumps({"status": "ok", "predictor_of_interest": predictor_name}) + "\n",
+            encoding="utf-8",
+        )
+
+    args = Namespace(config="config/config.yaml", schema="config/schema.json")
+    exit_code = lmeeeg_similarity.run(args, config=config)
+    assert exit_code == 0
+
+    output_paths = build_similarity_output_paths(config)
+    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
+
+    assert summary["whole_map_similarity"]["pearson"]["p_value"] is None
+    assert summary["inference"]["descriptive_only"] is True
+    assert summary["whole_map_null_path"] is None
+    assert summary["time_resolved_topography"]["corrected_p_values_path"] is None
+    assert not output_paths.whole_map_null_output_path.exists()
+    assert not output_paths.time_resolved_p_values_output_path.exists()
+
+
+def test_lmeeeg_similarity_refit_permutation_writes_null_shapes(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    config["similarity"]["inference"] = {
+        "method": "refit_permutation",
+        "n_permutations": 4,
+        "tail": "two-sided",
+        "tfce": {"enabled": True, "e_power": 0.5, "h_power": 2.0, "dh": 0.1},
+        "permutation_scheme": {
+            "kind": "circular_shift_within_subject",
+            "group_by": ["subject_id"],
+            "within_run": True,
+            "random_seed": 11,
+        },
+    }
+    config["similarity"].pop("inferential_test", None)
+    config["lmeeeg"]["models"]["other_rate_effect"]["formula"] = "~ other_rate"
+    config["lmeeeg"]["models"]["other_rate_effect"]["standardize"] = ["other_rate"]
+    config["lmeeeg"]["models"]["self_rate_effect"]["formula"] = "~ self_rate"
+    config["lmeeeg"]["models"]["self_rate_effect"]["standardize"] = ["self_rate"]
+
+    rows = [
+        {"subject_id": "sub-001", "task": "conversation", "run": "1", "status": "ok"},
+        {"subject_id": "sub-002", "task": "conversation", "run": "1", "status": "ok"},
+    ]
+    metadata_by_subject: dict[str, pd.DataFrame] = {}
+    data_by_subject: dict[str, np.ndarray] = {}
+    for subject_index, row in enumerate(rows):
+        subject_id = str(row["subject_id"])
+        other_rate = np.asarray([0.0, 1.4, -0.6, 2.1], dtype=float)
+        self_rate = np.asarray([1.0, -0.2, 0.7, -1.1], dtype=float)
+        latency = np.asarray([0.15, 0.55, 0.35, 0.9], dtype=float)
+        duration = np.asarray([0.5, 0.72, 0.61, 0.83], dtype=float)
+        time_within_run = np.asarray([0.0, 1.0, 1.5, 3.0], dtype=float)
+        metadata = pd.DataFrame(
+            {
+                "subject_id": [subject_id] * 4,
+                "task": ["conversation"] * 4,
+                "run": ["1"] * 4,
+                "other_rate": other_rate,
+                "self_rate": self_rate,
+                "latency": latency,
+                "duration_s": duration,
+                "time_within_run": time_within_run,
+            }
+        )
+        subject_intercept = float(subject_index + 1)
+        other_map = np.asarray([[0.8, 0.4, 0.2], [0.5, 0.3, 0.1]], dtype=float)
+        self_map = np.asarray([[0.6, 0.1, -0.1], [0.2, -0.2, -0.4]], dtype=float)
+        baseline = np.asarray([[0.1, 0.2, 0.0], [0.0, 0.1, -0.1]], dtype=float)
+        data = np.zeros((len(metadata), 2, 3), dtype=float)
+        for trial_index in range(len(metadata)):
+            data[trial_index] = (
+                baseline
+                + (other_rate[trial_index] * other_map)
+                + (self_rate[trial_index] * self_map)
+                + subject_intercept
+            )
+        metadata_by_subject[subject_id] = metadata
+        data_by_subject[subject_id] = data
+
+    dataset_index_path = _write_similarity_epochs(
+        tmp_path,
+        config,
+        rows,
+        metadata_by_subject=metadata_by_subject,
+        data_by_subject=data_by_subject,
+    )
+
+    fit_args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        dataset_index=str(dataset_index_path),
+        subject_id=None,
+        task=None,
+        run=None,
+        epochs_path=None,
+        metadata_path=None,
+        run_all=False,
+        output=None,
+        target=None,
+        trial_regressors_csv=None,
+        config_section="lmeeeg",
+    )
+    fit_args.model_name = "other_rate_effect"
+    assert lmeeeg_subject.run(fit_args, config=config) == 0
+    fit_args.model_name = "self_rate_effect"
+    assert lmeeeg_subject.run(fit_args, config=config) == 0
+
+    similarity_args = Namespace(config="config/config.yaml", schema="config/schema.json")
+    assert lmeeeg_similarity.run(similarity_args, config=config) == 0
+
+    output_paths = build_similarity_output_paths(config)
+    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
+    metadata = json.loads(output_paths.metadata_output_path.read_text(encoding="utf-8"))
+    whole_nulls = np.load(output_paths.whole_map_null_output_path)
+    corrected_p = np.load(output_paths.time_resolved_p_values_output_path)
+    null_curves = np.load(output_paths.time_resolved_null_curves_output_path)
+    null_max = np.load(output_paths.time_resolved_null_output_path)
+
+    assert summary["inference"]["method"] == "refit_permutation"
+    assert metadata["inference"]["method"] == "refit_permutation"
+    assert whole_nulls["pearson"].shape == (4,)
+    assert whole_nulls["cosine"].shape == (4,)
+    assert corrected_p.shape == (3,)
+    assert null_curves.shape == (4, 3)
+    assert null_max.shape == (4,)
+    assert summary["time_resolved_topography"]["correction"] == "tfce"
 
 
 def test_compute_tfce_1d_boosts_contiguous_timepoints() -> None:

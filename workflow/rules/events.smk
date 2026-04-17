@@ -10,7 +10,6 @@ EVENTS_STAGE = f"{OUT_DIR}/_stage/events_all.done.json"
 rule build_events:
     input:
         dataset_index=f"{OUT_DIR}/dataset/index.parquet",
-        preprocessing=PREPROCESSING_STAGE,
         config_path="config/config.yaml",
         schema_path="config/schema.json",
     output:

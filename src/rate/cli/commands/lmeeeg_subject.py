@@ -17,7 +17,7 @@ from rate.lmeeeg.io import (
     save_lmeeeg_result,
 )
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
-from rate.lmeeeg.pooling import load_pooled_lmeeeg_trial_data, select_lmeeeg_rows
+from rate.lmeeeg.pooling import fit_pooled_lmeeeg_model, load_pooled_lmeeeg_inputs, select_lmeeeg_rows
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
 
 LOGGER = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ def _fit_one_model(
     trial_regressors_path: Path | None = None,
 ) -> dict[str, Any]:
     LOGGER.info("Preparing pooled lmeEEG fit for model=%s", model_name)
-    trial_data = load_pooled_lmeeeg_trial_data(
+    pooled_inputs = load_pooled_lmeeeg_inputs(
         config,
         rows,
         config_section=config_section,
@@ -115,11 +115,16 @@ def _fit_one_model(
         trial_regressors_path=trial_regressors_path,
     )
     LOGGER.info(
-        "Starting pooled lmeEEG fit for model=%s with %d filtered trials",
+        "Starting pooled lmeEEG fit for model=%s with %d pooled trials before model-specific filtering",
         model_name,
-        int(trial_data.eeg_data.shape[0]),
+        int(pooled_inputs.eeg_data.shape[0]),
     )
-    result = fit_lmeeeg_mass_model(trial_data, config, config_section=config_section, model_name=model_name)
+    result = fit_pooled_lmeeeg_model(
+        config,
+        pooled_inputs=pooled_inputs,
+        config_section=config_section,
+        model_name=model_name,
+    )
     output_paths = build_lmeeeg_model_output_paths(config, config_section=config_section, target_name=target_name, model_name=model_name)
     summary = save_lmeeeg_result(result, output_paths)
     LOGGER.info(

@@ -39,7 +39,84 @@
     "glm": {"type": "object"},
     "lmeeeg": {"type": "object"},
     "lmeeeg_variance_partition": {"type": "object"},
-    "similarity": {"type": "object"},
+    "similarity": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "analysis_name": {"type": "string", "minLength": 1},
+        "predictor_a": {"type": "string", "minLength": 1},
+        "predictor_b": {"type": "string", "minLength": 1},
+        "map_type": {"type": "string", "enum": ["beta", "t_value"]},
+        "input": {
+          "type": "object",
+          "properties": {
+            "domain": {"type": "string", "minLength": 1},
+            "result_kind": {"type": "string", "minLength": 1},
+            "predictor_a": {"type": "string", "minLength": 1},
+            "predictor_b": {"type": "string", "minLength": 1},
+            "value_field": {"type": "string", "enum": ["beta", "t_value"]},
+            "use_unthresholded": {"type": "boolean"}
+          },
+          "additionalProperties": true
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "whole_map": {
+              "type": "array",
+              "items": {"type": "string", "enum": ["pearson", "cosine"]},
+              "minItems": 1
+            },
+            "time_resolved_topography": {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "method": {"type": "string", "enum": ["pearson"]}
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "inference": {
+          "type": "object",
+          "properties": {
+            "method": {"type": "string", "enum": ["none", "sign_flip", "refit_permutation"]},
+            "n_permutations": {"type": "integer", "minimum": 1},
+            "random_seed": {"type": "integer"},
+            "tail": {"type": "string", "enum": ["two-sided", "greater", "less"]},
+            "tfce": {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "e_power": {"type": "number"},
+                "h_power": {"type": "number"},
+                "dh": {"type": "number", "exclusiveMinimum": 0}
+              },
+              "additionalProperties": true
+            },
+            "permutation_scheme": {
+              "type": "object",
+              "properties": {
+                "kind": {"type": "string", "enum": ["circular_shift_within_subject"]},
+                "group_by": {
+                  "type": "array",
+                  "items": {"type": "string", "minLength": 1},
+                  "minItems": 1
+                },
+                "within_run": {"type": "boolean"},
+                "random_seed": {"type": "integer"}
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "inferential_test": {"type": "object"},
+        "outputs": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
     "debug": {
       "type": "object",
       "properties": {

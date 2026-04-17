@@ -93,7 +93,6 @@ rule r_analysis_stage:
 
 rule lmeeeg_group_stats:
     input:
-        lmeeeg=LMEEEG_STAGE,
         stats_config="config/stats.yaml",
         dataset_index=f"{OUT_DIR}/dataset/index.parquet",
         trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,

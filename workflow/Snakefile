@@ -188,12 +188,7 @@ def epoch_subject_preprocessing_inputs(wildcards):
     inputs: list[str] = []
     for row in rows:
         paths = build_preprocessing_output_paths(RESOLVED_CONFIG, row)
-        inputs.extend(
-            [
-                str(paths.eeg_output_path),
-                str(paths.summary_output_path),
-            ]
-        )
+        inputs.append(str(paths.eeg_output_path))
     return inputs
 
 

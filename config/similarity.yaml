@@ -13,17 +13,25 @@ similarity:
   metrics:
     whole_map:
       - "pearson"
-      # - "cosine"
+      - "cosine"
     time_resolved_topography:
       enabled: true
       method: "pearson"
 
-  inferential_test:
-    enabled: true
+  inference:
+    method: "refit_permutation"
     n_permutations: 5000
-    random_seed: 42
-    null_method: "sign_flip"
     tail: "two-sided"
+    tfce:
+      enabled: true
+      e_power: 0.5
+      h_power: 2.0
+      dh: 0.1
+    permutation_scheme:
+      kind: "circular_shift_within_subject"
+      group_by: ["subject_id"]
+      within_run: true
+      random_seed: 42
 
   outputs:
     save_null_distribution: true

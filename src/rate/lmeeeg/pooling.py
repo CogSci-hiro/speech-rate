@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from pathlib import Path
 from typing import Any, Mapping
@@ -11,12 +12,24 @@ import pandas as pd
 
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import load_lmeeeg_inputs_with_trial_regressors
+from rate.lmeeeg.mass_model import LMEEEGResult, fit_lmeeeg_mass_model
 from rate.lmeeeg.targets import section_supports_targets
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_data_from_arrays
 from rate.paths import resolve_out_dir
 from rate.util import read_parquet_dataframe
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PooledLMEEEGInputs:
+    """Pooled EEG arrays and metadata before model-specific design filtering."""
+
+    eeg_data: np.ndarray
+    metadata_df: pd.DataFrame
+    channel_names: list[str]
+    times: np.ndarray
+    metadata_provenance: dict[str, Any] | None = None
 
 
 def resolve_dataset_index_path(config: Mapping[str, Any], *, dataset_index: str | None = None) -> Path:
@@ -58,7 +71,7 @@ def select_lmeeeg_rows(
     return rows
 
 
-def load_pooled_lmeeeg_trial_data(
+def load_pooled_lmeeeg_inputs(
     config: Mapping[str, Any],
     rows: list[Mapping[str, Any]],
     *,
@@ -67,7 +80,7 @@ def load_pooled_lmeeeg_trial_data(
     model_name: str | None = None,
     trial_regressors_path: Path | None = None,
 ):
-    """Load and concatenate lmeEEG inputs across many dataset rows."""
+    """Load and concatenate lmeEEG-ready arrays across many dataset rows."""
     pooled_eeg: list[np.ndarray] = []
     pooled_metadata: list[pd.DataFrame] = []
     reference_channel_names: list[str] | None = None
@@ -137,13 +150,70 @@ def load_pooled_lmeeeg_trial_data(
         len(reference_channel_names),
         int(reference_times.shape[0]),
     )
-    return build_lmeeeg_trial_data_from_arrays(
+    return PooledLMEEEGInputs(
         eeg_data=np.concatenate(pooled_eeg, axis=0),
         metadata_df=pd.concat(pooled_metadata, axis=0, ignore_index=True),
-        channel_names=reference_channel_names,
-        times=reference_times,
+        channel_names=list(reference_channel_names),
+        times=np.asarray(reference_times, dtype=float),
+        metadata_provenance={"sources": merge_summaries},
+    )
+
+
+def load_pooled_lmeeeg_trial_data(
+    config: Mapping[str, Any],
+    rows: list[Mapping[str, Any]],
+    *,
+    config_section: str = "lmeeeg",
+    target_name: str | None = None,
+    model_name: str | None = None,
+    trial_regressors_path: Path | None = None,
+):
+    """Load pooled arrays and prepare one model-specific trial table."""
+    pooled_inputs = load_pooled_lmeeeg_inputs(
+        config,
+        rows,
+        config_section=config_section,
+        target_name=target_name,
+        model_name=model_name,
+        trial_regressors_path=trial_regressors_path,
+    )
+    return build_lmeeeg_trial_data_from_arrays(
+        eeg_data=pooled_inputs.eeg_data,
+        metadata_df=pooled_inputs.metadata_df,
+        channel_names=pooled_inputs.channel_names,
+        times=pooled_inputs.times,
         config=config,
         config_section=config_section,
         model_name=model_name,
-        metadata_provenance={"sources": merge_summaries},
+        metadata_provenance=pooled_inputs.metadata_provenance,
+    )
+
+
+def fit_pooled_lmeeeg_model(
+    config: Mapping[str, Any],
+    *,
+    pooled_inputs: PooledLMEEEGInputs,
+    config_section: str = "lmeeeg",
+    model_name: str | None = None,
+    metadata_df: pd.DataFrame | None = None,
+    metadata_provenance: dict[str, Any] | None = None,
+) -> LMEEEGResult:
+    """Fit one pooled lmeEEG model from cached pooled inputs and metadata."""
+    resolved_metadata = pooled_inputs.metadata_df if metadata_df is None else metadata_df
+    resolved_provenance = pooled_inputs.metadata_provenance if metadata_provenance is None else metadata_provenance
+    trial_data = build_lmeeeg_trial_data_from_arrays(
+        eeg_data=pooled_inputs.eeg_data,
+        metadata_df=resolved_metadata,
+        channel_names=pooled_inputs.channel_names,
+        times=pooled_inputs.times,
+        config=config,
+        config_section=config_section,
+        model_name=model_name,
+        metadata_provenance=resolved_provenance,
+    )
+    return fit_lmeeeg_mass_model(
+        trial_data,
+        config,
+        config_section=config_section,
+        model_name=model_name,
     )
