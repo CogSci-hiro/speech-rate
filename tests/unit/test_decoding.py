@@ -22,7 +22,10 @@ from rate.decoding.config import load_decoding_config
 from rate.decoding.io import build_decoding_model_output_paths
 from rate.decoding.pipeline import _residualise_target, resolve_ridge_alphas, run_decoding_model
 from rate.decoding.stats import (
+    _build_tfce_thresholds,
+    _compute_null_max_tfce,
     _resolve_permutation_fixed_alpha,
+    build_permutation_grouping,
     compute_tfce_2d,
     permute_decoding_targets,
     run_decoding_model_stats,
@@ -174,6 +177,30 @@ def test_tfce_2d_boosts_connected_positive_clusters() -> None:
     assert tfce.shape == scores.shape
     assert tfce[0, 1] > tfce[2, 0]
     assert tfce[1, 1] > 0.0
+
+
+def test_tfce_2d_matches_reference_implementation() -> None:
+    scores = np.array(
+        [
+            [0.0, 0.5, 0.5, 0.1],
+            [0.0, 0.5, 0.0, 0.1],
+            [0.2, 0.2, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    expected = _compute_tfce_2d_reference(scores, h_power=2.0, e_power=0.5, h_start=0.0, dh=0.1, tail="positive")
+    observed = compute_tfce_2d(
+        scores,
+        h_power=2.0,
+        e_power=0.5,
+        h_start=0.0,
+        dh=0.1,
+        tail="positive",
+        thresholds=_build_tfce_thresholds(scores, h_start=0.0, dh=0.1),
+    )
+
+    assert np.allclose(observed, expected, atol=1e-12, rtol=1e-12)
 
 
 def test_target_residualisation_excludes_target_from_its_own_control_set() -> None:
@@ -471,6 +498,174 @@ def test_cross_condition_permutation_leaves_test_target_fixed() -> None:
     assert np.array_equal(perm_test, prepared.test_target_residuals)
     assert set(perm_train[:2]) == {1.0, 2.0}
     assert set(perm_train[2:]) == {3.0, 4.0}
+
+
+def test_permutation_grouping_matches_reference_permutation() -> None:
+    metadata_df = pd.DataFrame(
+        {
+            "subject_id": ["s1", "s1", "s2", "s2", "s2", "s3"],
+            "run": ["1", "1", "1", "2", "2", "1"],
+        }
+    )
+    from rate.decoding.pipeline import PreparedDecodingData
+
+    prepared = PreparedDecodingData(
+        model_name="self_temporal_generalisation",
+        train_target="self_rate",
+        test_target="self_rate",
+        metadata_df=metadata_df,
+        eeg_residuals=np.zeros((6, 1, 1), dtype=float),
+        train_target_residuals=np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=float),
+        test_target_residuals=np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0], dtype=float),
+        fold_indices=[(np.array([0, 2, 4]), np.array([1, 3, 5]))],
+        times=np.array([0.0], dtype=float),
+        channel_names=["Fz"],
+        sfreq=32.0,
+        summary={},
+    )
+
+    expected_train, expected_test = _permute_decoding_targets_reference(
+        prepared,
+        scheme="within_subject_within_run",
+        rng=np.random.default_rng(123),
+    )
+    observed_train, observed_test = permute_decoding_targets(
+        prepared,
+        scheme="within_subject_within_run",
+        rng=np.random.default_rng(123),
+        grouping=build_permutation_grouping(prepared, scheme="within_subject_within_run"),
+    )
+
+    assert np.array_equal(observed_train, expected_train)
+    assert np.array_equal(observed_test, expected_test)
+
+
+def test_prepare_decoding_model_data_cache_roundtrip_matches_fresh(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    project_config = _project_config(out_dir)
+    decoding_config = _decoding_config()
+    dataset_index_path = _build_decoding_fixture_dataset(tmp_path, project_config)
+
+    from rate.decoding.pipeline import prepare_decoding_model_data
+
+    fresh = prepare_decoding_model_data(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+        use_prepared_data_cache=False,
+    )
+    prepare_decoding_model_data(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+        use_prepared_data_cache=True,
+    )
+    cached = prepare_decoding_model_data(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+        use_prepared_data_cache=True,
+    )
+
+    assert fresh.metadata_df.equals(cached.metadata_df)
+    assert np.array_equal(np.asarray(fresh.eeg_residuals), np.asarray(cached.eeg_residuals))
+    assert np.array_equal(fresh.train_target_residuals, np.asarray(cached.train_target_residuals))
+    assert np.array_equal(fresh.test_target_residuals, np.asarray(cached.test_target_residuals))
+    assert np.array_equal(fresh.times, np.asarray(cached.times))
+    assert fresh.channel_names == cached.channel_names
+    for (fresh_train, fresh_test), (cached_train, cached_test) in zip(fresh.fold_indices, cached.fold_indices, strict=True):
+        assert np.array_equal(fresh_train, cached_train)
+        assert np.array_equal(fresh_test, cached_test)
+
+
+def test_observed_decoding_matches_fresh_and_cached_prepared_inputs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    project_config = _project_config(out_dir)
+    decoding_config = _decoding_config()
+    dataset_index_path = _build_decoding_fixture_dataset(tmp_path, project_config)
+
+    from rate.decoding.pipeline import _run_temporal_generalisation, prepare_decoding_model_data
+
+    fresh = prepare_decoding_model_data(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+        use_prepared_data_cache=False,
+    )
+    cached = prepare_decoding_model_data(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+        use_prepared_data_cache=True,
+    )
+
+    fresh_result = _run_temporal_generalisation(
+        np.asarray(fresh.eeg_residuals),
+        fresh.train_target_residuals,
+        fresh.test_target_residuals,
+        estimator_config=decoding_config["estimator"],
+        cv_config=decoding_config["cv"],
+        nested_cv_config=decoding_config["nested_cv"],
+        scoring_config=decoding_config["scoring"],
+        fold_indices=fresh.fold_indices,
+        groups=fresh.metadata_df["subject_id"].to_numpy(),
+        model_name=fresh.model_name,
+        show_progress=False,
+        save_alpha_scores=True,
+    )
+    cached_result = _run_temporal_generalisation(
+        np.asarray(cached.eeg_residuals),
+        np.asarray(cached.train_target_residuals),
+        np.asarray(cached.test_target_residuals),
+        estimator_config=decoding_config["estimator"],
+        cv_config=decoding_config["cv"],
+        nested_cv_config=decoding_config["nested_cv"],
+        scoring_config=decoding_config["scoring"],
+        fold_indices=cached.fold_indices,
+        groups=cached.metadata_df["subject_id"].to_numpy(),
+        model_name=cached.model_name,
+        show_progress=False,
+        save_alpha_scores=True,
+    )
+
+    assert np.allclose(fresh_result.mean_scores, cached_result.mean_scores, atol=1e-12, rtol=1e-12)
+    assert np.allclose(fresh_result.fold_scores, cached_result.fold_scores, atol=1e-12, rtol=1e-12)
+    assert np.allclose(fresh_result.alpha_scores, cached_result.alpha_scores, atol=1e-12, rtol=1e-12)
+    assert np.array_equal(fresh_result.best_alphas, cached_result.best_alphas)
+
+
+def test_stats_null_tfce_matches_reference_implementation(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    project_config = _project_config(out_dir)
+    decoding_config = _decoding_config()
+    decoding_config["stats"]["n_permutations"] = 4
+    dataset_index_path = _build_decoding_fixture_dataset(tmp_path, project_config)
+
+    from rate.decoding.pipeline import prepare_decoding_model_data
+
+    prepared = prepare_decoding_model_data(
+        project_config,
+        decoding_config,
+        model_name="self_temporal_generalisation",
+        dataset_index=str(dataset_index_path),
+        use_prepared_data_cache=False,
+    )
+
+    expected = _compute_null_max_tfce_reference(prepared, decoding_config=decoding_config, stats_config=decoding_config["stats"])
+    observed = _compute_null_max_tfce(
+        prepared,
+        decoding_config=decoding_config,
+        stats_config=decoding_config["stats"],
+        fixed_alpha=None,
+        show_progress=False,
+    )
+
+    assert np.allclose(observed, expected, atol=1e-12, rtol=1e-12)
 
 
 def test_build_decoding_manifest_writes_combined_plot(tmp_path: Path) -> None:
@@ -776,6 +971,189 @@ def test_figures_decoding_results_cli_writes_manifest(tmp_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["plot_count"] == 2
     assert {plot["plot_name"] for plot in manifest["plots"]} == {"temporal_generalisation_results"}
+
+
+def _build_decoding_fixture_dataset(tmp_path: Path, project_config: dict) -> Path:
+    rows: list[dict[str, str]] = []
+    dataset_index_path = project_config["paths"]["out_dir"]
+    dataset_index = Path(dataset_index_path) / "dataset" / "index.parquet"
+    signal_map = np.array(
+        [
+            [0.8, -0.2, 0.6],
+            [0.4, 0.7, -0.3],
+        ],
+        dtype=float,
+    )
+    base_self = np.array([-1.4, 0.2, 1.1, -0.6, 0.9, 1.7], dtype=float)
+    base_other = np.array([0.5, -0.8, 0.7, 1.3, -0.2, 0.4], dtype=float)
+
+    for subject_offset, subject_id in enumerate(("sub-001", "sub-002", "sub-003", "sub-004"), start=1):
+        self_rate = base_self + (subject_offset * 0.15)
+        other_rate = (0.6 * self_rate) + base_other
+        metadata = pd.DataFrame(
+            {
+                "event_id": np.arange(6, dtype=int) + (subject_offset * 100),
+                "subject_id": [subject_id] * 6,
+                "dyad_id": [f"dyad-{subject_offset:03d}"] * 6,
+                "task": ["conversation"] * 6,
+                "run": ["1"] * 6,
+                "latency": np.linspace(0.1, 0.4, 6),
+                "duration_s": np.linspace(0.3, 0.8, 6),
+                "time_within_run": np.linspace(0.0, 1.0, 6),
+                "self_rate": self_rate,
+                "other_rate": other_rate,
+            }
+        )
+        data = np.zeros((6, 2, 3), dtype=float)
+        for trial_idx, row in metadata.iterrows():
+            nuisance = (0.5 * float(row["latency"])) + (0.25 * float(row["duration_s"])) + (0.1 * subject_offset)
+            data[trial_idx] = (float(row["self_rate"]) * signal_map) + nuisance
+
+        row = {
+            "dyad_id": f"dyad-{subject_offset:03d}",
+            "subject_id": subject_id,
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / f"{subject_id}.fif"),
+        }
+        epoch_paths = build_epoch_output_paths(project_config, row)
+        epoch_paths.epochs_output_path.parent.mkdir(parents=True, exist_ok=True)
+        _make_epochs(data, metadata.copy()).save(epoch_paths.epochs_output_path, overwrite=True, verbose="ERROR")
+        metadata.to_csv(epoch_paths.metadata_output_path, index=False)
+        rows.append(row)
+
+    dataset_index.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet_dataframe(pd.DataFrame(rows), dataset_index)
+    return dataset_index
+
+
+def _permute_decoding_targets_reference(prepared, *, scheme: str, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    train_values = np.asarray(prepared.train_target_residuals, dtype=float)
+    test_values = np.asarray(prepared.test_target_residuals, dtype=float)
+    permuted_train = train_values.copy()
+    permuted_test = test_values.copy()
+
+    if scheme == "within_subject":
+        group_keys = prepared.metadata_df["subject_id"].astype(str)
+    elif scheme == "within_subject_within_run":
+        if "run" not in prepared.metadata_df.columns:
+            raise ValueError("`within_subject_within_run` permutation requires a `run` column in decoding metadata.")
+        group_keys = prepared.metadata_df["subject_id"].astype(str) + "::" + prepared.metadata_df["run"].astype(str)
+    else:
+        raise ValueError(f"Unsupported decoding permutation scheme `{scheme}`.")
+
+    unique_keys = group_keys.drop_duplicates().tolist()
+    for group_key in unique_keys:
+        group_indices = np.flatnonzero(group_keys.to_numpy(dtype=str) == str(group_key))
+        if group_indices.size <= 1:
+            continue
+        shuffled_indices = rng.permutation(group_indices)
+        permuted_train[group_indices] = train_values[shuffled_indices]
+        if prepared.train_target == prepared.test_target:
+            permuted_test[group_indices] = test_values[shuffled_indices]
+        else:
+            permuted_test[group_indices] = test_values[group_indices]
+    return permuted_train, permuted_test
+
+
+def _compute_tfce_2d_reference(
+    score_matrix: np.ndarray,
+    *,
+    h_power: float,
+    e_power: float,
+    h_start: float,
+    dh: float,
+    tail: str = "positive",
+) -> np.ndarray:
+    if tail != "positive":
+        raise ValueError("Only positive-tail TFCE is implemented for decoding stats.")
+    scores = np.maximum(np.asarray(score_matrix, dtype=float), 0.0)
+    tfce = np.zeros_like(scores, dtype=float)
+    max_height = float(np.nanmax(scores))
+    if np.isclose(max_height, 0.0):
+        return tfce
+
+    threshold = max(float(h_start), 0.0)
+    if np.isclose(threshold, 0.0):
+        threshold = float(dh)
+    while threshold <= (max_height + (0.5 * dh)):
+        supra_threshold = scores >= threshold
+        for component in _connected_components_2d_reference(supra_threshold):
+            extent = float(len(component))
+            increment = (threshold ** h_power) * (extent ** e_power) * dh
+            for row_idx, col_idx in component:
+                tfce[row_idx, col_idx] += increment
+        threshold += dh
+    return tfce
+
+
+def _connected_components_2d_reference(mask: np.ndarray) -> list[list[tuple[int, int]]]:
+    visited = np.zeros_like(mask, dtype=bool)
+    components: list[list[tuple[int, int]]] = []
+    n_rows, n_cols = mask.shape
+    for row_idx in range(n_rows):
+        for col_idx in range(n_cols):
+            if not bool(mask[row_idx, col_idx]) or bool(visited[row_idx, col_idx]):
+                continue
+            stack = [(row_idx, col_idx)]
+            visited[row_idx, col_idx] = True
+            component: list[tuple[int, int]] = []
+            while stack:
+                current_row, current_col = stack.pop()
+                component.append((current_row, current_col))
+                for delta_row, delta_col in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    next_row = current_row + delta_row
+                    next_col = current_col + delta_col
+                    if next_row < 0 or next_row >= n_rows or next_col < 0 or next_col >= n_cols:
+                        continue
+                    if not bool(mask[next_row, next_col]) or bool(visited[next_row, next_col]):
+                        continue
+                    visited[next_row, next_col] = True
+                    stack.append((next_row, next_col))
+            components.append(component)
+    return components
+
+
+def _compute_null_max_tfce_reference(prepared, *, decoding_config: dict, stats_config: dict) -> np.ndarray:
+    from rate.decoding.pipeline import _run_temporal_generalisation
+
+    n_permutations = int(stats_config.get("n_permutations", 1000))
+    rng = np.random.default_rng(int(stats_config.get("random_state", decoding_config.get("random_state", 42))))
+    permutation_scheme = str(stats_config.get("permutation_scheme", "within_subject"))
+    tfce_cfg = dict(stats_config.get("tfce") or {})
+    null_max = np.zeros(n_permutations, dtype=float)
+
+    for permutation_idx in range(n_permutations):
+        permuted_train, permuted_test = _permute_decoding_targets_reference(
+            prepared,
+            scheme=permutation_scheme,
+            rng=rng,
+        )
+        permuted_scores = _run_temporal_generalisation(
+            np.asarray(prepared.eeg_residuals),
+            permuted_train,
+            permuted_test,
+            estimator_config=decoding_config["estimator"],
+            cv_config=decoding_config["cv"],
+            nested_cv_config=decoding_config.get("nested_cv") or {},
+            scoring_config=decoding_config["scoring"],
+            fold_indices=prepared.fold_indices,
+            groups=prepared.metadata_df[str(decoding_config["cv"]["group_column"])].to_numpy(),
+            model_name=f"{prepared.model_name} perm {permutation_idx + 1}",
+            show_progress=False,
+            save_alpha_scores=False,
+        ).mean_scores
+        permuted_tfce = _compute_tfce_2d_reference(
+            permuted_scores,
+            h_power=float(tfce_cfg.get("h_power", 2.0)),
+            e_power=float(tfce_cfg.get("e_power", 0.5)),
+            h_start=float(tfce_cfg.get("h_start", 0.0)),
+            dh=float(tfce_cfg.get("dh", 0.1)),
+            tail=str(tfce_cfg.get("tail", "positive")),
+        )
+        null_max[permutation_idx] = float(np.max(permuted_tfce))
+    return null_max
 
 
 def test_decoding_figure_workflow_rules_are_present() -> None:

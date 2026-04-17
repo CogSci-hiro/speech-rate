@@ -2,7 +2,7 @@ decoding:
   enabled: true
   analysis_name: decoding_temporal_generalisation
   output_dir: decoding
-  sfreq: 4
+  sfreq: 16
   random_state: 42
 
   input:
@@ -62,10 +62,12 @@ decoding:
     name: ridge
     save_alpha_scores: true
     alpha_grid:
+      - 1.0
+      - 10.0
+      - 100.0
+      - 1000.0
       - 10000.0
       - 100000.0
-      - 1000000.0
-      - 10000000.0
 
   scoring:
     name: pearson_r
@@ -76,7 +78,7 @@ decoding:
     random_state: 42
     permutation_scheme: within_subject
     n_jobs: 1
-    permutation_alpha_mode: retune_per_permutation # retune_per_permutationfixed_alpha
+    permutation_alpha_mode: fixed_alpha # retune_per_permutation
     fixed_alpha_source: median_observed_outer_folds
 
     tfce:

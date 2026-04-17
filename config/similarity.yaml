@@ -1,0 +1,32 @@
+similarity:
+  enabled: true
+  analysis_name: "other_vs_self"
+
+  input:
+    domain: "lmeeeg"
+    result_kind: "group_stats"
+    predictor_a: "other_rate"
+    predictor_b: "self_rate"
+    value_field: "beta"
+    use_unthresholded: true
+
+  metrics:
+    whole_map:
+      - "pearson"
+      # - "cosine"
+    time_resolved_topography:
+      enabled: true
+      method: "pearson"
+
+  inferential_test:
+    enabled: true
+    n_permutations: 5000
+    random_seed: 42
+    null_method: "sign_flip"
+    tail: "two-sided"
+
+  outputs:
+    save_null_distribution: true
+    save_time_resolved_curve: true
+    save_summary_table: true
+    save_difference_map: true

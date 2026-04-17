@@ -84,7 +84,7 @@ def test_build_behavioural_manifest_writes_combined_plot(tmp_path: Path) -> None
     assert plot["n_rows"] == 9
     assert plot["n_subjects"] == 3
     assert plot["n_dyads"] == 2
-    assert plot["ordered_dyads"] == ["dyad-001", "dyad-002"]
+    assert plot["ordered_dyads"] == ["dyad-002", "dyad-001"]
     assert len(plot["files"]) == 1
     assert Path(plot["files"][0]).exists()
 

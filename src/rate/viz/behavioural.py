@@ -111,6 +111,7 @@ def _build_combined_behavioural_plot(
         subject_summary=subject_summary,
         slope_dataframe=slope_dataframe,
         dyad_column=str(subject_slopes_cfg.get("dyad_col", "dyad_id")),
+        preferred_dyads=dyad_slope_summary[str(subject_slopes_cfg.get("dyad_col", "dyad_id"))].astype(str).tolist(),
     )
     dyad_to_color = _build_dyad_palette(valid_dyads, theme_config=theme)
 
@@ -199,10 +200,11 @@ def _collect_valid_dyads(
     subject_summary: pd.DataFrame,
     slope_dataframe: pd.DataFrame,
     dyad_column: str,
+    preferred_dyads: Sequence[str] | None = None,
 ) -> list[str]:
     subject_dyads = subject_summary["dyad_id"].dropna().astype(str).tolist()
     slope_dyads = slope_dataframe[dyad_column].dropna().astype(str).tolist()
-    return list(dict.fromkeys(subject_dyads + slope_dyads))
+    return list(dict.fromkeys(list(preferred_dyads or []) + subject_dyads + slope_dyads))
 
 
 def _prepare_subject_slopes(
@@ -323,57 +325,44 @@ def _plot_subject_median_rainplot(
     dot_alpha: float,
     rng: np.random.Generator,
 ) -> None:
-    ordered_dyads = (
-        subject_summary.groupby("dyad_id", as_index=False)
-        .agg(dyad_median_rate=("median_rate", "median"))
-        .sort_values("dyad_median_rate")
-        ["dyad_id"]
-        .astype(str)
-        .tolist()
-    )
-
     kde_height = max(dot_spread_y * 4.0, 0.32)
     rain_offset = max(dot_spread_y * 1.6, 0.18)
-    y_tick_positions: list[float] = []
     x_min = float(subject_summary["median_rate"].min())
     x_max = float(subject_summary["median_rate"].max())
     x_padding = max((x_max - x_min) * 0.08, 0.1)
+    plot_df = subject_summary.sort_values(["dyad_id", "median_rate", "subject_id"]).reset_index(drop=True)
+    all_median_rates = plot_df["median_rate"].to_numpy(dtype=float)
+    base_y = 0.0
 
-    for dyad_index, dyad_id in enumerate(ordered_dyads):
-        base_y = float(dyad_index)
-        y_tick_positions.append(base_y)
-        dyad_df = (
-            subject_summary[subject_summary["dyad_id"].astype(str) == dyad_id]
-            .sort_values("median_rate")
-            .reset_index(drop=True)
+    if len(all_median_rates) >= 2 and np.ptp(all_median_rates) > 0:
+        x_grid = np.linspace(all_median_rates.min() - x_padding, all_median_rates.max() + x_padding, 256)
+        density = gaussian_kde(all_median_rates)(x_grid)
+        density = (density / np.max(density)) * kde_height
+        ax.fill_between(
+            x_grid,
+            base_y,
+            base_y + density,
+            color="0.6",
+            alpha=0.22,
+            linewidth=0.0,
+            zorder=1,
         )
-        color = dyad_to_color[dyad_id]
-        median_rates = dyad_df["median_rate"].to_numpy(dtype=float)
+        ax.plot(x_grid, base_y + density, color="0.45", linewidth=1.2, alpha=0.95, zorder=2)
+    else:
+        ax.vlines(
+            float(all_median_rates[0]),
+            ymin=base_y,
+            ymax=base_y + (kde_height * 0.5),
+            color="0.45",
+            linewidth=1.2,
+            alpha=0.9,
+            zorder=2,
+        )
 
-        if len(median_rates) >= 2 and np.ptp(median_rates) > 0:
-            x_grid = np.linspace(median_rates.min() - x_padding, median_rates.max() + x_padding, 256)
-            density = gaussian_kde(median_rates)(x_grid)
-            density = (density / np.max(density)) * kde_height
-            ax.fill_between(
-                x_grid,
-                base_y,
-                base_y + density,
-                color=color,
-                alpha=0.28,
-                linewidth=0.0,
-                zorder=1,
-            )
-            ax.plot(x_grid, base_y + density, color=color, linewidth=1.2, alpha=0.95, zorder=2)
-        else:
-            ax.vlines(
-                float(median_rates[0]),
-                ymin=base_y,
-                ymax=base_y + (kde_height * 0.5),
-                color=color,
-                linewidth=1.2,
-                alpha=0.9,
-                zorder=2,
-            )
+    for dyad_id, dyad_df in plot_df.groupby("dyad_id", sort=False):
+        dyad_df = dyad_df.sort_values("median_rate").reset_index(drop=True)
+        color = dyad_to_color[str(dyad_id)]
+        median_rates = dyad_df["median_rate"].to_numpy(dtype=float)
 
         if len(dyad_df) == 1:
             base_y_positions = np.array([base_y - rain_offset + dot_center_y], dtype=float)
@@ -408,11 +397,11 @@ def _plot_subject_median_rainplot(
             zorder=4,
         )
 
-    ax.set_title("B. Subject median speech rates by dyad")
+    ax.set_title("B. Subject median speech rates")
     ax.set_xlabel("Median self speech rate")
-    ax.set_ylabel("Dyad")
-    ax.set_yticks(y_tick_positions, ordered_dyads)
-    ax.set_ylim(-0.5, len(ordered_dyads) - 0.5 + kde_height + 0.1)
+    ax.set_ylabel("")
+    ax.set_yticks([])
+    ax.set_ylim(base_y - rain_offset - dot_spread_y - 0.08, base_y + kde_height + 0.1)
     ax.set_xlim(x_min - x_padding, x_max + x_padding)
 
 
@@ -425,7 +414,7 @@ def _order_grouped_subject_slopes(
     dyad_summary = (
         plot_df.groupby(dyad_column, as_index=False)
         .agg(dyad_mean_slope=("slope", "mean"))
-        .sort_values("dyad_mean_slope")
+        .sort_values("dyad_mean_slope", ascending=False)
         .reset_index(drop=True)
     )
     ordered_dyads = dyad_summary[dyad_column].tolist()

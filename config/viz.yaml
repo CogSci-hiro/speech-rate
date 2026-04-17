@@ -26,7 +26,7 @@ viz:
         formats: ["png"]
         min_trials_per_subject: 5
         histogram_bins: 30
-        histogram_color: "#4B5563"
+        histogram_color: "#7B8794"
         point_size: 70
         dot_center_y: 0.0
         dot_spread_y: 0.10
