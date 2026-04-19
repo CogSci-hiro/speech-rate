@@ -115,7 +115,7 @@ rule lmeeeg_similarity:
         summary=SIMILARITY_STATS_OUTPUT,
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-similarity "
-        "--config {input.config_path} --schema {input.schema_path}"
+        "--config {input.config_path} --schema {input.schema_path} --skip-figures"
 
 rule lmeeeg_variance_partition_group_stats:
     input:

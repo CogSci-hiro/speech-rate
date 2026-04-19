@@ -13,14 +13,16 @@ similarity:
   metrics:
     whole_map:
       - "pearson"
-      - "cosine"
     time_resolved_topography:
       enabled: true
       method: "pearson"
 
   inference:
+    # Recompute pooled lmeEEG maps with the same estimator as the observed saved
+    # betas.npy maps. In this repository that means rerunning the standard
+    # lmeEEG approximation stage, not swapping in a different null-map estimator.
     method: "refit_permutation"
-    n_permutations: 5000
+    n_permutations: 100
     tail: "two-sided"
     tfce:
       enabled: true

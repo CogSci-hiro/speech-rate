@@ -12,6 +12,7 @@ os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 os.environ.setdefault("MNE_DONTWRITE_HOME", "true")
 
 import mne
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -26,14 +27,17 @@ from rate.cli.commands import figures_lmeeeg_variance_partition
 from rate.cli.commands import figures_lmeeeg_main_results
 from rate.cli.commands import figures_lmeeeg
 from rate.cli.commands import figures_lmeeeg_inference
+from rate.cli.commands import figures_similarity
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths, build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
+from rate.lmeeeg.pooling import compute_lmeeeg_pooled_beta_map, load_pooled_lmeeeg_inputs
 from rate.lmeeeg.similarity import (
     SimilarityPermutationScheme,
     _build_similarity_permutation_grouping,
     _compute_tfce_1d,
     _generate_similarity_permutation_indices,
     _permute_similarity_predictor,
+    _resolve_similarity_refit_estimator_strategy,
     build_similarity_output_paths,
     resolve_similarity_settings,
 )
@@ -47,6 +51,7 @@ from rate.lmeeeg.variance_partition import (
 from rate.util import write_parquet_dataframe
 from rate.viz import lmeeeg as lmeeeg_viz
 from rate.viz import lmeeeg_results as lmeeeg_results_viz
+from rate.viz import lmeeeg_similarity as lmeeeg_similarity_viz
 
 
 def _make_epochs(data: np.ndarray, metadata: pd.DataFrame) -> mne.EpochsArray:
@@ -642,6 +647,80 @@ def test_lmeeeg_similarity_cli_writes_outputs(tmp_path: Path) -> None:
     assert difference_map.shape == (2, 3)
     assert time_curve.shape == (3,)
     assert np.isclose(summary["whole_map_difference"]["mean_signed_difference"], float(np.mean(difference_map)))
+    assert output_paths.figure_manifest_output_path.exists()
+    figure_manifest = json.loads(output_paths.figure_manifest_output_path.read_text(encoding="utf-8"))
+    assert figure_manifest["plot_count"] == 1
+    assert figure_manifest["plots"][0]["plot_name"] == "similarity_summary"
+    assert all(Path(path).exists() for path in figure_manifest["plots"][0]["files"])
+
+
+def test_figures_similarity_cli_renders_from_existing_outputs_without_rerunning_analysis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+
+    other_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    self_paths = build_lmeeeg_model_output_paths(config, model_name="self_rate_effect")
+    other_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+    self_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    channel_names = ["Fz", "Cz"]
+    times = np.asarray([-0.1, 0.0, 0.1], dtype=float)
+    other_beta = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[1.0, 2.0, 3.0], [0.5, 1.0, 1.5]],
+        ],
+        dtype=float,
+    )
+    self_beta = np.asarray(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[0.8, 1.9, 3.1], [0.4, 0.9, 1.7]],
+        ],
+        dtype=float,
+    )
+
+    for output_paths, predictor_name, betas in (
+        (other_paths, "other_rate", other_beta),
+        (self_paths, "self_rate", self_beta),
+    ):
+        np.save(output_paths.betas_output_path, betas)
+        np.save(output_paths.t_values_output_path, betas * 2.0)
+        np.save(output_paths.times_output_path, times)
+        output_paths.channel_names_output_path.write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
+        output_paths.column_names_output_path.write_text(json.dumps(["Intercept", predictor_name]) + "\n", encoding="utf-8")
+        output_paths.test_predictors_output_path.write_text(json.dumps([predictor_name]) + "\n", encoding="utf-8")
+        output_paths.summary_output_path.write_text(
+            json.dumps({"status": "ok", "predictor_of_interest": predictor_name}) + "\n",
+            encoding="utf-8",
+        )
+
+    similarity_args = Namespace(config="config/config.yaml", schema="config/schema.json", skip_figures=True)
+    assert lmeeeg_similarity.run(similarity_args, config=config) == 0
+
+    monkeypatch.setattr(
+        figures_similarity,
+        "build_similarity_summary_figure_manifest",
+        lmeeeg_similarity_viz.build_similarity_summary_figure_manifest,
+    )
+
+    def _unexpected_rerun(_config: dict) -> dict[str, object]:
+        raise AssertionError("Similarity analysis should not rerun while rendering figures.")
+
+    monkeypatch.setattr(lmeeeg_similarity, "run_similarity_analysis", _unexpected_rerun)
+
+    figure_args = Namespace(config="config/config.yaml", schema="config/schema.json", viz_config="config/viz.yaml", output=None)
+    assert figures_similarity.run(figure_args, config=config) == 0
+
+    output_paths = build_similarity_output_paths(config)
+    assert output_paths.figure_manifest_output_path.exists()
+    figure_manifest = json.loads(output_paths.figure_manifest_output_path.read_text(encoding="utf-8"))
+    assert figure_manifest["plot_count"] == 1
+    assert figure_manifest["plots"][0]["plot_name"] == "similarity_summary"
+    assert all(Path(path).exists() for path in figure_manifest["plots"][0]["files"])
 
 
 def test_resolve_similarity_settings_supports_explicit_refit_inference_config(tmp_path: Path) -> None:
@@ -727,6 +806,93 @@ def test_similarity_circular_shift_permutation_preserves_within_block_values() -
     )
 
 
+def test_compute_lmeeeg_pooled_beta_map_matches_saved_stage_betas(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    config["lmeeeg"]["models"]["other_rate_effect"]["formula"] = "~ other_rate"
+    config["lmeeeg"]["models"]["other_rate_effect"]["standardize"] = ["other_rate"]
+
+    rows = [
+        {"subject_id": "sub-001", "task": "conversation", "run": "1", "status": "ok"},
+        {"subject_id": "sub-002", "task": "conversation", "run": "1", "status": "ok"},
+    ]
+    metadata_by_subject: dict[str, pd.DataFrame] = {}
+    data_by_subject: dict[str, np.ndarray] = {}
+    for subject_index, row in enumerate(rows):
+        subject_id = str(row["subject_id"])
+        other_rate = np.asarray([0.0, 1.4, -0.6, 2.1], dtype=float)
+        metadata = pd.DataFrame(
+            {
+                "subject_id": [subject_id] * 4,
+                "task": ["conversation"] * 4,
+                "run": ["1"] * 4,
+                "other_rate": other_rate,
+            }
+        )
+        subject_intercept = float(subject_index + 1)
+        other_map = np.asarray([[0.8, 0.4, 0.2], [0.5, 0.3, 0.1]], dtype=float)
+        baseline = np.asarray([[0.1, 0.2, 0.0], [0.0, 0.1, -0.1]], dtype=float)
+        data = np.zeros((len(metadata), 2, 3), dtype=float)
+        for trial_index in range(len(metadata)):
+            data[trial_index] = baseline + (other_rate[trial_index] * other_map) + subject_intercept
+        metadata_by_subject[subject_id] = metadata
+        data_by_subject[subject_id] = data
+
+    dataset_index_path = _write_similarity_epochs(
+        tmp_path,
+        config,
+        rows,
+        metadata_by_subject=metadata_by_subject,
+        data_by_subject=data_by_subject,
+    )
+    fit_args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        dataset_index=str(dataset_index_path),
+        subject_id=None,
+        task=None,
+        run=None,
+        epochs_path=None,
+        metadata_path=None,
+        run_all=False,
+        output=None,
+        target=None,
+        trial_regressors_csv=None,
+        config_section="lmeeeg",
+        model_name="other_rate_effect",
+    )
+    assert lmeeeg_subject.run(fit_args, config=config) == 0
+
+    pooled_inputs = load_pooled_lmeeeg_inputs(config, rows, config_section="lmeeeg", model_name="other_rate_effect")
+    map_estimate = compute_lmeeeg_pooled_beta_map(
+        config,
+        pooled_inputs=pooled_inputs,
+        config_section="lmeeeg",
+        model_name="other_rate_effect",
+        predictor_name="other_rate",
+    )
+    saved_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    saved_betas = np.load(saved_paths.betas_output_path)
+    saved_column_names = json.loads(saved_paths.column_names_output_path.read_text(encoding="utf-8"))
+    saved_effect_index = saved_column_names.index("other_rate")
+
+    assert map_estimate.effect_name == "other_rate"
+    assert map_estimate.residualisation_depends_on_predictor is True
+    np.testing.assert_allclose(map_estimate.beta_map, saved_betas[saved_effect_index])
+    np.testing.assert_allclose(map_estimate.times, np.load(saved_paths.times_output_path))
+    assert map_estimate.channel_names == json.loads(saved_paths.channel_names_output_path.read_text(encoding="utf-8"))
+
+
+def test_similarity_refit_strategy_marks_residualisation_as_predictor_dependent() -> None:
+    strategy = _resolve_similarity_refit_estimator_strategy()
+
+    assert strategy.estimator_name.startswith("lmeEEG pooled beta map")
+    assert strategy.observed_map_source == "saved pooled betas.npy from the standard lmeEEG stage"
+    assert strategy.residualisation_reused is False
+    assert strategy.residualisation_policy == "recomputed_per_permutation"
+    assert "predictor-dependent" in strategy.residualisation_reason
+
+
 def test_lmeeeg_similarity_none_mode_writes_descriptive_outputs_only(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
@@ -782,6 +948,226 @@ def test_lmeeeg_similarity_none_mode_writes_descriptive_outputs_only(tmp_path: P
     assert summary["time_resolved_topography"]["corrected_p_values_path"] is None
     assert not output_paths.whole_map_null_output_path.exists()
     assert not output_paths.time_resolved_p_values_output_path.exists()
+    assert output_paths.figure_manifest_output_path.exists()
+
+
+def test_lmeeeg_similarity_sign_flip_metadata_preserves_legacy_mode(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+
+    other_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    self_paths = build_lmeeeg_model_output_paths(config, model_name="self_rate_effect")
+    other_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+    self_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    channel_names = ["Fz", "Cz"]
+    times = np.asarray([-0.1, 0.0, 0.1], dtype=float)
+    for output_paths, predictor_name, betas in (
+        (
+            other_paths,
+            "other_rate",
+            np.asarray([[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], [[1.0, 2.0, 3.0], [0.5, 1.0, 1.5]]], dtype=float),
+        ),
+        (
+            self_paths,
+            "self_rate",
+            np.asarray([[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], [[0.8, 1.9, 3.1], [0.4, 0.9, 1.7]]], dtype=float),
+        ),
+    ):
+        np.save(output_paths.betas_output_path, betas)
+        np.save(output_paths.t_values_output_path, betas * 2.0)
+        np.save(output_paths.times_output_path, times)
+        output_paths.channel_names_output_path.write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
+        output_paths.column_names_output_path.write_text(json.dumps(["Intercept", predictor_name]) + "\n", encoding="utf-8")
+        output_paths.test_predictors_output_path.write_text(json.dumps([predictor_name]) + "\n", encoding="utf-8")
+        output_paths.summary_output_path.write_text(json.dumps({"status": "ok"}) + "\n", encoding="utf-8")
+
+    args = Namespace(config="config/config.yaml", schema="config/schema.json")
+    assert lmeeeg_similarity.run(args, config=config) == 0
+
+    output_paths = build_similarity_output_paths(config)
+    metadata = json.loads(output_paths.metadata_output_path.read_text(encoding="utf-8"))
+    assert metadata["inference"]["method"] == "sign_flip"
+    assert metadata["inference"]["p_value_source"] == "legacy_sign_flip_over_existing_maps"
+    assert metadata["inference"]["null_map_estimator_strategy"] is None
+
+
+def test_similarity_topomap_selection_is_deterministic() -> None:
+    times = np.asarray([-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4], dtype=float)
+    observed_curve = np.asarray([0.01, 0.04, 0.78, 0.55, 0.02, 0.61, 0.08], dtype=float)
+    significant_mask = np.asarray([False, False, True, True, False, True, False], dtype=bool)
+    time_mask = np.ones(times.shape, dtype=bool)
+
+    selected = lmeeeg_similarity_viz._select_topomap_indices(
+        times=times,
+        observed_curve=observed_curve,
+        significant_mask=significant_mask,
+        time_mask=time_mask,
+        n_topomaps=4,
+        window_radius_ms=50.0,
+    )
+
+    assert selected == [2, 5]
+
+
+def test_similarity_topomap_window_average_returns_expected_shape() -> None:
+    difference_map = np.asarray(
+        [
+            [1.0, 3.0, 5.0],
+            [2.0, 4.0, 6.0],
+        ],
+        dtype=float,
+    )
+    times = np.asarray([-0.05, 0.0, 0.05], dtype=float)
+
+    averaged_map, window_mask = lmeeeg_similarity_viz._average_map_window(
+        values_map=difference_map,
+        times=times,
+        center_index=1,
+        window_radius_ms=50.0,
+    )
+
+    assert averaged_map.shape == (2,)
+    np.testing.assert_allclose(averaged_map, np.asarray([3.0, 4.0], dtype=float))
+    np.testing.assert_array_equal(window_mask, np.asarray([True, True, True], dtype=bool))
+
+
+def test_similarity_significance_bar_aligns_with_time_axis_length() -> None:
+    figure, axis = plt.subplots()
+    times_ms = np.asarray([-100.0, 0.0, 80.0], dtype=float)
+    significant_mask = np.asarray([False, True, True], dtype=bool)
+
+    mesh = lmeeeg_similarity_viz._plot_significance_bar(
+        axis,
+        times_ms=times_ms,
+        significant_mask=significant_mask,
+        color="#2F6B3B",
+        label="TFCE-corrected p < 0.05",
+        fontsize=9.0,
+    )
+
+    assert np.asarray(mesh.get_array()).shape == (1, 3)
+    assert axis.get_xlim() == pytest.approx((-150.0, 120.0))
+    plt.close(figure)
+
+
+def test_similarity_topomap_color_scale_is_symmetric() -> None:
+    vmin, vmax = lmeeeg_similarity_viz._compute_symmetric_topomap_limits(
+        [
+            np.asarray([1.0, -2.5, 0.2], dtype=float),
+            np.asarray([-0.3, 0.8, 1.4], dtype=float),
+        ],
+        requested_vlim=None,
+    )
+
+    assert vmin == pytest.approx(-2.5)
+    assert vmax == pytest.approx(2.5)
+
+
+def test_similarity_summary_figure_manifest_writes_outputs(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    output_paths = build_similarity_output_paths(config)
+    output_paths.root_dir.mkdir(parents=True, exist_ok=True)
+    other_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    self_paths = build_lmeeeg_model_output_paths(config, model_name="self_rate_effect")
+    other_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+    self_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    difference_map = np.asarray(
+        [
+            [0.2, 0.8, 1.2, 0.6, 0.1],
+            [-0.1, 0.4, 0.9, 0.5, 0.0],
+            [0.0, 0.3, 0.6, 0.4, -0.1],
+            [-0.2, 0.2, 0.7, 0.3, -0.2],
+        ],
+        dtype=float,
+    )
+    times = np.asarray([-0.2, -0.1, 0.0, 0.1, 0.2], dtype=float)
+    other_map = np.asarray(
+        [
+            [0.4, 1.1, 1.6, 0.9, 0.2],
+            [0.1, 0.7, 1.2, 0.8, 0.3],
+            [0.2, 0.5, 0.9, 0.6, 0.1],
+            [0.0, 0.4, 0.8, 0.5, 0.0],
+        ],
+        dtype=float,
+    )
+    self_map = other_map - difference_map
+    observed_curve = np.asarray([0.01, 0.18, 0.62, 0.25, 0.05], dtype=float)
+    corrected_p = np.asarray([0.20, 0.03, 0.01, 0.20, 0.60], dtype=float)
+    null_curves = np.asarray(
+        [
+            [-0.10, 0.04, 0.08, 0.05, -0.02],
+            [-0.08, 0.02, 0.10, 0.03, -0.01],
+            [-0.12, 0.03, 0.07, 0.04, 0.00],
+            [-0.09, 0.01, 0.09, 0.02, -0.03],
+        ],
+        dtype=float,
+    )
+
+    np.save(output_paths.difference_map_output_path, difference_map)
+    np.save(output_paths.times_output_path, times)
+    np.save(output_paths.time_resolved_curve_output_path, observed_curve)
+    np.save(output_paths.time_resolved_p_values_output_path, corrected_p)
+    np.save(output_paths.time_resolved_null_curves_output_path, null_curves)
+    output_paths.channel_names_output_path.write_text(json.dumps(["Fz", "Cz", "Pz", "Oz"]) + "\n", encoding="utf-8")
+    for model_paths, predictor_name, values in (
+        (other_paths, "other_rate", other_map),
+        (self_paths, "self_rate", self_map),
+    ):
+        betas = np.stack([np.zeros_like(values), values], axis=0)
+        np.save(model_paths.betas_output_path, betas)
+        np.save(model_paths.t_values_output_path, betas * 2.0)
+        np.save(model_paths.times_output_path, times)
+        model_paths.channel_names_output_path.write_text(json.dumps(["Fz", "Cz", "Pz", "Oz"]) + "\n", encoding="utf-8")
+        model_paths.column_names_output_path.write_text(json.dumps(["Intercept", predictor_name]) + "\n", encoding="utf-8")
+        model_paths.test_predictors_output_path.write_text(json.dumps([predictor_name]) + "\n", encoding="utf-8")
+        model_paths.summary_output_path.write_text(
+            json.dumps({"status": "ok", "predictor_of_interest": predictor_name}) + "\n",
+            encoding="utf-8",
+        )
+    output_paths.summary_output_path.write_text(
+        json.dumps(
+            {
+                "analysis_name": "other_vs_self",
+                "input": {"predictor_a": "other_rate", "predictor_b": "self_rate"},
+                "time_resolved_topography": {
+                    "curve_path": str(output_paths.time_resolved_curve_output_path),
+                    "corrected_p_values_path": str(output_paths.time_resolved_p_values_output_path),
+                    "null_curves_path": str(output_paths.time_resolved_null_curves_output_path),
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_draw_similarity_topomap(**kwargs):
+        axis = kwargs["axis"]
+        axis.set_title(str(kwargs["title"]))
+        return axis.imshow(np.zeros((2, 2), dtype=float), vmin=kwargs["vmin"], vmax=kwargs["vmax"], cmap=kwargs["cmap"])
+
+    monkeypatch.setattr(lmeeeg_similarity_viz, "_draw_similarity_topomap", fake_draw_similarity_topomap)
+
+    manifest = lmeeeg_similarity_viz.build_similarity_summary_figure_manifest(
+        config=config,
+        out_dir=out_dir,
+        manifest_path=output_paths.figure_manifest_output_path,
+        figure_config={"n_topomaps": 4, "window_radius_ms": 50.0},
+        theme_config={"colors": {"shared": "#2F6B3B", "neutral": "#4B5563", "reference": "#6B7280"}},
+        formats=("png",),
+        dpi=72,
+    )
+
+    assert manifest["plot_count"] == 1
+    plot = manifest["plots"][0]
+    assert plot["plot_name"] == "similarity_summary"
+    assert plot["n_topomaps"] == 1
+    assert plot["plotting_tmin_s"] == -0.2
+    assert plot["plotting_tmax_s"] == 0.2
+    assert len(plot["files"]) == 1
+    assert Path(plot["files"][0]).exists()
 
 
 def test_lmeeeg_similarity_refit_permutation_writes_null_shapes(tmp_path: Path) -> None:
@@ -886,6 +1272,9 @@ def test_lmeeeg_similarity_refit_permutation_writes_null_shapes(tmp_path: Path) 
 
     assert summary["inference"]["method"] == "refit_permutation"
     assert metadata["inference"]["method"] == "refit_permutation"
+    assert metadata["inference"]["p_value_source"] == "recomputed_lmeeeg_pooled_beta_maps"
+    assert metadata["observed_map_estimator"]["source"] == "saved pooled betas.npy from the standard lmeEEG stage"
+    assert metadata["inference"]["null_map_estimator_strategy"]["residualisation_reused"] is False
     assert whole_nulls["pearson"].shape == (4,)
     assert whole_nulls["cosine"].shape == (4,)
     assert corrected_p.shape == (3,)
@@ -994,8 +1383,11 @@ def test_variance_partition_workflow_rules_are_present() -> None:
     assert "rule lmeeeg_variance_partition_group_stats" in stats_rules
     assert "rule lmeeeg_similarity" in stats_rules
     assert "rule figures_lmeeeg_main_results" in figures_rules
+    assert "rule figures_similarity" in figures_rules
     assert "rule figures_lmeeeg_variance_partition" in figures_rules
     assert "rule similarity_all" in targets_rules
+    assert "rule similarity_figures_all" in targets_rules
+    assert "SIMILARITY_FIGURES_OUTPUT" in targets_rules
     assert "rule lmeeeg_variance_partition_all" in targets_rules
     assert "rule lmeeeg_main_results_figures_all" in targets_rules
     assert "LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT" in targets_rules
@@ -1269,6 +1661,79 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
         np.save(model_dir / "times.npy", times)
         (model_dir / "channel_names.json").write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
 
+    other_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    self_paths = build_lmeeeg_model_output_paths(config, model_name="self_rate_effect")
+    difference_map = np.asarray(
+        [
+            [0.2, 0.8, 1.2, 0.6, 0.1],
+            [-0.1, 0.4, 0.9, 0.5, 0.0],
+            [0.0, 0.3, 0.6, 0.4, -0.1],
+            [-0.2, 0.2, 0.7, 0.3, -0.2],
+        ],
+        dtype=float,
+    )
+    other_map = np.asarray(
+        [
+            [0.4, 1.1, 1.6, 0.9, 0.2],
+            [0.1, 0.7, 1.2, 0.8, 0.3],
+            [0.2, 0.5, 0.9, 0.6, 0.1],
+            [0.0, 0.4, 0.8, 0.5, 0.0],
+        ],
+        dtype=float,
+    )
+    self_map = other_map - difference_map
+    for model_paths, predictor_name, values in (
+        (other_paths, "other_rate", other_map),
+        (self_paths, "self_rate", self_map),
+    ):
+        model_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+        betas = np.stack([np.zeros_like(values), values], axis=0)
+        np.save(model_paths.betas_output_path, betas)
+        np.save(model_paths.t_values_output_path, betas * 2.0)
+        np.save(model_paths.times_output_path, times)
+        model_paths.channel_names_output_path.write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
+        model_paths.column_names_output_path.write_text(json.dumps(["Intercept", predictor_name]) + "\n", encoding="utf-8")
+        model_paths.test_predictors_output_path.write_text(json.dumps([predictor_name]) + "\n", encoding="utf-8")
+        model_paths.summary_output_path.write_text(
+            json.dumps({"status": "ok", "predictor_of_interest": predictor_name}) + "\n",
+            encoding="utf-8",
+        )
+
+    similarity_paths = build_similarity_output_paths(config)
+    similarity_paths.root_dir.mkdir(parents=True, exist_ok=True)
+    observed_curve = np.asarray([0.01, 0.18, 0.62, 0.25, 0.05], dtype=float)
+    corrected_p = np.asarray([0.20, 0.03, 0.01, 0.20, 0.60], dtype=float)
+    null_curves = np.asarray(
+        [
+            [-0.10, 0.04, 0.08, 0.05, -0.02],
+            [-0.08, 0.02, 0.10, 0.03, -0.01],
+            [-0.12, 0.03, 0.07, 0.04, 0.00],
+            [-0.09, 0.01, 0.09, 0.02, -0.03],
+        ],
+        dtype=float,
+    )
+    np.save(similarity_paths.difference_map_output_path, difference_map)
+    np.save(similarity_paths.times_output_path, times)
+    np.save(similarity_paths.time_resolved_curve_output_path, observed_curve)
+    np.save(similarity_paths.time_resolved_p_values_output_path, corrected_p)
+    np.save(similarity_paths.time_resolved_null_curves_output_path, null_curves)
+    similarity_paths.channel_names_output_path.write_text(json.dumps(channel_names) + "\n", encoding="utf-8")
+    similarity_paths.summary_output_path.write_text(
+        json.dumps(
+            {
+                "analysis_name": "other_vs_self",
+                "input": {"predictor_a": "other_rate", "predictor_b": "self_rate"},
+                "time_resolved_topography": {
+                    "curve_path": str(similarity_paths.time_resolved_curve_output_path),
+                    "corrected_p_values_path": str(similarity_paths.time_resolved_p_values_output_path),
+                    "null_curves_path": str(similarity_paths.time_resolved_null_curves_output_path),
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     viz_config_path = tmp_path / "viz.yaml"
     viz_config_path.write_text(
         yaml.safe_dump(
@@ -1305,7 +1770,14 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
                                     "topomap_times_s": [-0.5],
                                 },
                             },
-                        }
+                        },
+                        "similarity_summary": {
+                            "enabled": True,
+                            "n_topomaps": 4,
+                            "window_radius_ms": 50.0,
+                            "plotting_tmin_s": -0.8,
+                            "plotting_tmax_s": 0.2,
+                        },
                     },
                 }
             }
@@ -1319,6 +1791,11 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
         return axis.imshow(np.zeros((2, 2), dtype=float), vmin=kwargs["vmin"], vmax=kwargs["vmax"], cmap=kwargs["cmap"])
 
     monkeypatch.setattr(lmeeeg_results_viz, "_draw_topomap_with_significant_markers", fake_draw_topomap_with_significant_markers)
+    monkeypatch.setattr(
+        lmeeeg_similarity_viz,
+        "_draw_similarity_topomap",
+        lambda **kwargs: kwargs["axis"].imshow(np.zeros((2, 2), dtype=float), vmin=kwargs["vmin"], vmax=kwargs["vmax"], cmap=kwargs["cmap"]),
+    )
 
     args = Namespace(
         config="config/config.yaml",
@@ -1333,7 +1810,7 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
     manifest_path = out_dir / "figures" / "lmeeeg_main_results" / "figure_manifest.json"
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["plot_count"] == 1
+    assert manifest["plot_count"] == 2
     plot = manifest["plots"][0]
     assert plot["plot_name"] == "lmeeeg_main_results"
     assert plot["significance_threshold"] == 0.05
@@ -1344,3 +1821,7 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
     assert plot["models"][1]["topomap_times_s"] == [-0.5]
     assert len(plot["files"]) == 1
     assert Path(plot["files"][0]).exists()
+    similarity_plot = manifest["plots"][1]
+    assert similarity_plot["plot_name"] == "similarity_summary"
+    assert all(Path(path).parent == out_dir / "figures" / "lmeeeg_main_results" for path in map(Path, similarity_plot["files"]))
+    assert all(Path(path).exists() for path in similarity_plot["files"])

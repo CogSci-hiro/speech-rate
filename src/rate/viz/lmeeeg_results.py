@@ -30,6 +30,7 @@ def build_lmeeeg_main_results_manifest(
 ) -> dict[str, object]:
     """Render the main lmeEEG results figure from two configured effects."""
     figure_config = dict(figure_config or {})
+    similarity_figure_config = dict(figure_config.pop("similarity_summary", {}) or {})
     theme = apply_theme(theme_config)
     model_specs = dict(figure_config.get("models") or {})
     self_spec = dict(model_specs.get("self") or {})
@@ -213,23 +214,41 @@ def build_lmeeeg_main_results_manifest(
         written_paths.append(str(output_path))
     plt.close(figure)
 
+    plots = [
+        {
+            "plot_name": "lmeeeg_main_results",
+            "files": written_paths,
+            "config_section": config_section,
+            "significance_threshold": alpha_threshold,
+            "plotting_tmin_s": float(times_window_s.min()),
+            "plotting_tmax_s": float(times_window_s.max()),
+            "models": [
+                _manifest_model_entry(self_spec, self_payload, self_topomap_times_s),
+                _manifest_model_entry(other_spec, other_payload, other_topomap_times_s),
+            ],
+        }
+    ]
+
+    if similarity_figure_config and bool(similarity_figure_config.get("enabled", True)):
+        from rate.viz.lmeeeg_similarity import build_similarity_summary_figure_manifest
+
+        similarity_manifest = build_similarity_summary_figure_manifest(
+            config=config,
+            out_dir=out_dir,
+            manifest_path=manifest_path,
+            output_stem=out_dir / "figures" / figure_subdir / "similarity_summary",
+            figure_config=similarity_figure_config,
+            theme_config=theme_config,
+            formats=formats,
+            dpi=dpi,
+            write_manifest=False,
+        )
+        plots.extend(similarity_manifest["plots"])
+
     manifest = {
         "status": "ok",
-        "plot_count": 1,
-        "plots": [
-            {
-                "plot_name": "lmeeeg_main_results",
-                "files": written_paths,
-                "config_section": config_section,
-                "significance_threshold": alpha_threshold,
-                "plotting_tmin_s": float(times_window_s.min()),
-                "plotting_tmax_s": float(times_window_s.max()),
-                "models": [
-                    _manifest_model_entry(self_spec, self_payload, self_topomap_times_s),
-                    _manifest_model_entry(other_spec, other_payload, other_topomap_times_s),
-                ],
-            }
-        ],
+        "plot_count": len(plots),
+        "plots": plots,
     }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

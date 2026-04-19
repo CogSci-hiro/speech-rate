@@ -37,6 +37,9 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     viz_cfg = _load_viz_config(Path(args.viz_config))
     viz_section = dict(viz_cfg.get("viz") or {})
     figure_section = dict(((viz_section.get("figures") or {}).get("lmeeeg_main_results")) or {})
+    similarity_figure_section = dict(((viz_section.get("figures") or {}).get("similarity_summary")) or {})
+    if similarity_figure_section:
+        figure_section["similarity_summary"] = similarity_figure_section
     theme_section = dict(viz_section.get("theme") or {})
 
     manifest = build_lmeeeg_main_results_manifest(

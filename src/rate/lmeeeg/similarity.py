@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
@@ -13,7 +13,12 @@ import pandas as pd
 
 from rate.design import list_model_names, load_model_spec
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths
-from rate.lmeeeg.pooling import PooledLMEEEGInputs, fit_pooled_lmeeeg_model, load_pooled_lmeeeg_inputs, select_lmeeeg_rows
+from rate.lmeeeg.pooling import (
+    PooledLMEEEGInputs,
+    compute_lmeeeg_pooled_beta_map,
+    load_pooled_lmeeeg_inputs,
+    select_lmeeeg_rows,
+)
 from rate.paths import ensure_parent_dir, resolve_out_dir
 from rate.util import write_parquet_dataframe
 
@@ -110,6 +115,8 @@ class SimilarityOutputPaths:
     """Canonical outputs for one similarity analysis."""
 
     root_dir: Path
+    figures_dir: Path
+    figure_manifest_output_path: Path
     summary_output_path: Path
     metadata_output_path: Path
     summary_table_output_path: Path
@@ -142,6 +149,17 @@ class SimilarityPermutationGrouping:
 
     group_labels: tuple[str, ...]
     group_indices: tuple[np.ndarray, ...]
+
+
+@dataclass(frozen=True)
+class SimilarityRefitEstimatorStrategy:
+    """Developer-facing description of how refit-permutation regenerates null maps."""
+
+    estimator_name: str
+    observed_map_source: str
+    residualisation_reused: bool
+    residualisation_policy: str
+    residualisation_reason: str
 
 
 def resolve_similarity_settings(config: Mapping[str, Any]) -> SimilaritySettings:
@@ -240,6 +258,8 @@ def build_similarity_output_paths(config: Mapping[str, Any]) -> SimilarityOutput
     root_dir = resolve_out_dir(config) / "similarity" / _sanitize_token(settings.analysis_name)
     return SimilarityOutputPaths(
         root_dir=root_dir,
+        figures_dir=root_dir / "figures",
+        figure_manifest_output_path=root_dir / "figures" / "figure_manifest.json",
         summary_output_path=root_dir / "summary.json",
         metadata_output_path=root_dir / "metadata.json",
         summary_table_output_path=root_dir / "summary_table.parquet",
@@ -399,6 +419,7 @@ def run_similarity_analysis(config: Mapping[str, Any]) -> dict[str, Any]:
         whole_map_nulls=whole_map_nulls,
         null_curves=null_curves,
         null_max_distribution=null_max_distribution,
+        refit_null_payload=refit_null_payload,
     )
     output_paths.metadata_output_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -433,8 +454,9 @@ def run_similarity_analysis(config: Mapping[str, Any]) -> dict[str, Any]:
         "n_times": int(map_a.times.shape[0]),
         "note": (
             "This analysis describes similarity between two existing pooled lmeEEG fixed-effect maps. "
-            "Inferential similarity, when enabled, targets a null of disrupted predictor-to-EEG alignment after refitting "
-            "the lmeEEG models; it does not test map equality or identical mechanisms."
+            "Inferential similarity, when enabled, targets a null of disrupted predictor-to-EEG alignment after "
+            "recomputing pooled lmeEEG maps with the same estimator as the observed analysis; it does not test map "
+            "equality or identical mechanisms."
         ),
     }
     output_paths.summary_output_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -496,6 +518,7 @@ def _run_refit_permutation_similarity(
         raise ValueError("Refit-permutation similarity currently supports only `value_field: beta`.")
 
     rows = select_lmeeeg_rows(config)
+    estimator_strategy = _resolve_similarity_refit_estimator_strategy()
     pooled_inputs = load_pooled_lmeeeg_inputs(
         config,
         rows,
@@ -531,6 +554,11 @@ def _run_refit_permutation_similarity(
             predictor_names=predictor_names,
             permutation_indices=permutation_indices,
         )
+        # The observed similarity inputs are saved pooled betas.npy maps from the
+        # standard lmeEEG stage. Those maps come from backend random-effect removal
+        # plus downstream OLS, so refit-permutation reruns that same estimator here.
+        # In this codebase the marginalisation stage depends on the model formula,
+        # which means residualisation cannot be frozen across permutations.
         base_provenance = pooled_inputs.metadata_provenance or {}
         permutation_meta = {
             "sources": base_provenance.get("sources"),
@@ -584,6 +612,7 @@ def _run_refit_permutation_similarity(
     return {
         "whole_map_nulls": null_whole_map,
         "time_resolved_null_curves": null_time_curves,
+        "estimator_strategy": estimator_strategy,
     }
 
 
@@ -597,47 +626,40 @@ def _fit_similarity_predictor_map(
     predictor_name: str,
     expected_map: PredictorMap,
 ) -> PredictorMap:
-    result = fit_pooled_lmeeeg_model(
+    map_estimate = compute_lmeeeg_pooled_beta_map(
         config,
         pooled_inputs=pooled_inputs,
         config_section="lmeeeg",
         model_name=model_name,
+        predictor_name=predictor_name,
         metadata_df=metadata_df,
         metadata_provenance=metadata_provenance,
     )
-    null_map = _extract_predictor_map_from_result(
-        result_betas=result.betas,
-        column_names=result.column_names,
+    null_map = PredictorMap(
         predictor_name=predictor_name,
         model_name=model_name,
+        effect_name=map_estimate.effect_name,
         value_field="beta",
-        channel_names=result.channel_names,
-        times=result.times,
+        values=np.asarray(map_estimate.beta_map, dtype=float),
+        channel_names=list(map_estimate.channel_names),
+        times=np.asarray(map_estimate.times, dtype=float),
     )
     _validate_predictor_maps(expected_map, null_map)
     return null_map
 
 
-def _extract_predictor_map_from_result(
-    *,
-    result_betas: np.ndarray,
-    column_names: list[str],
-    predictor_name: str,
-    model_name: str,
-    value_field: str,
-    channel_names: list[str],
-    times: np.ndarray,
-) -> PredictorMap:
-    effect_name = _resolve_effect_name(column_names, predictor_name=predictor_name)
-    effect_index = int(column_names.index(effect_name))
-    return PredictorMap(
-        predictor_name=predictor_name,
-        model_name=model_name,
-        effect_name=effect_name,
-        value_field=value_field,
-        values=np.asarray(result_betas[effect_index], dtype=float),
-        channel_names=list(channel_names),
-        times=np.asarray(times, dtype=float),
+def _resolve_similarity_refit_estimator_strategy() -> SimilarityRefitEstimatorStrategy:
+    """Describe the observed-type estimator reused by refit-permutation."""
+
+    return SimilarityRefitEstimatorStrategy(
+        estimator_name="lmeEEG pooled beta map from backend random-effect removal plus downstream OLS",
+        observed_map_source="saved pooled betas.npy from the standard lmeEEG stage",
+        residualisation_reused=False,
+        residualisation_policy="recomputed_per_permutation",
+        residualisation_reason=(
+            "The backend-produced marginal EEG depends on the fitted single-predictor model formula, "
+            "so the random-effect removal stage is predictor-dependent and must be rerun after permutation."
+        ),
     )
 
 
@@ -886,7 +908,13 @@ def _build_similarity_metadata(
     whole_map_nulls: Mapping[str, np.ndarray],
     null_curves: np.ndarray | None,
     null_max_distribution: np.ndarray | None,
+    refit_null_payload: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    estimator_strategy = (
+        asdict(refit_null_payload["estimator_strategy"])
+        if refit_null_payload is not None and "estimator_strategy" in refit_null_payload
+        else None
+    )
     return {
         "analysis_name": settings.analysis_name,
         "predictor_a": map_a.predictor_name,
@@ -895,10 +923,23 @@ def _build_similarity_metadata(
             "predictor_a": map_a.model_name,
             "predictor_b": map_b.model_name,
         },
+        "observed_map_estimator": {
+            "source": "saved pooled betas.npy from the standard lmeEEG stage",
+            "estimator": "lmeEEG pooled beta map from backend random-effect removal plus downstream OLS",
+            "value_field": map_a.value_field,
+        },
         "inference": {
             "descriptive_only": not settings.inference.enabled,
             "method": settings.inference.method,
-            "p_value_source": None if not settings.inference.enabled else settings.inference.method,
+            "p_value_source": (
+                None
+                if not settings.inference.enabled
+                else (
+                    "legacy_sign_flip_over_existing_maps"
+                    if settings.inference.method == "sign_flip"
+                    else "recomputed_lmeeeg_pooled_beta_maps"
+                )
+            ),
             "n_permutations": int(settings.inference.n_permutations) if settings.inference.enabled else 0,
             "random_seed": int(settings.inference.random_seed),
             "tail": settings.inference.tail,
@@ -917,13 +958,16 @@ def _build_similarity_metadata(
             "whole_map_null_metrics": sorted(whole_map_nulls),
             "time_resolved_null_shape": None if null_curves is None else list(np.asarray(null_curves).shape),
             "time_resolved_null_max_shape": None if null_max_distribution is None else list(np.asarray(null_max_distribution).shape),
+            "null_map_estimator_strategy": estimator_strategy,
             "null_hypothesis": (
                 "Similarity is evaluated against null maps generated by disrupting predictor-to-EEG alignment "
-                "and refitting the lmeEEG models. This does not test whether the observed maps are equal."
+                "and recomputing observed-type pooled lmeEEG maps. This does not test whether the observed maps are equal."
             ),
             "method_note": (
-                "Similarity inference should be based on null maps generated by disrupting predictor-to-EEG alignment "
-                "and refitting the lmeEEG models; post hoc sign-flip over map features is kept only as a legacy/fast approximation."
+                "Similarity inference should recompute null maps with the same estimator as the observed similarity maps. "
+                "In this repository the observed maps are pooled lmeEEG OLS-stage betas after random-effect removal, "
+                "so refit-permutation regenerates those pooled beta maps; post hoc sign-flip over existing map features "
+                "is kept only as a legacy/fast approximation."
             ),
         },
     }

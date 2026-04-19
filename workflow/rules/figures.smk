@@ -1,6 +1,7 @@
 BEHAVIOURAL_FIGURES_OUTPUT = f"{OUT_DIR}/figures/behavioural/figure_manifest.json"
 DECODING_FIGURES_OUTPUT = f"{OUT_DIR}/figures/decoding/figure_manifest.json"
 DECODING_RESULTS_FIGURES_OUTPUT = f"{OUT_DIR}/figures/decoding_results/figure_manifest.json"
+SIMILARITY_FIGURES_OUTPUT = str(build_similarity_output_paths(RESOLVED_CONFIG).figure_manifest_output_path)
 LMEEEG_QC_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg/figure_manifest.json"
 LMEEEG_INFERENCE_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_inference/figure_manifest.json"
 LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_main_results/figure_manifest.json"
@@ -76,11 +77,24 @@ rule figures_lmeeeg_inference:
 rule figures_lmeeeg_main_results:
     input:
         lmeeeg_output=LMEEEG_STATS_OUTPUT,
+        similarity_output=SIMILARITY_STATS_OUTPUT,
         viz_config="config/viz.yaml",
     output:
         LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT,
     shell:
         "PYTHONPATH=src python -m rate.cli.main figures-lmeeeg-main-results "
+        "--config config/config.yaml --schema config/schema.json "
+        "--viz-config {input.viz_config} --output {output}"
+
+
+rule figures_similarity:
+    input:
+        similarity_output=SIMILARITY_STATS_OUTPUT,
+        viz_config="config/viz.yaml",
+    output:
+        SIMILARITY_FIGURES_OUTPUT,
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main figures-similarity "
         "--config config/config.yaml --schema config/schema.json "
         "--viz-config {input.viz_config} --output {output}"
 

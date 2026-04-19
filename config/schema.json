@@ -91,6 +91,7 @@
                 "enabled": {"type": "boolean"},
                 "e_power": {"type": "number"},
                 "h_power": {"type": "number"},
+                "h_start": {"type": "number"},
                 "dh": {"type": "number", "exclusiveMinimum": 0}
               },
               "additionalProperties": true

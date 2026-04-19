@@ -32,6 +32,29 @@ class PooledLMEEEGInputs:
     metadata_provenance: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class PooledLMEEEGMapEstimate:
+    """One single-predictor pooled beta map from the standard lmeEEG stage estimator.
+
+    The saved pooled ``betas.npy`` maps used by similarity are the OLS-stage fixed-effect
+    coefficients produced by :func:`fit_pooled_lmeeeg_model` after the backend removes the
+    fitted random-intercept contribution for each feature. They are not direct featurewise
+    mixed-model coefficients. Because that backend-produced marginal EEG depends on the
+    model formula, the residualisation stage is predictor-dependent in this codebase and
+    must be rerun whenever the predictor alignment is permuted.
+    """
+
+    model_name: str
+    predictor_name: str
+    effect_name: str
+    beta_map: np.ndarray
+    channel_names: list[str]
+    times: np.ndarray
+    result: LMEEEGResult
+    estimator_name: str = "lmeEEG pooled beta map from backend random-effect removal plus downstream OLS"
+    residualisation_depends_on_predictor: bool = True
+
+
 def resolve_dataset_index_path(config: Mapping[str, Any], *, dataset_index: str | None = None) -> Path:
     """Resolve the dataset-index parquet path."""
     if dataset_index:
@@ -216,4 +239,55 @@ def fit_pooled_lmeeeg_model(
         config,
         config_section=config_section,
         model_name=model_name,
+    )
+
+
+def compute_lmeeeg_pooled_beta_map(
+    config: Mapping[str, Any],
+    *,
+    pooled_inputs: PooledLMEEEGInputs,
+    predictor_name: str,
+    config_section: str = "lmeeeg",
+    model_name: str,
+    metadata_df: pd.DataFrame | None = None,
+    metadata_provenance: dict[str, Any] | None = None,
+) -> PooledLMEEEGMapEstimate:
+    """Recompute one saved-style pooled beta map for a single-predictor lmeEEG model.
+
+    This helper is the reusable bridge between the standard pooled lmeEEG stage and the
+    similarity refit-permutation null: both must use the same observed-map estimator.
+    """
+
+    result = fit_pooled_lmeeeg_model(
+        config,
+        pooled_inputs=pooled_inputs,
+        config_section=config_section,
+        model_name=model_name,
+        metadata_df=metadata_df,
+        metadata_provenance=metadata_provenance,
+    )
+    if tuple(result.test_predictors) != (predictor_name,):
+        raise ValueError(
+            "Expected a single-predictor pooled lmeEEG model when extracting a similarity beta map, "
+            f"got test predictors {result.test_predictors!r} for model `{model_name}`."
+        )
+    effect_name = _resolve_effect_name(result.column_names, predictor_name=predictor_name)
+    effect_index = int(result.column_names.index(effect_name))
+    return PooledLMEEEGMapEstimate(
+        model_name=model_name,
+        predictor_name=predictor_name,
+        effect_name=effect_name,
+        beta_map=np.asarray(result.betas[effect_index], dtype=float),
+        channel_names=list(result.channel_names),
+        times=np.asarray(result.times, dtype=float),
+        result=result,
+    )
+
+
+def _resolve_effect_name(column_names: list[str], *, predictor_name: str) -> str:
+    for column_name in column_names:
+        if str(column_name) == predictor_name:
+            return str(column_name)
+    raise ValueError(
+        f"Predictor `{predictor_name}` did not resolve to a saved fixed-effect column. Available columns: {column_names}"
     )

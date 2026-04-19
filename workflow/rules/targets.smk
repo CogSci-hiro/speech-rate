@@ -58,6 +58,7 @@ _figures_all_inputs = [
     BEHAVIOURAL_FIGURES_OUTPUT,
     DECODING_FIGURES_OUTPUT,
     DECODING_RESULTS_FIGURES_OUTPUT,
+    SIMILARITY_FIGURES_OUTPUT,
     LMEEEG_QC_FIGURES_OUTPUT,
     LMEEEG_INFERENCE_FIGURES_OUTPUT,
     LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT,
@@ -83,6 +84,11 @@ rule decoding_figures_all:
 rule decoding_results_figures_all:
     input:
         DECODING_RESULTS_FIGURES_OUTPUT
+
+
+rule similarity_figures_all:
+    input:
+        SIMILARITY_FIGURES_OUTPUT
 
 
 rule lmeeeg_main_results_figures_all:

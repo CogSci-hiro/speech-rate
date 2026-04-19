@@ -129,5 +129,18 @@ viz:
           model_name: "other_rate_effect"
           effect_name: "other_rate"
           topomap_times_s: [-0.7, -0.5]
+    similarity_summary:
+      enabled: true
+      n_topomaps: 4
+      window_radius_ms: 50
+      topomap_selection: "automatic"
+      plotting_tmin_s: -2.0
+      plotting_tmax_s: 0.5
+      significance_threshold: 0.05
+      topomap_cmap: "RdBu_r"
+      colorbar_label: "Beta coefficient"
+      line_title: "Time-resolved topographic similarity"
+      font_scale: 3.0
+      null_envelope_percentiles: [2.5, 97.5]
     glm:
       contrasts: ["speech_rate"]

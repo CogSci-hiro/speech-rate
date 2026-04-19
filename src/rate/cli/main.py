@@ -34,6 +34,7 @@ _COMMANDS = {
     "figures-decoding-results": "rate.cli.commands.figures_decoding_results",
     "figures-glm": "rate.legacy.cli.commands.figures_glm",
     "figures-lmeeeg": "rate.cli.commands.figures_lmeeeg",
+    "figures-similarity": "rate.cli.commands.figures_similarity",
     "figures-lmeeeg-main-results": "rate.cli.commands.figures_lmeeeg_main_results",
     "figures-lmeeeg-variance-partition": "rate.cli.commands.figures_lmeeeg_variance_partition",
     "figures-lmeeeg-inference": "rate.cli.commands.figures_lmeeeg_inference",
