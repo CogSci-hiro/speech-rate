@@ -1733,6 +1733,39 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
         + "\n",
         encoding="utf-8",
     )
+    behavioural_dir = out_dir / "stats" / "behavioural_residuals"
+    behavioural_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "subject_id": ["sub-001", "sub-001", "sub-001", "sub-002", "sub-002", "sub-002"],
+            "dyad_id": ["dyad-001", "dyad-001", "dyad-001", "dyad-001", "dyad-001", "dyad-001"],
+            "self_rate": [4.1, 4.4, 4.6, 3.3, 3.5, 3.7],
+        }
+    ).to_csv(behavioural_dir / "trialwise_residuals.csv", index=False)
+    pd.DataFrame(
+        {
+            "subject_id": ["sub-001", "sub-002"],
+            "dyad_id": ["dyad-001", "dyad-001"],
+            "slope": [-0.15, 0.05],
+            "se": [0.04, 0.05],
+        }
+    ).to_csv(behavioural_dir / "subject_slopes.csv", index=False)
+    variance_partition_group_paths = build_variance_partition_group_output_paths(config)
+    variance_partition_group_paths.group_dir.mkdir(parents=True, exist_ok=True)
+    write_parquet_dataframe(
+        pd.DataFrame(
+            {
+                "channel": ["Fp1", "Fp1", "Oz", "Oz"],
+                "time": [-0.1, 0.0, -0.1, 0.0],
+                "channel_index": [0, 0, 1, 1],
+                "time_index": [0, 1, 0, 1],
+                "unique_self": [0.04, 0.06, 0.03, 0.05],
+                "unique_other": [0.03, 0.02, 0.04, 0.03],
+                "shared": [0.01, 0.02, 0.05, 0.06],
+            }
+        ),
+        variance_partition_group_paths.table_output_path,
+    )
 
     viz_config_path = tmp_path / "viz.yaml"
     viz_config_path.write_text(
@@ -1778,6 +1811,23 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
                             "plotting_tmin_s": -0.8,
                             "plotting_tmax_s": 0.2,
                         },
+                        "behavioural": {
+                            "speech_rate": {
+                                "enabled": True,
+                                "min_trials_per_subject": 3,
+                                "font_scale": 3.0,
+                            },
+                            "subject_slopes": {
+                                "enabled": True,
+                            },
+                        },
+                        "variance_partition": {
+                            "use_proportions": False,
+                            "rois": {
+                                "anterior": ["Fp1"],
+                                "posterior": ["Oz"],
+                            },
+                        },
                     },
                 }
             }
@@ -1807,10 +1857,10 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
     exit_code = figures_lmeeeg_main_results.run(args, config=config)
 
     assert exit_code == 0
-    manifest_path = out_dir / "figures" / "lmeeeg_main_results" / "figure_manifest.json"
+    manifest_path = out_dir / "figures" / "main_figures" / "figure_manifest.json"
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["plot_count"] == 2
+    assert manifest["plot_count"] == 4
     plot = manifest["plots"][0]
     assert plot["plot_name"] == "lmeeeg_main_results"
     assert plot["significance_threshold"] == 0.05
@@ -1823,5 +1873,13 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
     assert Path(plot["files"][0]).exists()
     similarity_plot = manifest["plots"][1]
     assert similarity_plot["plot_name"] == "similarity_summary"
-    assert all(Path(path).parent == out_dir / "figures" / "lmeeeg_main_results" for path in map(Path, similarity_plot["files"]))
+    assert all(Path(path).parent == out_dir / "figures" / "main_figures" for path in map(Path, similarity_plot["files"]))
     assert all(Path(path).exists() for path in similarity_plot["files"])
+    behavioural_plot = manifest["plots"][2]
+    assert behavioural_plot["plot_name"] == "behavioural_summary"
+    assert all(Path(path).parent == out_dir / "figures" / "main_figures" for path in map(Path, behavioural_plot["files"]))
+    assert all(Path(path).exists() for path in behavioural_plot["files"])
+    variance_partition_plot = manifest["plots"][3]
+    assert variance_partition_plot["plot_name"] == "variance_partition_summary"
+    assert all(Path(path).parent == out_dir / "figures" / "main_figures" for path in map(Path, variance_partition_plot["files"]))
+    assert all(Path(path).exists() for path in variance_partition_plot["files"])

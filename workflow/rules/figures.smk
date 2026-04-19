@@ -4,7 +4,7 @@ DECODING_RESULTS_FIGURES_OUTPUT = f"{OUT_DIR}/figures/decoding_results/figure_ma
 SIMILARITY_FIGURES_OUTPUT = str(build_similarity_output_paths(RESOLVED_CONFIG).figure_manifest_output_path)
 LMEEEG_QC_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg/figure_manifest.json"
 LMEEEG_INFERENCE_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_inference/figure_manifest.json"
-LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_main_results/figure_manifest.json"
+LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT = f"{OUT_DIR}/figures/main_figures/figure_manifest.json"
 LMEEEG_VARIANCE_PARTITION_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_variance_partition/figure_manifest.json"
 
 
@@ -78,6 +78,9 @@ rule figures_lmeeeg_main_results:
     input:
         lmeeeg_output=LMEEEG_STATS_OUTPUT,
         similarity_output=SIMILARITY_STATS_OUTPUT,
+        behavioural_residuals=BEHAVIOURAL_RESIDUALS_OUTPUT,
+        behavioural_slopes=BEHAVIOURAL_SUBJECT_SLOPES_OUTPUT,
+        variance_partition_stats=LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT,
         viz_config="config/viz.yaml",
     output:
         LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT,

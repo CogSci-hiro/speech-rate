@@ -33,13 +33,19 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     assert config is not None
     out_dir = resolve_out_dir(config)
     config_section = str(getattr(args, "config_section", "lmeeeg") or "lmeeeg")
-    output_path = Path(args.output) if args.output else out_dir / "figures" / f"{config_section}_main_results" / "figure_manifest.json"
+    output_path = Path(args.output) if args.output else out_dir / "figures" / "main_figures" / "figure_manifest.json"
     viz_cfg = _load_viz_config(Path(args.viz_config))
     viz_section = dict(viz_cfg.get("viz") or {})
     figure_section = dict(((viz_section.get("figures") or {}).get("lmeeeg_main_results")) or {})
     similarity_figure_section = dict(((viz_section.get("figures") or {}).get("similarity_summary")) or {})
+    behavioural_figure_section = dict(((viz_section.get("figures") or {}).get("behavioural")) or {})
+    variance_partition_figure_section = dict(((viz_section.get("figures") or {}).get("variance_partition")) or {})
     if similarity_figure_section:
         figure_section["similarity_summary"] = similarity_figure_section
+    if behavioural_figure_section:
+        figure_section["behavioural"] = behavioural_figure_section
+    if variance_partition_figure_section:
+        figure_section["variance_partition"] = variance_partition_figure_section
     theme_section = dict(viz_section.get("theme") or {})
 
     manifest = build_lmeeeg_main_results_manifest(
@@ -49,7 +55,7 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
         figure_config=figure_section,
         theme_config=theme_section,
         config_section=config_section,
-        figure_subdir=f"{config_section}_main_results",
+        figure_subdir="main_figures",
         formats=tuple(viz_section.get("formats", ["png", "pdf"])),
         dpi=int(viz_section.get("dpi", 300)),
     )

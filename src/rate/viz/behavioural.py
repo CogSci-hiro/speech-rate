@@ -20,11 +20,13 @@ def build_behavioural_manifest(
     residuals_path: Path,
     subject_slopes_path: Path | None,
     manifest_path: Path,
+    output_stem: Path | None = None,
     figure_config: Mapping[str, Any] | None = None,
     theme_config: Mapping[str, Any] | None = None,
     figure_subdir: str = "behavioural",
     formats: Sequence[str] = ("png", "pdf"),
     dpi: int = 300,
+    write_manifest: bool = True,
 ) -> dict[str, object]:
     """Render one combined behavioural figure and write a manifest."""
     figure_config = dict(figure_config or {})
@@ -37,6 +39,7 @@ def build_behavioural_manifest(
         out_dir=out_dir,
         residuals_path=residuals_path,
         subject_slopes_path=subject_slopes_path,
+        output_stem=output_stem,
         figure_subdir=figure_subdir,
         speech_rate_cfg=speech_rate_cfg,
         subject_slopes_cfg=subject_slopes_cfg,
@@ -50,8 +53,9 @@ def build_behavioural_manifest(
         "plot_count": 1,
         "plots": [plot],
     }
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if write_manifest:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
 
 
@@ -60,6 +64,7 @@ def _build_combined_behavioural_plot(
     out_dir: Path,
     residuals_path: Path,
     subject_slopes_path: Path,
+    output_stem: Path | None,
     figure_subdir: str,
     speech_rate_cfg: Mapping[str, Any],
     subject_slopes_cfg: Mapping[str, Any],
@@ -80,6 +85,8 @@ def _build_combined_behavioural_plot(
     jitter_sd = float(speech_rate_cfg.get("jitter_sd", 0.012))
     connector_alpha = float(speech_rate_cfg.get("connector_alpha", 0.75))
     dot_alpha = float(speech_rate_cfg.get("dot_alpha", 0.95))
+    font_scale = float(speech_rate_cfg.get("font_scale", 3.0))
+    slopes_legend_font_scale = float(subject_slopes_cfg.get("legend_font_scale", 1.5))
     rng_seed = int(speech_rate_cfg.get("random_seed", 42))
     rng = np.random.default_rng(rng_seed)
 
@@ -125,9 +132,10 @@ def _build_combined_behavioural_plot(
         edgecolor="none",
         linewidth=0.0,
     )
-    ax_hist.set_title("A. Distribution of self speech rate")
-    ax_hist.set_xlabel("Self speech rate")
-    ax_hist.set_ylabel("Count")
+    ax_hist.set_title("A. Distribution of\nself speech rate", fontsize=_scaled_fontsize(11, font_scale))
+    ax_hist.set_xlabel("Self speech rate", fontsize=_scaled_fontsize(10, font_scale))
+    ax_hist.set_ylabel("Count", fontsize=_scaled_fontsize(10, font_scale))
+    ax_hist.tick_params(axis="both", labelsize=_scaled_fontsize(8, font_scale))
 
     _plot_subject_median_rainplot(
         ax=ax_subject,
@@ -140,6 +148,7 @@ def _build_combined_behavioural_plot(
         connector_alpha=connector_alpha,
         dot_alpha=dot_alpha,
         rng=rng,
+        font_scale=font_scale,
     )
 
     plot_grouped_subject_slopes(
@@ -147,7 +156,7 @@ def _build_combined_behavioural_plot(
         slope_dataframe=slope_dataframe,
         subject_column=str(subject_slopes_cfg.get("subject_col", "subject_id")),
         dyad_column=str(subject_slopes_cfg.get("dyad_col", "dyad_id")),
-        title="C. Subject-specific other-rate slopes by dyad",
+        title="C. Subject-specific\nother-rate slopes by dyad",
         xlabel="Subject-specific slope estimate",
         point_color=str(subject_slopes_cfg.get("point_color", palette["other"])),
         line_color=str(subject_slopes_cfg.get("line_color", palette["other"])),
@@ -155,15 +164,17 @@ def _build_combined_behavioural_plot(
         between_dyad_spacing=float(subject_slopes_cfg.get("between_dyad_spacing", 1.8)),
         dyad_to_color=dyad_to_color,
         show_legend=True,
+        font_scale=font_scale,
+        legend_font_scale=slopes_legend_font_scale,
     )
 
     fig.tight_layout()
 
-    output_stem = out_dir / "figures" / figure_subdir / "behavioural_summary"
-    output_stem.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output_stem = output_stem if output_stem is not None else out_dir / "figures" / figure_subdir / "behavioural_summary"
+    resolved_output_stem.parent.mkdir(parents=True, exist_ok=True)
     written_paths: list[str] = []
     for fmt in formats:
-        output_path = output_stem.with_suffix(f".{fmt}")
+        output_path = resolved_output_stem.with_suffix(f".{fmt}")
         fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
         written_paths.append(str(output_path))
     plt.close(fig)
@@ -240,6 +251,8 @@ def plot_grouped_subject_slopes(
     between_dyad_spacing: float = 1.8,
     dyad_to_color: Mapping[str, tuple[float, float, float]] | None = None,
     show_legend: bool = False,
+    font_scale: float = 1.0,
+    legend_font_scale: float = 1.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Plot grouped subject-wise slopes with 95% confidence intervals."""
     ordered_plot_df, dyad_summary = _order_grouped_subject_slopes(
@@ -286,10 +299,11 @@ def plot_grouped_subject_slopes(
         current_y += between_dyad_spacing
 
     ax.axvline(0.0, linewidth=1, color="0.4")
-    ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("Subjects grouped by dyad")
+    ax.set_title(title, fontsize=_scaled_fontsize(11, font_scale))
+    ax.set_xlabel(xlabel, fontsize=_scaled_fontsize(10, font_scale))
+    ax.set_ylabel("Subjects grouped by dyad", fontsize=_scaled_fontsize(10, font_scale))
     ax.set_yticks([])
+    ax.tick_params(axis="both", labelsize=_scaled_fontsize(8, font_scale))
 
     if show_legend and dyad_to_color:
         legend_handles = [
@@ -307,7 +321,9 @@ def plot_grouped_subject_slopes(
             if str(dyad_id) in dyad_to_color
         ]
         if legend_handles:
-            ax.legend(handles=legend_handles, title="Dyad ID", loc="best", frameon=False)
+            legend = ax.legend(handles=legend_handles, title="Dyad ID", loc="best", frameon=False)
+            plt.setp(legend.get_texts(), fontsize=_scaled_fontsize(8, legend_font_scale))
+            legend.get_title().set_fontsize(_scaled_fontsize(9, legend_font_scale))
 
     return ordered_plot_df, dyad_summary
 
@@ -324,6 +340,7 @@ def _plot_subject_median_rainplot(
     connector_alpha: float,
     dot_alpha: float,
     rng: np.random.Generator,
+    font_scale: float,
 ) -> None:
     kde_height = max(dot_spread_y * 4.0, 0.32)
     rain_offset = max(dot_spread_y * 1.6, 0.18)
@@ -397,12 +414,17 @@ def _plot_subject_median_rainplot(
             zorder=4,
         )
 
-    ax.set_title("B. Subject median speech rates")
-    ax.set_xlabel("Median self speech rate")
+    ax.set_title("B. Subject median\nspeech rates", fontsize=_scaled_fontsize(11, font_scale))
+    ax.set_xlabel("Median self speech rate", fontsize=_scaled_fontsize(10, font_scale))
     ax.set_ylabel("")
     ax.set_yticks([])
+    ax.tick_params(axis="both", labelsize=_scaled_fontsize(8, font_scale))
     ax.set_ylim(base_y - rain_offset - dot_spread_y - 0.08, base_y + kde_height + 0.1)
     ax.set_xlim(x_min - x_padding, x_max + x_padding)
+
+
+def _scaled_fontsize(base_size: float, scale: float) -> float:
+    return float(base_size) * float(scale)
 
 
 def _order_grouped_subject_slopes(

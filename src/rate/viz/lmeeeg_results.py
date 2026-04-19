@@ -24,13 +24,15 @@ def build_lmeeeg_main_results_manifest(
     figure_config: Mapping[str, Any] | None = None,
     theme_config: Mapping[str, Any] | None = None,
     config_section: str = "lmeeeg",
-    figure_subdir: str = "lmeeeg_main_results",
+    figure_subdir: str = "main_figures",
     formats: Sequence[str] = ("png", "pdf"),
     dpi: int = 300,
 ) -> dict[str, object]:
     """Render the main lmeEEG results figure from two configured effects."""
     figure_config = dict(figure_config or {})
     similarity_figure_config = dict(figure_config.pop("similarity_summary", {}) or {})
+    behavioural_figure_config = dict(figure_config.pop("behavioural", {}) or {})
+    variance_partition_figure_config = dict(figure_config.pop("variance_partition", {}) or {})
     theme = apply_theme(theme_config)
     model_specs = dict(figure_config.get("models") or {})
     self_spec = dict(model_specs.get("self") or {})
@@ -59,6 +61,7 @@ def build_lmeeeg_main_results_manifest(
     alpha_threshold = float(figure_config.get("significance_threshold", 0.05))
     robust_percentile = float(figure_config.get("robust_percentile", 97.5))
     manual_vlim = figure_config.get("manual_vlim")
+    font_scale = float(figure_config.get("font_scale", 3.0))
     shared_vmin, shared_vmax = _compute_shared_vlim(
         np.asarray(self_payload["observed_map"], dtype=float),
         np.asarray(other_payload["observed_map"], dtype=float),
@@ -98,24 +101,32 @@ def build_lmeeeg_main_results_manifest(
     figure = plt.figure(
         figsize=(
             float(figure_config.get("figure_width", 14.0)),
-            float(figure_config.get("figure_height", 8.0)),
+            float(figure_config.get("figure_height", 10.5)),
         )
     )
     outer_grid = gridspec.GridSpec(
-        nrows=3,
+        nrows=4,
         ncols=2,
         figure=figure,
         width_ratios=[1.0, 0.04],
-        height_ratios=[1.0, 1.4, 1.0],
+        height_ratios=[1.1, 1.5, float(figure_config.get("bottom_row_spacer_height", 0.38)), 1.1],
         hspace=float(figure_config.get("hspace", 0.20)),
         wspace=float(figure_config.get("wspace", 0.12)),
     )
     top_grid = gridspec.GridSpecFromSubplotSpec(1, n_cols, subplot_spec=outer_grid[0, 0], wspace=0.35)
     line_axis = figure.add_subplot(outer_grid[1, 0])
-    bottom_grid = gridspec.GridSpecFromSubplotSpec(1, n_cols, subplot_spec=outer_grid[2, 0], wspace=0.35)
-    colorbar_axis = figure.add_subplot(outer_grid[:, 1])
+    bottom_grid = gridspec.GridSpecFromSubplotSpec(1, n_cols, subplot_spec=outer_grid[3, 0], wspace=0.35)
+    colorbar_host_axis = figure.add_subplot(outer_grid[:, 1])
+    colorbar_host_axis.axis("off")
+    colorbar_axis = colorbar_host_axis.inset_axes([0.25, 0.25, 0.5, 0.5])
     self_topomap_axes = [figure.add_subplot(top_grid[0, index]) for index in range(n_cols)]
     other_topomap_axes = [figure.add_subplot(bottom_grid[0, index]) for index in range(n_cols)]
+    _align_bottom_right_topomap_to_main_panel(
+        other_topomap_axes,
+        plotted_count=n_other_maps,
+        right_edge=line_axis.get_position().x1,
+        extra_offset=float(figure_config.get("bottom_right_topomap_extra_offset", 0.0)),
+    )
 
     times_window_s = times[time_mask]
     times_window_ms = times_window_s * 1000.0
@@ -124,20 +135,27 @@ def build_lmeeeg_main_results_manifest(
     line_axis.plot(times_window_ms, self_counts_window, color=line_self_color, linewidth=2.5, label=str(self_spec.get("label", "Unique self")))
     line_axis.plot(times_window_ms, other_counts_window, color=line_other_color, linewidth=2.5, label=str(other_spec.get("label", "Unique other")))
     line_axis.axvline(0.0, color=reference_color, linewidth=1.0)
-    line_axis.set_ylabel("Number of significant electrodes")
-    line_axis.set_xlabel("Time (ms)")
-    line_axis.set_title(str(figure_config.get("line_title", "Spatial extent of significant effects over time")), fontsize=13)
+    line_axis.set_ylabel("Number of significant electrodes", fontsize=_scaled_fontsize(11, font_scale))
+    line_axis.set_xlabel("Time (ms)", fontsize=_scaled_fontsize(11, font_scale))
     line_axis.spines["top"].set_visible(False)
     line_axis.spines["right"].set_visible(False)
-    line_axis.legend(frameon=False, loc="upper right")
+    line_axis.tick_params(axis="both", labelsize=_scaled_fontsize(9, font_scale))
+    line_axis.legend(frameon=False, loc="upper right", fontsize=_scaled_fontsize(9, font_scale))
+    figure.suptitle(
+        str(figure_config.get("line_title", "Spatial extent of significant effects over time")),
+        fontsize=_scaled_fontsize(13, font_scale),
+        y=float(figure_config.get("title_y", 1.01)),
+    )
 
     marker_size = float(figure_config.get("significant_marker_size", 40.0))
     marker_facecolor = str(figure_config.get("significant_marker_facecolor", shared_label_color))
     marker_edgecolor = str(figure_config.get("significant_marker_edgecolor", get_theme_color("background", theme)))
     marker_linewidth = float(figure_config.get("significant_marker_linewidth", 1.2))
     topomap_cmap = str(figure_config.get("topomap_cmap", "RdBu_r"))
-    top_title_pad = float(figure_config.get("topomap_title_pad", 6.0))
-    bottom_title_pad = float(figure_config.get("bottom_topomap_title_pad", 0.0))
+    top_title_pad = float(figure_config.get("topomap_title_pad", 2.0))
+    bottom_title_pad = float(figure_config.get("bottom_topomap_title_pad", -18.0))
+    topomap_title_fontsize = _scaled_fontsize(11, font_scale)
+    lower_panel_link_target_y = float(figure_config.get("lower_panel_link_target_y", 0.88))
     last_image = None
 
     for index, selected_time_s in enumerate(self_topomap_times_s):
@@ -157,6 +175,7 @@ def build_lmeeeg_main_results_manifest(
             marker_edgecolor=marker_edgecolor,
             marker_linewidth=marker_linewidth,
             title_pad=top_title_pad,
+            title_fontsize=topomap_title_fontsize,
         )
         _add_time_link(
             figure=figure,
@@ -165,7 +184,7 @@ def build_lmeeeg_main_results_manifest(
             selected_time_ms=selected_time_ms,
             y_value=float(np.interp(selected_time_ms, times_window_ms, self_counts_window)),
             color=line_self_color,
-            connect_to_top=0.0,
+            connect_to_y=0.0,
         )
     for index in range(n_self_maps, n_cols):
         self_topomap_axes[index].axis("off")
@@ -187,6 +206,7 @@ def build_lmeeeg_main_results_manifest(
             marker_edgecolor=marker_edgecolor,
             marker_linewidth=marker_linewidth,
             title_pad=bottom_title_pad,
+            title_fontsize=topomap_title_fontsize,
         )
         _add_time_link(
             figure=figure,
@@ -195,7 +215,7 @@ def build_lmeeeg_main_results_manifest(
             selected_time_ms=selected_time_ms,
             y_value=float(np.interp(selected_time_ms, times_window_ms, other_counts_window)),
             color=line_other_color,
-            connect_to_top=1.0,
+            connect_to_y=lower_panel_link_target_y,
         )
     for index in range(n_other_maps, n_cols):
         other_topomap_axes[index].axis("off")
@@ -203,7 +223,9 @@ def build_lmeeeg_main_results_manifest(
     if last_image is None:
         raise ValueError("No topomap snapshots were drawn. Configure at least one topomap time for self or other.")
     colorbar = figure.colorbar(last_image, cax=colorbar_axis)
-    colorbar.set_label(str(figure_config.get("colorbar_label", "Observed t value")), rotation=90)
+    colorbar.set_label(str(figure_config.get("colorbar_label", "Observed t value")), rotation=90, fontsize=_scaled_fontsize(11, font_scale))
+    colorbar.ax.tick_params(labelsize=_scaled_fontsize(9, font_scale))
+    colorbar.ax.yaxis.get_offset_text().set_size(_scaled_fontsize(9, font_scale))
 
     output_stem = out_dir / "figures" / figure_subdir / "main_results"
     output_stem.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +267,47 @@ def build_lmeeeg_main_results_manifest(
         )
         plots.extend(similarity_manifest["plots"])
 
+    if behavioural_figure_config:
+        from rate.viz.behavioural import build_behavioural_manifest
+
+        behavioural_manifest = build_behavioural_manifest(
+            out_dir=out_dir,
+            residuals_path=out_dir / "stats" / "behavioural_residuals" / "trialwise_residuals.csv",
+            subject_slopes_path=out_dir / "stats" / "behavioural_residuals" / "subject_slopes.csv",
+            manifest_path=manifest_path,
+            output_stem=out_dir / "figures" / figure_subdir / "behavioural_summary",
+            figure_config=behavioural_figure_config,
+            theme_config=theme_config,
+            figure_subdir=figure_subdir,
+            formats=formats,
+            dpi=dpi,
+            write_manifest=False,
+        )
+        plots.extend(behavioural_manifest["plots"])
+
+    if variance_partition_figure_config:
+        from rate.lmeeeg.variance_partition import build_variance_partition_group_output_paths
+        from rate.viz.variance_partition import build_variance_partition_manifest
+
+        variance_partition_paths = build_variance_partition_group_output_paths(config)
+        variance_partition_table_path = _resolve_variance_partition_table_path(
+            default_path=variance_partition_paths.table_output_path,
+            out_dir=out_dir,
+        )
+        variance_partition_manifest = build_variance_partition_manifest(
+            out_dir=out_dir,
+            table_path=variance_partition_table_path,
+            manifest_path=manifest_path,
+            output_stem=out_dir / "figures" / figure_subdir / "variance_partition_summary",
+            figure_config=variance_partition_figure_config,
+            theme_config=theme_config,
+            figure_subdir=figure_subdir,
+            formats=formats,
+            dpi=dpi,
+            write_manifest=False,
+        )
+        plots.extend(variance_partition_manifest["plots"])
+
     manifest = {
         "status": "ok",
         "plot_count": len(plots),
@@ -265,6 +328,15 @@ def _manifest_model_entry(effect_config: Mapping[str, Any], payload: Mapping[str
         "corrected_p_values": str(payload["corrected_p_path"]),
         "topomap_times_s": [float(value) for value in topomap_times_s],
     }
+
+
+def _resolve_variance_partition_table_path(*, default_path: Path, out_dir: Path) -> Path:
+    if default_path.exists():
+        return default_path
+    fallback_path = out_dir / "_previous" / "last" / "lmeeeg_variance_partition" / "group" / "descriptive_maps.parquet"
+    if fallback_path.exists():
+        return fallback_path
+    return default_path
 
 
 def _load_effect_payload(
@@ -414,6 +486,7 @@ def _draw_topomap_with_significant_markers(
     marker_edgecolor: str,
     marker_linewidth: float,
     title_pad: float,
+    title_fontsize: float,
 ):
     image, _ = mne.viz.plot_topomap(
         values,
@@ -439,7 +512,7 @@ def _draw_topomap_with_significant_markers(
             linewidths=marker_linewidth,
             zorder=10,
         )
-    axis.set_title(title, fontsize=11, pad=title_pad)
+    axis.set_title(title, fontsize=title_fontsize, pad=title_pad)
     return image
 
 
@@ -451,7 +524,7 @@ def _add_time_link(
     selected_time_ms: float,
     y_value: float,
     color: str,
-    connect_to_top: float,
+    connect_to_y: float,
 ) -> None:
     line_axis.axvline(selected_time_ms, color="0.65", linestyle="--", linewidth=1.0, alpha=0.7)
     line_axis.scatter([selected_time_ms], [y_value], color=color, s=35, zorder=5)
@@ -459,7 +532,7 @@ def _add_time_link(
         ConnectionPatch(
             xyA=(selected_time_ms, y_value),
             coordsA=line_axis.transData,
-            xyB=(0.5, connect_to_top),
+            xyB=(0.5, connect_to_y),
             coordsB=topomap_axis.transAxes,
             arrowstyle="->",
             shrinkA=4,
@@ -469,3 +542,25 @@ def _add_time_link(
             linewidth=1.5,
         )
     )
+
+
+def _align_bottom_right_topomap_to_main_panel(
+    axes: Sequence[plt.Axes],
+    *,
+    plotted_count: int,
+    right_edge: float,
+    extra_offset: float,
+) -> None:
+    if len(axes) < 1 or plotted_count < 1:
+        return
+    target_index = min(plotted_count, len(axes)) - 1
+    if target_index < 0:
+        return
+    target_axis = axes[target_index]
+    position = target_axis.get_position()
+    new_x0 = right_edge - position.width + extra_offset
+    target_axis.set_position([new_x0, position.y0, position.width, position.height])
+
+
+def _scaled_fontsize(base_size: float, scale: float) -> float:
+    return float(base_size) * float(scale)

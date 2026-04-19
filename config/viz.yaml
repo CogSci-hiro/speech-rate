@@ -24,6 +24,7 @@ viz:
       speech_rate:
         enabled: true
         formats: ["png"]
+        font_scale: 3.0
         min_trials_per_subject: 5
         histogram_bins: 30
         histogram_color: "#7B8794"
@@ -54,11 +55,20 @@ viz:
       use_proportions: false
       epsilon: 1.0e-12
       figure_width: 14
-      figure_height: 5
+      figure_height: 6.0
+      font_scale: 3.0
+      venn_label_scale: 0.75
+      venn_title_scale: 0.8
+      legend_font_scale: 0.8
+      legend_loc: "upper left"
+      ylabel_font_scale: 0.45
+      show_inset_labels: false
       constrained_w_pad: 0.02
-      constrained_h_pad: 0.02
+      constrained_h_pad: 0.005
       wspace: 0.04
-      hspace: 0.06
+      hspace: 0.01
+      anterior_inset_anchor: [0.80, 0.50, 0.18, 0.42]
+      posterior_inset_anchor: [0.80, 0.50, 0.18, 0.42]
       rois:
         anterior:
           - "Fp1"
@@ -114,10 +124,17 @@ viz:
       plotting_tmax_s: 0.5
       robust_percentile: 99.5
       manual_vlim: 5
-      hspace: 0.5
-      bottom_topomap_title_pad: -6
+      figure_height: 10.5
+      hspace: 0.20
+      bottom_row_spacer_height: 0.45
+      bottom_right_topomap_extra_offset: 0.0
+      title_y: 1.01
+      topomap_title_pad: 2
+      bottom_topomap_title_pad: -18
       topomap_cmap: "RdBu_r"
       colorbar_label: "Observed t value"
+      font_scale: 3.0
+      lower_panel_link_target_y: 0.88
       models:
         self:
           label: "Self"

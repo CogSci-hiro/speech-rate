@@ -81,11 +81,13 @@ def build_variance_partition_manifest(
     out_dir: Path,
     table_path: Path,
     manifest_path: Path,
+    output_stem: Path | None = None,
     figure_config: Mapping[str, Any] | None = None,
     theme_config: Mapping[str, Any] | None = None,
     figure_subdir: str = "lmeeeg_variance_partition",
     formats: Sequence[str] = ("png", "pdf"),
     dpi: int = 300,
+    write_manifest: bool = True,
 ) -> dict[str, object]:
     """Render variance-partition summary figures and write a manifest."""
     figure_config = dict(figure_config or {})
@@ -94,6 +96,10 @@ def build_variance_partition_manifest(
     roi_config = dict(figure_config.get("rois") or {})
     use_proportions = bool(figure_config.get("use_proportions", False))
     epsilon = float(figure_config.get("epsilon", 1e-12))
+    font_scale = float(figure_config.get("font_scale", 3.0))
+    venn_label_scale = float(figure_config.get("venn_label_scale", 0.8))
+    venn_title_scale = float(figure_config.get("venn_title_scale", 0.8))
+    legend_font_scale = float(figure_config.get("legend_font_scale", 0.8))
     palette = get_role_palette(theme)
 
     anterior_channels = tuple(roi_config.get("anterior", DEFAULT_ANTERIOR_CHANNELS))
@@ -145,6 +151,9 @@ def build_variance_partition_manifest(
         title=str(figure_config.get("global_title", "Global variance partitioning")),
         colors=palette,
         theme_config=theme,
+        font_scale=font_scale,
+        label_scale=venn_label_scale,
+        title_scale=venn_title_scale,
     )
     y_axis_label = "Proportion of explained variance" if use_proportions else "Explained variance"
     _plot_stacked_area(
@@ -154,6 +163,8 @@ def build_variance_partition_manifest(
         ylabel=y_axis_label,
         colors=palette,
         theme_config=theme,
+        font_scale=font_scale,
+        ylabel_scale=float(figure_config.get("ylabel_font_scale", 0.45)),
     )
     _plot_stacked_area(
         posterior_axis,
@@ -162,6 +173,8 @@ def build_variance_partition_manifest(
         ylabel=y_axis_label,
         colors=palette,
         theme_config=theme,
+        font_scale=font_scale,
+        ylabel_scale=float(figure_config.get("ylabel_font_scale", 0.45)),
     )
     _add_roi_inset(
         anterior_axis,
@@ -170,6 +183,7 @@ def build_variance_partition_manifest(
         highlight_color=palette["self"],
         theme_config=theme,
         anchor=tuple(figure_config.get("anterior_inset_anchor", (0.01, 0.50, 0.18, 0.42))),
+        show_label=bool(figure_config.get("show_inset_labels", False)),
     )
     _add_roi_inset(
         posterior_axis,
@@ -178,8 +192,11 @@ def build_variance_partition_manifest(
         highlight_color=palette["other"],
         theme_config=theme,
         anchor=tuple(figure_config.get("posterior_inset_anchor", (0.01, 0.50, 0.18, 0.42))),
+        show_label=bool(figure_config.get("show_inset_labels", False)),
     )
-    posterior_axis.set_xlabel("Time (s)")
+    posterior_axis.set_xlabel("Time (s)", fontsize=_scaled_fontsize(10, font_scale))
+    anterior_axis.tick_params(axis="both", labelsize=_scaled_fontsize(8, font_scale))
+    posterior_axis.tick_params(axis="both", labelsize=_scaled_fontsize(8, font_scale))
 
     if use_proportions:
         anterior_axis.set_ylim(0.0, 1.0)
@@ -194,13 +211,19 @@ def build_variance_partition_manifest(
 
     handles, labels = anterior_axis.get_legend_handles_labels()
     if handles:
-        anterior_axis.legend(handles, labels, loc="upper right", frameon=False)
+        anterior_axis.legend(
+            handles,
+            labels,
+            loc=str(figure_config.get("legend_loc", "upper left")),
+            frameon=False,
+            fontsize=_scaled_fontsize(8, font_scale * legend_font_scale),
+        )
 
-    output_stem = out_dir / "figures" / figure_subdir / "variance_partition_summary"
-    output_stem.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output_stem = output_stem if output_stem is not None else out_dir / "figures" / figure_subdir / "variance_partition_summary"
+    resolved_output_stem.parent.mkdir(parents=True, exist_ok=True)
     written_paths: list[str] = []
     for fmt in formats:
-        output_path = output_stem.with_suffix(f".{fmt}")
+        output_path = resolved_output_stem.with_suffix(f".{fmt}")
         figure.savefig(output_path, dpi=dpi, bbox_inches="tight")
         written_paths.append(str(output_path))
     plt.close(figure)
@@ -222,8 +245,9 @@ def build_variance_partition_manifest(
             }
         ],
     }
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if write_manifest:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
 
 
@@ -303,6 +327,8 @@ def _plot_stacked_area(
     ylabel: str,
     colors: Mapping[str, str],
     theme_config: Mapping[str, Any] | None = None,
+    font_scale: float = 1.0,
+    ylabel_scale: float = 1.0,
 ) -> None:
     time_values = timecourse_df["time"].to_numpy(dtype=float)
     axis.stackplot(
@@ -315,8 +341,8 @@ def _plot_stacked_area(
         alpha=0.9,
     )
     axis.axvline(0.0, linewidth=1.0, color=get_theme_color("reference", theme_config))
-    axis.set_title(title, fontsize=13)
-    axis.set_ylabel(ylabel)
+    axis.set_title(title, fontsize=_scaled_fontsize(11, font_scale))
+    axis.set_ylabel(ylabel, fontsize=_scaled_fontsize(10, font_scale * ylabel_scale))
     axis.set_xlim(float(time_values.min()), float(time_values.max()))
     axis.spines["top"].set_visible(False)
     axis.spines["right"].set_visible(False)
@@ -330,6 +356,7 @@ def _add_roi_inset(
     highlight_color: str,
     theme_config: Mapping[str, Any] | None = None,
     anchor: Sequence[float] = (0.01, 0.50, 0.18, 0.42),
+    show_label: bool = False,
 ) -> None:
     positions = _get_roi_channel_positions(roi_channels)
     if positions is None:
@@ -363,7 +390,8 @@ def _add_roi_inset(
         linewidths=0.3,
         zorder=2,
     )
-    inset_axis.text(0.0, -1.22, label, ha="center", va="top", fontsize=8.5, fontweight="semibold")
+    if show_label:
+        inset_axis.text(0.0, -1.22, label, ha="center", va="top", fontsize=8.5, fontweight="semibold")
     inset_axis.set_xlim(-1.15, 1.15)
     inset_axis.set_ylim(-1.28, 1.2)
     inset_axis.set_aspect("equal")
@@ -407,6 +435,9 @@ def _draw_weighted_venn(
     title: str,
     colors: Mapping[str, str],
     theme_config: Mapping[str, Any] | None = None,
+    font_scale: float = 1.0,
+    label_scale: float = 1.0,
+    title_scale: float = 1.0,
 ) -> None:
     if venn2 is not None:
         _draw_weighted_venn_with_matplotlib_venn(
@@ -417,6 +448,9 @@ def _draw_weighted_venn(
             title=title,
             colors=colors,
             theme_config=theme_config,
+            font_scale=font_scale,
+            label_scale=label_scale,
+            title_scale=title_scale,
         )
         return
     _draw_weighted_venn_fallback(
@@ -427,6 +461,9 @@ def _draw_weighted_venn(
         title=title,
         colors=colors,
         theme_config=theme_config,
+        font_scale=font_scale,
+        label_scale=label_scale,
+        title_scale=title_scale,
     )
 
 
@@ -439,6 +476,9 @@ def _draw_weighted_venn_with_matplotlib_venn(
     title: str,
     colors: Mapping[str, str],
     theme_config: Mapping[str, Any] | None = None,
+    font_scale: float = 1.0,
+    label_scale: float = 1.0,
+    title_scale: float = 1.0,
 ) -> None:
     venn_object = venn2(
         subsets=(unique_self_value, unique_other_value, shared_value),
@@ -463,7 +503,7 @@ def _draw_weighted_venn_with_matplotlib_venn(
         label = venn_object.get_label_by_id(region_id)
         if label is not None:
             label.set_text(region_text)
-            label.set_fontsize(11)
+            label.set_fontsize(_scaled_fontsize(8, font_scale * label_scale))
             label.set_fontweight("semibold")
             label.set_color("white")
 
@@ -475,10 +515,10 @@ def _draw_weighted_venn_with_matplotlib_venn(
     for set_id in ("A", "B"):
         set_label = venn_object.get_label_by_id(set_id)
         if set_label is not None:
-            set_label.set_fontsize(12)
+            set_label.set_fontsize(_scaled_fontsize(9, font_scale * label_scale))
             set_label.set_fontweight("semibold")
             set_label.set_color("white")
-    axis.set_title(title, fontsize=14, pad=12)
+    axis.set_title(title, fontsize=_scaled_fontsize(11, font_scale * title_scale), pad=12)
 
 
 def _draw_weighted_venn_fallback(
@@ -490,6 +530,9 @@ def _draw_weighted_venn_fallback(
     title: str,
     colors: Mapping[str, str],
     theme_config: Mapping[str, Any] | None = None,
+    font_scale: float = 1.0,
+    label_scale: float = 1.0,
+    title_scale: float = 1.0,
 ) -> None:
     total_self = max(unique_self_value + shared_value, 0.0)
     total_other = max(unique_other_value + shared_value, 0.0)
@@ -502,12 +545,12 @@ def _draw_weighted_venn_fallback(
     right_center = (0.35, 0.0)
     axis.add_patch(Circle(left_center, self_radius, facecolor=colors["self"], edgecolor=edge_color, linewidth=1.25, alpha=0.35))
     axis.add_patch(Circle(right_center, other_radius, facecolor=colors["other"], edgecolor=edge_color, linewidth=1.25, alpha=0.35))
-    axis.text(left_center[0] - 0.12, 0.0, f"Unique self\n{_format_scientific_mathtext(unique_self_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold", color="white")
-    axis.text(right_center[0] + 0.12, 0.0, f"Unique other\n{_format_scientific_mathtext(unique_other_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold", color="white")
-    axis.text(0.0, -0.02, f"Shared\n{_format_scientific_mathtext(shared_value, 1)}", ha="center", va="center", fontsize=11, fontweight="semibold", color=colors["shared"])
-    axis.text(left_center[0], self_radius + 0.16, "Self", ha="center", va="bottom", fontsize=12, fontweight="semibold", color="white")
-    axis.text(right_center[0], other_radius + 0.16, "Other", ha="center", va="bottom", fontsize=12, fontweight="semibold", color="white")
-    axis.set_title(title, fontsize=14, pad=12)
+    axis.text(left_center[0] - 0.12, 0.0, f"Unique self\n{_format_scientific_mathtext(unique_self_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.text(right_center[0] + 0.12, 0.0, f"Unique other\n{_format_scientific_mathtext(unique_other_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.text(0.0, -0.02, f"Shared\n{_format_scientific_mathtext(shared_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color=colors["shared"])
+    axis.text(left_center[0], self_radius + 0.16, "Self", ha="center", va="bottom", fontsize=_scaled_fontsize(9, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.text(right_center[0], other_radius + 0.16, "Other", ha="center", va="bottom", fontsize=_scaled_fontsize(9, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.set_title(title, fontsize=_scaled_fontsize(11, font_scale * title_scale), pad=12)
     axis.set_xlim(-1.35, 1.35)
     axis.set_ylim(-1.0, 1.1)
     axis.set_aspect("equal")
@@ -528,3 +571,7 @@ def _find_topomap_coords(mne_info: mne.Info) -> np.ndarray:
     from mne.channels.layout import _find_topomap_coords as mne_find_topomap_coords
 
     return mne_find_topomap_coords(mne_info, picks=np.arange(len(mne_info.ch_names)))
+
+
+def _scaled_fontsize(base_size: float, scale: float) -> float:
+    return float(base_size) * float(scale)
