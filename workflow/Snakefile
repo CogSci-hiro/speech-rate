@@ -67,6 +67,7 @@ BEHAVIOURAL_RESIDUALS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/trialwise_residuals
 BEHAVIOURAL_SUBJECT_SLOPES_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/subject_slopes.csv"
 BEHAVIOURAL_MODEL_SUMMARY_CSV_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/behavioural_model_summary.csv"
 BEHAVIOURAL_MODEL_SUMMARY_TXT_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/behavioural_model_summary.txt"
+R_ANALYSIS_MODEL_SUMMARY_TXT_OUTPUT = f"{OUT_DIR}/stats/r_analysis/analysis_model_summaries.txt"
 
 
 def _dataset_index_checkpoint_path() -> str:

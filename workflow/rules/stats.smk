@@ -4,6 +4,7 @@ R_ANALYSIS_PREPROCESS_PARTNER_OUTPUT = f"{R_ANALYSIS_DIR}/partner_events.csv"
 R_ANALYSIS_PREPROCESS_NULL_OUTPUT = f"{R_ANALYSIS_DIR}/null_summary.csv"
 R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT = f"{R_ANALYSIS_DIR}/preprocess_summary.json"
 R_ANALYSIS_RESULTS_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_results.csv"
+R_ANALYSIS_MODEL_SUMMARY_TXT_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_model_summaries.txt"
 R_ANALYSIS_STAGE = f"{OUT_DIR}/_stage/r_analysis_all.done.json"
 LMEEEG_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_group_stats.json"
 SIMILARITY_STATS_OUTPUT = str(build_similarity_output_paths(RESOLVED_CONFIG).summary_output_path)
@@ -65,6 +66,7 @@ rule r_analysis_fit:
         fit_script=str(WORKFLOW_DIR / "scripts" / "fit_lmeeeg.R"),
     output:
         results=R_ANALYSIS_RESULTS_OUTPUT,
+        model_summaries_txt=R_ANALYSIS_MODEL_SUMMARY_TXT_OUTPUT,
     params:
         n_null=1000,
         seed=int((RESOLVED_CONFIG.get("project") or {}).get("random_seed", 1234)),
@@ -74,6 +76,7 @@ rule r_analysis_fit:
         "--input {input.events} "
         "--preprocess_script {input.preprocess_script} "
         "--output {output.results} "
+        "--model_summary_txt {output.model_summaries_txt} "
         "--n_null {params.n_null} "
         "--seed {params.seed}"
 
@@ -82,6 +85,7 @@ rule r_analysis_stage:
     input:
         R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
         R_ANALYSIS_RESULTS_OUTPUT,
+        R_ANALYSIS_MODEL_SUMMARY_TXT_OUTPUT,
     output:
         R_ANALYSIS_STAGE,
     shell:

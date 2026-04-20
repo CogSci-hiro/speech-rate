@@ -148,6 +148,52 @@ fit_behavioural_residual_model <- function(data, subject_column = NULL) {
   )
 }
 
+extract_behavioural_convergence_diagnostics <- function(model_fit) {
+  model <- model_fit$model
+  optinfo <- model@optinfo
+  conv_info <- optinfo$conv
+  lme4_messages <- conv_info$lme4$messages
+  optimizer_code <- conv_info$opt
+  optimizer_messages <- if (is.list(conv_info$opt)) conv_info$opt$message else NULL
+
+  derivs <- optinfo$derivs
+  gradient_values <- derivs$gradient
+  if (is.null(gradient_values)) {
+    gradient_values <- derivs$grad
+  }
+  max_abs_gradient <- if (is.null(gradient_values)) {
+    NA_real_
+  } else {
+    max(abs(as.numeric(gradient_values)), na.rm = TRUE)
+  }
+  if (!is.finite(max_abs_gradient)) {
+    max_abs_gradient <- NA_real_
+  }
+
+  conv_messages <- c(lme4_messages, optimizer_messages)
+  conv_messages <- conv_messages[!is.na(conv_messages) & nzchar(conv_messages)]
+
+  optimizer_code_value <- if (is.list(optimizer_code)) {
+    suppressWarnings(as.integer(optimizer_code$code))
+  } else {
+    suppressWarnings(as.integer(optimizer_code))
+  }
+  if (length(optimizer_code_value) == 0L || is.na(optimizer_code_value[[1]])) {
+    optimizer_code_value <- NA_integer_
+  } else {
+    optimizer_code_value <- optimizer_code_value[[1]]
+  }
+
+  list(
+    convergence_warning = length(conv_messages) > 0L,
+    convergence_ok = length(conv_messages) == 0L,
+    convergence_message = if (length(conv_messages) > 0L) paste(conv_messages, collapse = " | ") else NA_character_,
+    optimizer_code = optimizer_code_value,
+    optimizer_message = if (length(optimizer_messages) > 0L) paste(optimizer_messages, collapse = " | ") else NA_character_,
+    max_abs_gradient = max_abs_gradient
+  )
+}
+
 extract_behavioural_fixed_effects <- function(model) {
   coefficient_table <- as.data.frame(summary(model)$coefficients)
   coefficient_table$term <- rownames(coefficient_table)
@@ -166,12 +212,19 @@ extract_behavioural_fixed_effects <- function(model) {
 
 build_behavioural_model_summary <- function(model_fit, analysis_data, subject_column, prediction_mode) {
   fixed_effects <- extract_behavioural_fixed_effects(model_fit$model)
+  convergence <- extract_behavioural_convergence_diagnostics(model_fit)
 
   fixed_effects %>%
     mutate(
       model_label = model_fit$model_label,
       formula = paste(deparse(model_fit$formula), collapse = " "),
       singular_fit = isTRUE(model_fit$singular_fit),
+      convergence_ok = isTRUE(convergence$convergence_ok),
+      convergence_warning = isTRUE(convergence$convergence_warning),
+      convergence_message = convergence$convergence_message,
+      optimizer_code = convergence$optimizer_code,
+      optimizer_message = convergence$optimizer_message,
+      max_abs_gradient = convergence$max_abs_gradient,
       fallback_used = isTRUE(model_fit$fallback_used),
       fallback_reason = model_fit$fallback_reason,
       prediction_mode = prediction_mode,
@@ -183,6 +236,12 @@ build_behavioural_model_summary <- function(model_fit, analysis_data, subject_co
       .data$model_label,
       .data$prediction_mode,
       .data$singular_fit,
+      .data$convergence_ok,
+      .data$convergence_warning,
+      .data$convergence_message,
+      .data$optimizer_code,
+      .data$optimizer_message,
+      .data$max_abs_gradient,
       .data$fallback_used,
       .data$fallback_reason,
       .data$n_observations,
@@ -246,6 +305,7 @@ extract_behavioural_subject_slopes <- function(model_fit, analysis_data, subject
 }
 
 format_behavioural_model_summary_text <- function(model_fit, analysis_data, subject_column, prediction_mode) {
+  convergence <- extract_behavioural_convergence_diagnostics(model_fit)
   fixed_effects <- extract_behavioural_fixed_effects(model_fit$model)
   fixed_effect_lines <- purrr::pmap_chr(
     fixed_effects,
@@ -267,12 +327,21 @@ format_behavioural_model_summary_text <- function(model_fit, analysis_data, subj
       sprintf("model_label: %s", model_fit$model_label),
       sprintf("prediction_mode: %s", prediction_mode),
       sprintf("singular_fit: %s", isTRUE(model_fit$singular_fit)),
+      sprintf("convergence_ok: %s", isTRUE(convergence$convergence_ok)),
+      sprintf("convergence_warning: %s", isTRUE(convergence$convergence_warning)),
+      sprintf("convergence_message: %s", convergence$convergence_message),
+      sprintf("optimizer_code: %s", convergence$optimizer_code),
+      sprintf("optimizer_message: %s", convergence$optimizer_message),
+      sprintf("max_abs_gradient: %s", format(convergence$max_abs_gradient, digits = 8, scientific = FALSE)),
       sprintf("fallback_used: %s", isTRUE(model_fit$fallback_used)),
       sprintf("fallback_reason: %s", model_fit$fallback_reason),
       sprintf("n_observations: %d", nrow(analysis_data)),
       sprintf("n_subjects: %d", dplyr::n_distinct(analysis_data[[subject_column]])),
       "fixed_effects:",
-      fixed_effect_lines
+      fixed_effect_lines,
+      "",
+      "full_model_summary:",
+      capture.output(summary(model_fit$model))
     ),
     collapse = "\n"
   )
