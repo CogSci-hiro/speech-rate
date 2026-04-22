@@ -304,6 +304,82 @@ extract_behavioural_subject_slopes <- function(model_fit, analysis_data, subject
     relocate(.data$subject_id, .data$dyad_id, .data$slope, .data$se)
 }
 
+extract_behavioural_random_intercepts <- function(model_fit, analysis_data, subject_column, dyad_column = "dyad_id") {
+  random_effects <- lme4::ranef(model_fit$model, condVar = TRUE)
+
+  extract_group_intercepts <- function(group_column) {
+    group_effects <- random_effects[[group_column]]
+    if (is.null(group_effects) || !"(Intercept)" %in% colnames(group_effects)) {
+      return(NULL)
+    }
+
+    posterior_variance <- attr(group_effects, "postVar")
+    if (is.null(posterior_variance) || length(dim(posterior_variance)) != 3L) {
+      stop(
+        sprintf("Unable to extract posterior variance for grouping column `%s`.", group_column),
+        call. = FALSE
+      )
+    }
+
+    intercept_index <- match("(Intercept)", colnames(group_effects))
+    if (is.na(intercept_index)) {
+      stop(
+        sprintf("Unable to locate `(Intercept)` index for grouping column `%s`.", group_column),
+        call. = FALSE
+      )
+    }
+
+    level_ids <- rownames(group_effects)
+    intercept_ses <- vapply(
+      seq_along(level_ids),
+      function(index) {
+        variance_value <- posterior_variance[intercept_index, intercept_index, index]
+        sqrt(as.numeric(variance_value))
+      },
+      numeric(1)
+    )
+
+    tibble::tibble(
+      grouping_factor = group_column,
+      level_id = as.character(level_ids),
+      random_intercept = as.numeric(group_effects[, "(Intercept)"]),
+      se = intercept_ses
+    )
+  }
+
+  subject_lookup <- analysis_data %>%
+    transmute(
+      subject_id = as.character(.data[[subject_column]]),
+      dyad_id = as.character(.data[[dyad_column]])
+    ) %>%
+    distinct() %>%
+    mutate(
+      subject_id = as.character(subject_id),
+      dyad_id = as.character(dyad_id)
+    )
+
+  subject_intercepts <- extract_group_intercepts(subject_column) %>%
+    left_join(subject_lookup, by = c("level_id" = "subject_id")) %>%
+    mutate(subject_id = .data$level_id) %>%
+    relocate("grouping_factor", "level_id", "subject_id", "dyad_id", "random_intercept", "se")
+
+  dyad_intercepts <- extract_group_intercepts(dyad_column)
+  if (!is.null(dyad_intercepts)) {
+    dyad_intercepts <- dyad_intercepts %>%
+      mutate(
+        subject_id = NA_character_,
+        dyad_id = .data$level_id
+      ) %>%
+      relocate("grouping_factor", "level_id", "subject_id", "dyad_id", "random_intercept", "se")
+  }
+
+  random_intercepts <- bind_rows(subject_intercepts, dyad_intercepts)
+  if (nrow(random_intercepts) == 0L) {
+    stop("No random intercepts available in the fitted behavioural model.", call. = FALSE)
+  }
+  random_intercepts
+}
+
 format_behavioural_model_summary_text <- function(model_fit, analysis_data, subject_column, prediction_mode) {
   convergence <- extract_behavioural_convergence_diagnostics(model_fit)
   fixed_effects <- extract_behavioural_fixed_effects(model_fit$model)
@@ -421,6 +497,11 @@ compute_behavioural_residuals <- function(
     augmented_data = augmented_data,
     analysis_data = analysis_data %>% select(-.row_id, -.source_row_id),
     model_fit = model_fit,
+    random_effects = extract_behavioural_random_intercepts(
+      model_fit = model_fit,
+      analysis_data = analysis_data,
+      subject_column = subject_column
+    ),
     subject_slopes = extract_behavioural_subject_slopes(
       model_fit = model_fit,
       analysis_data = analysis_data,

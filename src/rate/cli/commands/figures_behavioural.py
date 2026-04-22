@@ -22,7 +22,8 @@ def add_subparser(subparsers) -> ArgumentParser:
     add_common_config_arguments(parser)
     parser.add_argument("--viz-config", default="config/viz.yaml", help="Path to the figure config file.")
     parser.add_argument("--input", help="Optional explicit behavioural residuals CSV path.")
-    parser.add_argument("--slopes-input", help="Optional explicit behavioural subject slopes CSV path.")
+    parser.add_argument("--random-effects-input", help="Optional explicit behavioural random-effects CSV path.")
+    parser.add_argument("--lmm-summary-input", help="Optional explicit LMM summary text path.")
     parser.add_argument("--output", help="Optional explicit output path.")
     return parser
 
@@ -31,7 +32,16 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     assert config is not None
     out_dir = resolve_out_dir(config)
     residuals_path = Path(args.input) if args.input else out_dir / "stats" / "behavioural_residuals" / "trialwise_residuals.csv"
-    slopes_path = Path(args.slopes_input) if args.slopes_input else out_dir / "stats" / "behavioural_residuals" / "subject_slopes.csv"
+    random_effects_path = (
+        Path(args.random_effects_input)
+        if args.random_effects_input
+        else out_dir / "stats" / "behavioural_residuals" / "random_effects.csv"
+    )
+    lmm_summary_path = (
+        Path(args.lmm_summary_input)
+        if args.lmm_summary_input
+        else out_dir / "stats" / "r_analysis" / "analysis_model_summaries.txt"
+    )
     output_path = Path(args.output) if args.output else out_dir / "figures" / "behavioural" / "figure_manifest.json"
     viz_cfg = _load_viz_config(Path(args.viz_config))
     viz_section = dict(viz_cfg.get("viz") or {})
@@ -41,7 +51,9 @@ def run(args: Namespace, config: Mapping[str, Any] | None = None) -> int:
     manifest = build_behavioural_manifest(
         out_dir=out_dir,
         residuals_path=residuals_path,
-        subject_slopes_path=slopes_path,
+        random_effects_path=random_effects_path,
+        subject_slopes_path=None,
+        lmm_summary_path=lmm_summary_path,
         manifest_path=output_path,
         figure_config=behavioural_viz_section,
         theme_config=theme_section,

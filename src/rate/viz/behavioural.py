@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -18,7 +19,9 @@ def build_behavioural_manifest(
     *,
     out_dir: Path,
     residuals_path: Path,
+    random_effects_path: Path | None,
     subject_slopes_path: Path | None,
+    lmm_summary_path: Path | None,
     manifest_path: Path,
     output_stem: Path | None = None,
     figure_config: Mapping[str, Any] | None = None,
@@ -31,18 +34,17 @@ def build_behavioural_manifest(
     """Render one combined behavioural figure and write a manifest."""
     figure_config = dict(figure_config or {})
     speech_rate_cfg = dict(figure_config.get("speech_rate") or {})
-    subject_slopes_cfg = dict(figure_config.get("subject_slopes") or {})
-    if subject_slopes_path is None:
-        raise ValueError("subject_slopes_path is required for the combined behavioural figure.")
+    if lmm_summary_path is None:
+        raise ValueError("lmm_summary_path is required for the combined behavioural figure.")
 
     plot = _build_combined_behavioural_plot(
         out_dir=out_dir,
         residuals_path=residuals_path,
-        subject_slopes_path=subject_slopes_path,
+        random_effects_path=random_effects_path,
+        lmm_summary_path=lmm_summary_path,
         output_stem=output_stem,
         figure_subdir=figure_subdir,
         speech_rate_cfg=speech_rate_cfg,
-        subject_slopes_cfg=subject_slopes_cfg,
         theme_config=theme_config,
         formats=tuple(speech_rate_cfg.get("formats", formats)),
         dpi=int(speech_rate_cfg.get("dpi", dpi)),
@@ -63,11 +65,11 @@ def _build_combined_behavioural_plot(
     *,
     out_dir: Path,
     residuals_path: Path,
-    subject_slopes_path: Path,
+    random_effects_path: Path | None,
+    lmm_summary_path: Path,
     output_stem: Path | None,
     figure_subdir: str,
     speech_rate_cfg: Mapping[str, Any],
-    subject_slopes_cfg: Mapping[str, Any],
     theme_config: Mapping[str, Any] | None,
     formats: Sequence[str],
     dpi: int,
@@ -77,6 +79,9 @@ def _build_combined_behavioural_plot(
     subject_col = str(speech_rate_cfg.get("subject_col", "subject_id"))
     dyad_col = str(speech_rate_cfg.get("dyad_col", "dyad_id"))
     rate_col = str(speech_rate_cfg.get("rate_col", "self_rate"))
+    regression_x_col = str(speech_rate_cfg.get("regression_x_col", "other_rate"))
+    regression_y_col = str(speech_rate_cfg.get("regression_y_col", rate_col))
+    lmm_analysis_id = str(speech_rate_cfg.get("lmm_analysis_id", "self_rate_by_other_rate"))
     min_trials_per_subject = int(speech_rate_cfg.get("min_trials_per_subject", 5))
     histogram_bins = int(speech_rate_cfg.get("histogram_bins", 30))
     point_size = float(speech_rate_cfg.get("point_size", 70))
@@ -86,13 +91,24 @@ def _build_combined_behavioural_plot(
     connector_alpha = float(speech_rate_cfg.get("connector_alpha", 0.75))
     dot_alpha = float(speech_rate_cfg.get("dot_alpha", 0.95))
     font_scale = float(speech_rate_cfg.get("font_scale", 3.0))
-    slopes_legend_font_scale = float(subject_slopes_cfg.get("legend_font_scale", 1.5))
     rng_seed = int(speech_rate_cfg.get("random_seed", 42))
+    regression_line_width = float(speech_rate_cfg.get("regression_line_width", 2.4))
+    show_marginalised_scatter = bool(speech_rate_cfg.get("show_marginalised_scatter", False))
+    marginalised_scatter_mode = str(speech_rate_cfg.get("marginalised_scatter_mode", "partial_residual"))
+    marginalised_scatter_alpha = float(speech_rate_cfg.get("marginalised_scatter_alpha", 0.35))
+    marginalised_scatter_size = float(speech_rate_cfg.get("marginalised_scatter_size", 20))
+    regression_line_color = str(speech_rate_cfg.get("regression_line_color", palette["other"]))
+    marginalised_scatter_color = str(speech_rate_cfg.get("marginalised_scatter_color", palette["other"]))
     rng = np.random.default_rng(rng_seed)
 
     data = pd.read_csv(residuals_path)
-    required_columns = [subject_col, dyad_col, rate_col]
+    random_effects = _load_random_effects(random_effects_path)
+    required_columns = [subject_col, dyad_col, rate_col, regression_x_col, regression_y_col]
     _require_columns(data, required_columns, source_path=residuals_path)
+    lmm_fit = _extract_lmm_fixed_effects_from_summary(
+        lmm_summary_path=lmm_summary_path,
+        analysis_id=lmm_analysis_id,
+    )
 
     data = data.dropna(subset=required_columns).copy()
     subject_counts = data.groupby(subject_col).size()
@@ -110,15 +126,10 @@ def _build_combined_behavioural_plot(
         .sort_values(["dyad_id", subject_col])
         .reset_index(drop=True)
     )
-    slope_dataframe, ordered_slope_df, dyad_slope_summary = _prepare_subject_slopes(
-        subject_slopes_path=subject_slopes_path,
-        plot_config=subject_slopes_cfg,
-    )
     valid_dyads = _collect_valid_dyads(
         subject_summary=subject_summary,
-        slope_dataframe=slope_dataframe,
-        dyad_column=str(subject_slopes_cfg.get("dyad_col", "dyad_id")),
-        preferred_dyads=dyad_slope_summary[str(subject_slopes_cfg.get("dyad_col", "dyad_id"))].astype(str).tolist(),
+        dyad_column=dyad_col,
+        preferred_dyads=subject_summary[dyad_col].astype(str).dropna().tolist(),
     )
     dyad_to_color = _build_dyad_palette(valid_dyads, theme_config=theme)
 
@@ -151,21 +162,25 @@ def _build_combined_behavioural_plot(
         font_scale=font_scale,
     )
 
-    plot_grouped_subject_slopes(
+    _plot_lmm_relationship(
         ax=ax_slope,
-        slope_dataframe=slope_dataframe,
-        subject_column=str(subject_slopes_cfg.get("subject_col", "subject_id")),
-        dyad_column=str(subject_slopes_cfg.get("dyad_col", "dyad_id")),
-        title="C. Subject-specific\nother-rate slopes by dyad",
-        xlabel="Subject-specific slope estimate",
-        point_color=str(subject_slopes_cfg.get("point_color", palette["other"])),
-        line_color=str(subject_slopes_cfg.get("line_color", palette["other"])),
-        within_dyad_spacing=float(subject_slopes_cfg.get("within_dyad_spacing", 0.8)),
-        between_dyad_spacing=float(subject_slopes_cfg.get("between_dyad_spacing", 1.8)),
-        dyad_to_color=dyad_to_color,
-        show_legend=True,
+        dataframe=data,
+        x_column=regression_x_col,
+        y_column=regression_y_col,
+        title="C. LMM model: fixed effect",
+        xlabel="Other speech rate",
+        ylabel="Self speech rate",
+        line_color=regression_line_color,
+        fixed_effects=lmm_fit,
+        random_effects=random_effects,
+        subject_column=subject_col,
+        show_marginalised_scatter=show_marginalised_scatter,
+        marginalised_scatter_mode=marginalised_scatter_mode,
+        marginalised_scatter_color=marginalised_scatter_color,
+        marginalised_scatter_alpha=marginalised_scatter_alpha,
+        marginalised_scatter_size=marginalised_scatter_size,
+        line_width=regression_line_width,
         font_scale=font_scale,
-        legend_font_scale=slopes_legend_font_scale,
     )
 
     fig.tight_layout()
@@ -181,14 +196,18 @@ def _build_combined_behavioural_plot(
 
     return {
         "plot_name": "behavioural_summary",
-        "source_paths": [str(residuals_path), str(subject_slopes_path)],
+        "source_paths": [
+            str(residuals_path),
+            *([str(random_effects_path)] if random_effects_path is not None else []),
+            str(lmm_summary_path),
+        ],
         "files": written_paths,
         "n_rows": int(len(data)),
         "n_subjects": int(data[subject_col].nunique()),
         "n_dyads": int(data[dyad_col].nunique()),
         "min_trials_per_subject": min_trials_per_subject,
-        "ordered_subject_ids": ordered_slope_df[str(subject_slopes_cfg.get("subject_col", "subject_id"))].astype(str).tolist(),
-        "ordered_dyads": dyad_slope_summary[str(subject_slopes_cfg.get("dyad_col", "dyad_id"))].astype(str).tolist(),
+        "ordered_subject_ids": subject_summary[subject_col].astype(str).tolist(),
+        "ordered_dyads": subject_summary[dyad_col].astype(str).drop_duplicates().tolist(),
     }
 
 
@@ -209,123 +228,20 @@ def _build_dyad_palette(
 def _collect_valid_dyads(
     *,
     subject_summary: pd.DataFrame,
-    slope_dataframe: pd.DataFrame,
     dyad_column: str,
     preferred_dyads: Sequence[str] | None = None,
 ) -> list[str]:
-    subject_dyads = subject_summary["dyad_id"].dropna().astype(str).tolist()
-    slope_dyads = slope_dataframe[dyad_column].dropna().astype(str).tolist()
-    return list(dict.fromkeys(list(preferred_dyads or []) + subject_dyads + slope_dyads))
+    subject_dyads = subject_summary[dyad_column].dropna().astype(str).tolist()
+    return list(dict.fromkeys(list(preferred_dyads or []) + subject_dyads))
 
 
-def _prepare_subject_slopes(
-    *,
-    subject_slopes_path: Path,
-    plot_config: Mapping[str, Any],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    subject_col = str(plot_config.get("subject_col", "subject_id"))
-    dyad_col = str(plot_config.get("dyad_col", "dyad_id"))
-    slope_col = str(plot_config.get("slope_col", "slope"))
-    se_col = str(plot_config.get("se_col", "se"))
-    slope_dataframe = pd.read_csv(subject_slopes_path)
-    _require_columns(slope_dataframe, [subject_col, dyad_col, slope_col, se_col], source_path=subject_slopes_path)
-    slope_dataframe = slope_dataframe.dropna(subset=[subject_col, dyad_col, slope_col, se_col]).copy()
-
-    ordered_plot_df, dyad_summary = _order_grouped_subject_slopes(
-        slope_dataframe=slope_dataframe,
-        dyad_column=dyad_col,
-    )
-    return slope_dataframe, ordered_plot_df, dyad_summary
-
-
-def plot_grouped_subject_slopes(
-    ax: plt.Axes,
-    slope_dataframe: pd.DataFrame,
-    subject_column: str,
-    dyad_column: str,
-    title: str,
-    xlabel: str,
-    point_color: str = "0.25",
-    line_color: str = "0.35",
-    within_dyad_spacing: float = 0.8,
-    between_dyad_spacing: float = 1.8,
-    dyad_to_color: Mapping[str, tuple[float, float, float]] | None = None,
-    show_legend: bool = False,
-    font_scale: float = 1.0,
-    legend_font_scale: float = 1.0,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Plot grouped subject-wise slopes with 95% confidence intervals."""
-    ordered_plot_df, dyad_summary = _order_grouped_subject_slopes(
-        slope_dataframe=slope_dataframe,
-        dyad_column=dyad_column,
-    )
-    ordered_plot_df = ordered_plot_df.copy()
-    current_y = 0.0
-    y_positions: list[float] = []
-    for dyad_id in dyad_summary[dyad_column].tolist():
-        dyad_size = int((ordered_plot_df[dyad_column] == dyad_id).sum())
-        for _ in range(dyad_size):
-            y_positions.append(current_y)
-            current_y += within_dyad_spacing
-        current_y += between_dyad_spacing
-    ordered_plot_df["y_position"] = y_positions
-
-    for _, row in ordered_plot_df.iterrows():
-        dyad_key = str(row[dyad_column])
-        row_color = dyad_to_color.get(dyad_key, point_color) if dyad_to_color is not None else point_color
-        ax.hlines(
-            y=float(row["y_position"]),
-            xmin=float(row["slope"]) - (1.96 * float(row["se"])),
-            xmax=float(row["slope"]) + (1.96 * float(row["se"])),
-            linewidth=1.5,
-            color=row_color,
-            alpha=0.9,
-        )
-        ax.scatter(
-            float(row["slope"]),
-            float(row["y_position"]),
-            s=35,
-            color=row_color,
-            alpha=0.95,
-            zorder=3,
-        )
-
-    current_y = 0.0
-    for dyad_id in dyad_summary[dyad_column].tolist()[:-1]:
-        dyad_size = int((ordered_plot_df[dyad_column] == dyad_id).sum())
-        current_y += dyad_size * within_dyad_spacing
-        separator_y = current_y - (0.5 * within_dyad_spacing) + (0.5 * between_dyad_spacing)
-        ax.axhline(separator_y, color="0.9", linewidth=1, zorder=0)
-        current_y += between_dyad_spacing
-
-    ax.axvline(0.0, linewidth=1, color="0.4")
-    ax.set_title(title, fontsize=_scaled_fontsize(11, font_scale))
-    ax.set_xlabel(xlabel, fontsize=_scaled_fontsize(10, font_scale))
-    ax.set_ylabel("Subjects grouped by dyad", fontsize=_scaled_fontsize(10, font_scale))
-    ax.set_yticks([])
-    ax.tick_params(axis="both", labelsize=_scaled_fontsize(8, font_scale))
-
-    if show_legend and dyad_to_color:
-        legend_handles = [
-            plt.Line2D(
-                [0],
-                [0],
-                color=dyad_to_color[str(dyad_id)],
-                marker="o",
-                linestyle="-",
-                linewidth=1.8,
-                markersize=6,
-                label=str(dyad_id),
-            )
-            for dyad_id in dyad_summary[dyad_column].tolist()
-            if str(dyad_id) in dyad_to_color
-        ]
-        if legend_handles:
-            legend = ax.legend(handles=legend_handles, title="Dyad ID", loc="best", frameon=False)
-            plt.setp(legend.get_texts(), fontsize=_scaled_fontsize(8, legend_font_scale))
-            legend.get_title().set_fontsize(_scaled_fontsize(9, legend_font_scale))
-
-    return ordered_plot_df, dyad_summary
+def _load_random_effects(random_effects_path: Path | None) -> pd.DataFrame | None:
+    if random_effects_path is None or not random_effects_path.exists():
+        return None
+    random_effects = pd.read_csv(random_effects_path)
+    required_columns = ["grouping_factor", "level_id", "random_intercept"]
+    _require_columns(random_effects, required_columns, source_path=random_effects_path)
+    return random_effects
 
 
 def _plot_subject_median_rainplot(
@@ -427,35 +343,6 @@ def _scaled_fontsize(base_size: float, scale: float) -> float:
     return float(base_size) * float(scale)
 
 
-def _order_grouped_subject_slopes(
-    *,
-    slope_dataframe: pd.DataFrame,
-    dyad_column: str,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    plot_df = slope_dataframe.copy()
-    dyad_summary = (
-        plot_df.groupby(dyad_column, as_index=False)
-        .agg(dyad_mean_slope=("slope", "mean"))
-        .sort_values("dyad_mean_slope", ascending=False)
-        .reset_index(drop=True)
-    )
-    ordered_dyads = dyad_summary[dyad_column].tolist()
-
-    ordered_rows: list[pd.DataFrame] = []
-    for dyad_id in ordered_dyads:
-        dyad_df = (
-            plot_df[plot_df[dyad_column] == dyad_id]
-            .sort_values("slope")
-            .reset_index(drop=True)
-        )
-        ordered_rows.append(dyad_df)
-
-    ordered_plot_df = pd.concat(ordered_rows, ignore_index=True) if ordered_rows else pd.DataFrame(columns=plot_df.columns)
-    if ordered_plot_df.empty:
-        raise ValueError("No subject slope rows available after filtering missing values.")
-    return ordered_plot_df, dyad_summary
-
-
 def _plot_regression_scatter(
     *,
     ax: plt.Axes,
@@ -499,3 +386,192 @@ def _plot_regression_scatter(
                         linewidth=0,
                     )
         ax.plot(x_line, y_line, linewidth=2, color=color)
+
+
+def _extract_lmm_fixed_effects_from_summary(
+    *,
+    lmm_summary_path: Path,
+    analysis_id: str,
+) -> dict[str, dict[str, float]]:
+    summary_text = lmm_summary_path.read_text(encoding="utf-8")
+    blocks = re.split(r"\n={10,}\n", summary_text)
+    target_block = next(
+        (block for block in blocks if f"analysis_id: {analysis_id}" in block),
+        None,
+    )
+    if target_block is None:
+        raise ValueError(f"Analysis id `{analysis_id}` not found in LMM summary file: {lmm_summary_path}")
+
+    lines = target_block.splitlines()
+    try:
+        fixed_effects_start = lines.index("Fixed effects:") + 1
+    except ValueError as exc:
+        raise ValueError(f"Fixed effects section not found for analysis `{analysis_id}` in {lmm_summary_path}") from exc
+
+    fixed_effects: dict[str, dict[str, float]] = {}
+    number_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    coefficient_pattern = re.compile(rf"^\s*(\S+)\s+({number_pattern})\s+({number_pattern})(?:\s+.*)?$")
+    for line in lines[fixed_effects_start:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Correlation of Fixed Effects:") or stripped.startswith("---"):
+            break
+        if stripped.startswith("Estimate Std. Error") or stripped.startswith("Fixed effects:"):
+            continue
+        match = coefficient_pattern.match(line)
+        if match is None:
+            continue
+        fixed_effects[match.group(1)] = {
+            "estimate": float(match.group(2)),
+            "std_error": float(match.group(3)),
+        }
+
+    if "(Intercept)" not in fixed_effects:
+        raise ValueError(f"Intercept not found in fixed effects for analysis `{analysis_id}` in {lmm_summary_path}")
+    return fixed_effects
+
+
+def _plot_lmm_relationship(
+    *,
+    ax: plt.Axes,
+    dataframe: pd.DataFrame,
+    x_column: str,
+    y_column: str,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    line_color: str,
+    fixed_effects: Mapping[str, Mapping[str, float]],
+    random_effects: pd.DataFrame | None,
+    subject_column: str,
+    show_marginalised_scatter: bool,
+    marginalised_scatter_mode: str,
+    marginalised_scatter_color: str,
+    marginalised_scatter_alpha: float,
+    marginalised_scatter_size: float,
+    line_width: float,
+    font_scale: float,
+) -> None:
+    plot_df = dataframe.dropna(subset=[x_column, y_column]).copy()
+    x_values = plot_df[x_column].to_numpy(dtype=float)
+    if len(plot_df) == 0:
+        raise ValueError(f"No rows available to plot `{y_column}` against `{x_column}`.")
+    ax.set_facecolor((0.98, 0.98, 0.99))
+
+    intercept = float(fixed_effects["(Intercept)"]["estimate"])
+    intercept_se = float(fixed_effects["(Intercept)"]["std_error"])
+    adjustment_terms = [
+        term for term in fixed_effects.keys()
+        if term not in {"(Intercept)", x_column} and term in plot_df.columns
+    ]
+    adjusted_intercept = intercept + sum(
+        float(fixed_effects[term]["estimate"]) * float(plot_df[term].astype(float).mean())
+        for term in adjustment_terms
+    )
+    slope = float(fixed_effects.get(x_column, {}).get("estimate", 0.0))
+    slope_se = float(fixed_effects.get(x_column, {}).get("std_error", 0.0))
+    if np.min(x_values) == np.max(x_values):
+        x_line = np.asarray([float(np.min(x_values)), float(np.max(x_values))], dtype=float)
+    else:
+        x_line = np.linspace(float(np.min(x_values)), float(np.max(x_values)), 200)
+    y_line = adjusted_intercept + (slope * x_line)
+
+    if show_marginalised_scatter:
+        if marginalised_scatter_mode == "population_level":
+            y_marginalised = _compute_population_level_marginal_response(
+                dataframe=plot_df,
+                x_column=x_column,
+                fixed_effects=fixed_effects,
+            )
+        elif marginalised_scatter_mode == "partial_residual":
+            y_marginalised = _compute_partial_residual_response(
+                dataframe=plot_df,
+                y_column=y_column,
+                x_column=x_column,
+                fixed_effects=fixed_effects,
+                random_effects=random_effects,
+                subject_column=subject_column,
+            )
+        else:
+            raise ValueError(
+                "Unsupported `marginalised_scatter_mode`: "
+                f"{marginalised_scatter_mode}. Expected `partial_residual` or `population_level`."
+            )
+        ax.scatter(
+            x_values,
+            y_marginalised,
+            s=marginalised_scatter_size,
+            alpha=marginalised_scatter_alpha,
+            color=marginalised_scatter_color,
+            edgecolor="white",
+            linewidth=0.3,
+            zorder=2,
+        )
+
+    band_half_width = 1.96 * np.sqrt((intercept_se**2) + ((x_line**2) * (slope_se**2)))
+    ax.fill_between(
+        x_line,
+        y_line - band_half_width,
+        y_line + band_half_width,
+        color=line_color,
+        alpha=0.16,
+        linewidth=0.0,
+    )
+    ax.plot(x_line, y_line, linewidth=line_width, color=line_color, alpha=0.98)
+    ax.grid(axis="both", color="0.90", linewidth=0.8, alpha=0.8)
+
+    ax.set_title(title, fontsize=_scaled_fontsize(11, font_scale))
+    ax.set_xlabel(xlabel, fontsize=_scaled_fontsize(10, font_scale))
+    ax.set_ylabel(ylabel, fontsize=_scaled_fontsize(10, font_scale))
+    ax.tick_params(axis="both", labelsize=_scaled_fontsize(8, font_scale))
+
+
+def _compute_population_level_marginal_response(
+    *,
+    dataframe: pd.DataFrame,
+    x_column: str,
+    fixed_effects: Mapping[str, Mapping[str, float]],
+) -> np.ndarray:
+    intercept = float(fixed_effects["(Intercept)"]["estimate"])
+    adjustment_terms = [
+        term for term in fixed_effects.keys()
+        if term not in {"(Intercept)", x_column} and term in dataframe.columns
+    ]
+    adjusted_intercept = intercept + sum(
+        float(fixed_effects[term]["estimate"]) * float(dataframe[term].astype(float).mean())
+        for term in adjustment_terms
+    )
+    slope = float(fixed_effects.get(x_column, {}).get("estimate", 0.0))
+    x_values = dataframe[x_column].to_numpy(dtype=float)
+    return adjusted_intercept + (slope * x_values)
+
+
+def _compute_partial_residual_response(
+    *,
+    dataframe: pd.DataFrame,
+    y_column: str,
+    x_column: str,
+    fixed_effects: Mapping[str, Mapping[str, float]],
+    random_effects: pd.DataFrame | None,
+    subject_column: str,
+) -> np.ndarray:
+    y_values = dataframe[y_column].to_numpy(dtype=float)
+    partial_response = y_values.copy()
+    for term, stats in fixed_effects.items():
+        if term in {"(Intercept)", x_column, y_column} or term not in dataframe.columns:
+            continue
+        term_values = dataframe[term].to_numpy(dtype=float)
+        term_mean = float(np.mean(term_values))
+        partial_response = partial_response - (float(stats["estimate"]) * (term_values - term_mean))
+    if random_effects is not None and subject_column in dataframe.columns:
+        subject_random_intercepts = (
+            random_effects.loc[random_effects["grouping_factor"].astype(str) == subject_column, ["level_id", "random_intercept"]]
+            .dropna(subset=["level_id", "random_intercept"])
+            .assign(level_id=lambda df: df["level_id"].astype(str))
+            .drop_duplicates(subset=["level_id"], keep="last")
+            .set_index("level_id")["random_intercept"]
+        )
+        subject_intercepts = dataframe[subject_column].astype(str).map(subject_random_intercepts).fillna(0.0).to_numpy(dtype=float)
+        partial_response = partial_response - subject_intercepts
+    return partial_response

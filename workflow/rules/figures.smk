@@ -11,7 +11,8 @@ LMEEEG_VARIANCE_PARTITION_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_variance_p
 rule figures_behavioural:
     input:
         residuals=BEHAVIOURAL_RESIDUALS_OUTPUT,
-        subject_slopes=BEHAVIOURAL_SUBJECT_SLOPES_OUTPUT,
+        random_effects=BEHAVIOURAL_RANDOM_EFFECTS_OUTPUT,
+        lmm_summary=R_ANALYSIS_MODEL_SUMMARY_TXT_OUTPUT,
         viz_config="config/viz.yaml",
     output:
         BEHAVIOURAL_FIGURES_OUTPUT,
@@ -19,7 +20,8 @@ rule figures_behavioural:
         "PYTHONPATH=src python -m rate.cli.main figures-behavioural "
         "--config config/config.yaml --schema config/schema.json "
         "--viz-config {input.viz_config} --input {input.residuals} "
-        "--slopes-input {input.subject_slopes} --output {output}"
+        "--random-effects-input {input.random_effects} "
+        "--lmm-summary-input {input.lmm_summary} --output {output}"
 
 
 rule figures_decoding:
@@ -79,7 +81,7 @@ rule figures_lmeeeg_main_results:
         lmeeeg_output=LMEEEG_STATS_OUTPUT,
         similarity_output=SIMILARITY_STATS_OUTPUT,
         behavioural_residuals=BEHAVIOURAL_RESIDUALS_OUTPUT,
-        behavioural_slopes=BEHAVIOURAL_SUBJECT_SLOPES_OUTPUT,
+        behavioural_random_effects=BEHAVIOURAL_RANDOM_EFFECTS_OUTPUT,
         variance_partition_stats=LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT,
         viz_config="config/viz.yaml",
     output:

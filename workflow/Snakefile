@@ -64,6 +64,7 @@ def _safe_list_model_names(config, *, section: str) -> tuple[str, ...]:
 LMEEEG_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg")
 BEHAVIOURAL_RESIDUALS_DIR = f"{OUT_DIR}/stats/behavioural_residuals"
 BEHAVIOURAL_RESIDUALS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/trialwise_residuals.csv"
+BEHAVIOURAL_RANDOM_EFFECTS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/random_effects.csv"
 BEHAVIOURAL_SUBJECT_SLOPES_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/subject_slopes.csv"
 BEHAVIOURAL_MODEL_SUMMARY_CSV_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/behavioural_model_summary.csv"
 BEHAVIOURAL_MODEL_SUMMARY_TXT_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/behavioural_model_summary.txt"

@@ -19,6 +19,7 @@ rule behavioural_residuals:
         script=str(WORKFLOW_DIR / "scripts" / "build_behavioural_residuals.R"),
     output:
         residuals=BEHAVIOURAL_RESIDUALS_OUTPUT,
+        random_effects=BEHAVIOURAL_RANDOM_EFFECTS_OUTPUT,
         subject_slopes=BEHAVIOURAL_SUBJECT_SLOPES_OUTPUT,
         model_summary_csv=BEHAVIOURAL_MODEL_SUMMARY_CSV_OUTPUT,
         model_summary_txt=BEHAVIOURAL_MODEL_SUMMARY_TXT_OUTPUT,
@@ -29,6 +30,7 @@ rule behavioural_residuals:
         "--input {input.events} "
         "--preprocess_script {input.preprocess_script} "
         "--output {output.residuals} "
+        "--random_effects_output {output.random_effects} "
         "--subject_slopes_output {output.subject_slopes} "
         "--model_summary_csv {output.model_summary_csv} "
         "--model_summary_txt {output.model_summary_txt} "

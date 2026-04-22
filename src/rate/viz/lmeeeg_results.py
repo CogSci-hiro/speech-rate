@@ -273,7 +273,9 @@ def build_lmeeeg_main_results_manifest(
         behavioural_manifest = build_behavioural_manifest(
             out_dir=out_dir,
             residuals_path=out_dir / "stats" / "behavioural_residuals" / "trialwise_residuals.csv",
-            subject_slopes_path=out_dir / "stats" / "behavioural_residuals" / "subject_slopes.csv",
+            random_effects_path=out_dir / "stats" / "behavioural_residuals" / "random_effects.csv",
+            subject_slopes_path=None,
+            lmm_summary_path=out_dir / "stats" / "r_analysis" / "analysis_model_summaries.txt",
             manifest_path=manifest_path,
             output_stem=out_dir / "figures" / figure_subdir / "behavioural_summary",
             figure_config=behavioural_figure_config,

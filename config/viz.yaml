@@ -35,13 +35,12 @@ viz:
         connector_alpha: 0.75
         dot_alpha: 0.95
         random_seed: 42
-      subject_slopes:
-        enabled: true
-        formats: ["png"]
-        point_color: "#1F4E79"
-        line_color: "#1F4E79"
-        within_dyad_spacing: 0.8
-        between_dyad_spacing: 1.8
+        regression_line_color: "#1F4E79"
+        show_marginalised_scatter: false
+        marginalised_scatter_mode: "partial_residual"
+        marginalised_scatter_color: "#1F4E79"
+        marginalised_scatter_alpha: 0.35
+        marginalised_scatter_size: 20
     decoding:
       diag_auto: true
       diag_pad_fraction: 0.02

@@ -1740,16 +1740,45 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
             "subject_id": ["sub-001", "sub-001", "sub-001", "sub-002", "sub-002", "sub-002"],
             "dyad_id": ["dyad-001", "dyad-001", "dyad-001", "dyad-001", "dyad-001", "dyad-001"],
             "self_rate": [4.1, 4.4, 4.6, 3.3, 3.5, 3.7],
+            "other_rate": [3.8, 4.0, 4.2, 3.0, 3.1, 3.4],
+            "latency": [0.2, 0.3, 0.4, 0.5, 0.4, 0.3],
+            "duration_s": [0.9, 1.0, 1.1, 1.0, 1.1, 0.9],
+            "time_within_run": [0.1, 0.2, 0.3, 0.1, 0.3, 0.5],
+            "run": [1, 1, 1, 1, 1, 1],
         }
     ).to_csv(behavioural_dir / "trialwise_residuals.csv", index=False)
-    pd.DataFrame(
-        {
-            "subject_id": ["sub-001", "sub-002"],
-            "dyad_id": ["dyad-001", "dyad-001"],
-            "slope": [-0.15, 0.05],
-            "se": [0.04, 0.05],
-        }
-    ).to_csv(behavioural_dir / "subject_slopes.csv", index=False)
+    r_analysis_dir = out_dir / "stats" / "r_analysis"
+    r_analysis_dir.mkdir(parents=True, exist_ok=True)
+    (r_analysis_dir / "analysis_model_summaries.txt").write_text(
+        "\n".join(
+            [
+                "analysis_id: self_rate_by_other_rate",
+                "analysis_family: core",
+                "outcome: self_rate",
+                "predictor: other_rate",
+                "controls: latency; duration_s; time_within_run; run",
+                "random_effects: (1 | subject_id) + (1 | dyad_id)",
+                "note: Local speech-rate adaptation",
+                "n_obs: 6",
+                "n_subjects: 2",
+                "n_dyads: 1",
+                "",
+                "full_model_summary:",
+                "Fixed effects:",
+                "                  Estimate Std. Error         df t value Pr(>|t|)",
+                "(Intercept)        1.50000    0.25000   10.00000   6.000  0.0001",
+                "other_rate         0.70000    0.05000   10.00000  14.000  0.0000",
+                "latency            0.20000    0.06000   10.00000   3.333  0.0070",
+                "duration_s        -0.10000    0.04000   10.00000  -2.500  0.0310",
+                "time_within_run    0.05000    0.03000   10.00000   1.667  0.1260",
+                "run                0.02000    0.01000   10.00000   2.000  0.0730",
+                "---",
+                "Correlation of Fixed Effects:",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     variance_partition_group_paths = build_variance_partition_group_output_paths(config)
     variance_partition_group_paths.group_dir.mkdir(parents=True, exist_ok=True)
     write_parquet_dataframe(
@@ -1816,9 +1845,6 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
                                 "enabled": True,
                                 "min_trials_per_subject": 3,
                                 "font_scale": 3.0,
-                            },
-                            "subject_slopes": {
-                                "enabled": True,
                             },
                         },
                         "variance_partition": {

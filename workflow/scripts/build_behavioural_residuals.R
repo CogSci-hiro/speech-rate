@@ -96,6 +96,7 @@ main <- function() {
   input_path <- get_arg_value(args, "input", required = TRUE)
   preprocess_script_path <- get_arg_value(args, "preprocess_script", required = TRUE)
   output_path <- get_arg_value(args, "output", required = TRUE)
+  random_effects_output_path <- get_arg_value(args, "random_effects_output", required = TRUE)
   subject_slopes_output_path <- get_arg_value(args, "subject_slopes_output", required = TRUE)
   model_summary_csv_path <- get_arg_value(args, "model_summary_csv", required = TRUE)
   model_summary_txt_path <- get_arg_value(args, "model_summary_txt", required = TRUE)
@@ -116,6 +117,7 @@ main <- function() {
   )
 
   write_csv_output(residual_table, output_path)
+  write_csv_output(residual_results$random_effects, random_effects_output_path)
   write_csv_output(residual_results$subject_slopes, subject_slopes_output_path)
   write_csv_output(residual_results$summary_table, model_summary_csv_path)
   write_text_file(residual_results$summary_text, model_summary_txt_path)
