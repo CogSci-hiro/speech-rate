@@ -16,3 +16,4 @@ legacy
 rate.egg-info
 .tmp
 .venv
+dev_outputs
