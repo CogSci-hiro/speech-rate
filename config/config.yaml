@@ -10,5 +10,5 @@ debug:
 paths:
   out_dir: "/Users/hiro/Datasets/working/speech-rate-refactoring"
   bids_dir: "/Users/hiro/Datasets/hyperscanning-bids"
-  ica_dir: "/Users/hiro/Datasets/working/hyperscanning/precomputed_ica"
+  ica_dir: "/Users/hiro/Datasets/working/duet-extra-data/precomputed_ica"
   annotations_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/annotations"

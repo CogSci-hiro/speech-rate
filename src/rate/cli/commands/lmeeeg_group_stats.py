@@ -285,11 +285,10 @@ def _resolve_adjacency(
         adjacency, _ = mne.channels.find_ch_adjacency(info, ch_type="eeg")
         return adjacency
     except Exception as exc:
-        LOGGER.warning(
-            "Unable to construct EEG adjacency from channel locations; falling back to no adjacency: %s",
-            exc,
+        raise ValueError(
+            "Unable to construct EEG adjacency from channel locations while `stats.adjacency` is enabled: "
+            f"{exc}"
         )
-        return None
 
 
 def _resolve_preprocessing_montage_name(config: Mapping[str, Any]) -> str:
@@ -354,7 +353,6 @@ def _write_inference_outputs(
     np.save(permutation_observed_path, permutation_observed_map)
     np.save(corrected_p_path, np.asarray(inference.corrected_p_values, dtype=float))
     np.save(null_path, np.asarray(inference.null_distribution, dtype=float))
-    np.save(cluster_p_path, np.asarray([] if inference.cluster_p_values is None else inference.cluster_p_values, dtype=float))
     csv_columns = _write_p_values_csv(
         p_values_csv_path,
         inference=inference,
@@ -381,8 +379,10 @@ def _write_inference_outputs(
         ),
         "corrected_p_values": str(corrected_p_path),
         "null_distribution": str(null_path),
-        "cluster_p_values": str(cluster_p_path),
     }
+    if inference.cluster_p_values is not None:
+        np.save(cluster_p_path, np.asarray(inference.cluster_p_values, dtype=float))
+        summary["cluster_p_values"] = str(cluster_p_path)
     if target_name is not None:
         summary["target"] = target_name
     if csv_columns is not None:

@@ -1,8 +1,9 @@
 stats:
-  method: "tfce"
+  method: "cluster"
   n_permutations: 100
   tail: 0
   adjacency: "mne_default"
+  cluster_threshold: 0.01
   tfce_threshold:
     start: 0.0
     step: 0.01

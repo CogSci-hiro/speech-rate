@@ -9,16 +9,15 @@ EVENTS_STAGE = f"{OUT_DIR}/_stage/events_all.done.json"
 
 rule build_events:
     input:
-        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        dataset_index=ancient(f"{OUT_DIR}/dataset/index.parquet"),
         config_path="config/config.yaml",
-        schema_path="config/schema.json",
     output:
         events=EVENTS_OUTPUT,
         qc=EVENTS_QC_OUTPUT,
         validation=EVENTS_VALIDATION_OUTPUT,
     shell:
         "PYTHONPATH=src python -m rate.cli.main build-events "
-        "--config {input.config_path} --schema {input.schema_path} "
+        "--config {input.config_path} --schema config/schema.json "
         "--dataset-index {input.dataset_index} "
         "--output {output.events} "
         "--qc-output {output.qc} --validation-output {output.validation}"

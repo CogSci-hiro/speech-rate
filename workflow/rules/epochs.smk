@@ -33,9 +33,9 @@ rule epoch_subject:
     input:
         preprocessing=epoch_subject_preprocessing_inputs,
         events_table=f"{OUT_DIR}/events/events.csv",
-        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        dataset_index=ancient(f"{OUT_DIR}/dataset/index.parquet"),
         config_path="config/config.yaml",
-        schema_path="config/schema.json",
+        epochs_config_path="config/epochs.yaml",
     output:
         epochs=f"{OUT_DIR}/epochs/{{subject_id}}/{_EPOCHS_FILENAME}",
         metadata=f"{OUT_DIR}/epochs/{{subject_id}}/{_METADATA_FILENAME}",
@@ -46,7 +46,7 @@ rule epoch_subject:
         subject_id=lambda wildcards: str(wildcards.subject_id),
     shell:
         "PYTHONPATH=src python -m rate.cli.main epoch-subject "
-        "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
+        "--config {input.config_path} --schema config/schema.json --dataset-index {input.dataset_index} "
         "--dyad-id {params.dyad_id} --subject-id {params.subject_id} --events-table {input.events_table} "
         "--epochs-output {output.epochs} --metadata-output {output.metadata} "
         "--events-array-output {output.events_array} --summary-output {output.summary}"
@@ -68,9 +68,9 @@ rule margin_epoch_subject:
     input:
         preprocessing=epoch_subject_preprocessing_inputs,
         events_table=f"{OUT_DIR}/events/events.csv",
-        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        dataset_index=ancient(f"{OUT_DIR}/dataset/index.parquet"),
         config_path="config/config.yaml",
-        schema_path="config/schema.json",
+        margin_epochs_config_path="config/margin_epochs.yaml",
     output:
         epochs=f"{OUT_DIR}/epochs/{{subject_id}}/{_MARGIN_EPOCHS_FILENAME}",
         metadata=f"{OUT_DIR}/epochs/{{subject_id}}/{_MARGIN_METADATA_FILENAME}",
@@ -81,7 +81,7 @@ rule margin_epoch_subject:
         subject_id=lambda wildcards: str(wildcards.subject_id),
     shell:
         "PYTHONPATH=src python -m rate.cli.main epoch-subject "
-        "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
+        "--config {input.config_path} --schema config/schema.json --dataset-index {input.dataset_index} "
         "--dyad-id {params.dyad_id} --subject-id {params.subject_id} --events-table {input.events_table} "
         "--epochs-section margin_epochs "
         "--epochs-output {output.epochs} --metadata-output {output.metadata} "

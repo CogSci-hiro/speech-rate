@@ -19,6 +19,7 @@ from rate.decoding import build_decoding_model_output_paths, list_decoding_model
 from rate.design import ModelSpecError, list_model_names
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths
+from rate.lmeeeg_source.source_space import build_source_prepared_paths
 from rate.lmeeeg.similarity import build_similarity_output_paths
 from rate.lmeeeg.targets import resolve_target_names
 from rate.lmeeeg.variance_partition import (
@@ -62,6 +63,7 @@ def _safe_list_model_names(config, *, section: str) -> tuple[str, ...]:
 
 
 LMEEEG_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg")
+LMEEEG_SOURCE_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg_source")
 BEHAVIOURAL_RESIDUALS_DIR = f"{OUT_DIR}/stats/behavioural_residuals"
 BEHAVIOURAL_RESIDUALS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/trialwise_residuals.csv"
 BEHAVIOURAL_RANDOM_EFFECTS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/random_effects.csv"
@@ -201,6 +203,21 @@ def lmeeeg_stage_inputs(wildcards):
     ]
 
 
+def lmeeeg_source_prepare_inputs(wildcards):
+    index_path = _dataset_index_checkpoint_path()
+    return [
+        str(build_source_prepared_paths(RESOLVED_CONFIG, row).summary_output_path)
+        for row in _epochs_subject_map(index_path).values()
+    ]
+
+
+def lmeeeg_source_stage_inputs(wildcards):
+    return [
+        str(build_lmeeeg_model_output_paths(RESOLVED_CONFIG, config_section="lmeeeg_source", model_name=model_name).summary_output_path)
+        for model_name in LMEEEG_SOURCE_MODEL_NAMES
+    ]
+
+
 def _safe_target_names(config, *, section: str) -> tuple[str, ...]:
     try:
         return tuple(target for target in resolve_target_names(config, config_section=section) if target is not None)
@@ -249,6 +266,8 @@ include: "rules/preprocessing.smk"
 include: "rules/events.smk"
 include: "rules/epochs.smk"
 include: "rules/lmeeeg.smk"
+# Source-space lmeEEG experimental extension
+include: "rules/lmeeeg_source.smk"
 include: "rules/decoding.smk"
 include: "rules/stats.smk"
 include: "rules/figures.smk"

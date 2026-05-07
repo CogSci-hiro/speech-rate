@@ -11,9 +11,9 @@ rule preprocess_subject:
     input:
         raw_eeg=lambda wildcards: str(preprocessing_paths(wildcards).raw_eeg_path),
         channels_tsv=lambda wildcards: str(preprocessing_paths(wildcards).channels_tsv_path),
-        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        dataset_index=ancient(f"{OUT_DIR}/dataset/index.parquet"),
         config_path="config/config.yaml",
-        schema_path="config/schema.json",
+        preprocessing_config_path="config/preprocessing.yaml",
     output:
         eeg_raw=f"{OUT_DIR}/preprocessing/{{subject_id}}/task-{{task}}/run-{{run}}/{_PREPROCESSING_EEG_FILENAME}",
         emg=f"{OUT_DIR}/preprocessing/{{subject_id}}/task-{{task}}/run-{{run}}/{_PREPROCESSING_EMG_FILENAME}",
@@ -31,7 +31,7 @@ rule preprocess_subject:
         ),
     shell:
         "PYTHONPATH=src python -m rate.cli.main preprocess-subject "
-        "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
+        "--config {input.config_path} --schema config/schema.json --dataset-index {input.dataset_index} "
         "--dyad-id {params.dyad_id} --subject-id {params.subject_id} --task {params.task} --run {params.run} "
         "--raw-path {input.raw_eeg} --channels-tsv {input.channels_tsv} "
         "{params.ica_arg} "

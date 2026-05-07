@@ -26,6 +26,12 @@ rule lmeeeg_all:
         LMEEEG_STATS_OUTPUT
 
 
+# Source-space lmeEEG experimental extension
+rule lmeeeg_source_all:
+    input:
+        LMEEEG_SOURCE_STAGE
+
+
 rule similarity_all:
     input:
         SIMILARITY_STATS_OUTPUT
@@ -104,6 +110,10 @@ rule lmeeeg_variance_partition_figures_all:
 rule qc_lmeeeg_plots_all:
     input:
         LMEEEG_QC_FIGURES_OUTPUT
+
+rule qc_lmeeeg_source_plots_all:
+    input:
+        LMEEEG_SOURCE_QC_FIGURES_OUTPUT
 
 rule inference_lmeeeg_plots_all:
     input:

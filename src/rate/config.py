@@ -25,6 +25,7 @@ MODULAR_COMPUTE_FILES = {
     "margin_epochs": "margin_epochs.yaml",
     "glm": "glm.yaml",
     "lmeeeg": "lmeeeg.yaml",
+    "lmeeeg_source": "lmeeeg_source.yaml",
     "lmeeeg_variance_partition": "lmeeeg.yaml",
     "similarity": "similarity.yaml",
 }
@@ -119,6 +120,7 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
         "margin_epochs",
         "glm",
         "lmeeeg",
+        "lmeeeg_source",
         "lmeeeg_variance_partition",
         "similarity",
     ):

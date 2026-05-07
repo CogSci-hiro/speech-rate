@@ -27,7 +27,7 @@ from rate.dataset.discover import (
 from rate.dataset.validate import REQUIRED_INDEX_COLUMNS, validate_dataset_index
 from rate.paths import ensure_parent_dir
 from rate.preprocessing.io import resolve_preprocessed_eeg_path
-from rate.util import write_parquet_dataframe
+from rate.util import read_parquet_dataframe, write_parquet_dataframe
 
 LOGGER = logging.getLogger(__name__)
 
@@ -403,6 +403,15 @@ def write_dataset_index(config: Mapping[str, Any], output_path: Path | None = No
         logger=LOGGER,
         label="dataset index",
     )
+    if target_path.exists():
+        try:
+            existing_df = read_parquet_dataframe(target_path)
+        except RuntimeError:
+            existing_df = None
+        else:
+            if existing_df.equals(index_df):
+                LOGGER.info("Dataset index unchanged at %s (%d rows).", target_path, len(index_df))
+                return target_path
     try:
         write_parquet_dataframe(index_df, target_path)
     except RuntimeError as exc:

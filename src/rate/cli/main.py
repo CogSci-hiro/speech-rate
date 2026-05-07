@@ -23,6 +23,7 @@ _COMMANDS = {
     "glm-subject": "rate.legacy.cli.commands.glm_subject",
     "glm-group-stats": "rate.legacy.cli.commands.glm_group_stats",
     "lmeeeg-subject": "rate.cli.commands.lmeeeg_subject",
+    "lmeeeg-source": "rate.cli.commands.lmeeeg_source",
     "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
     "lmeeeg-similarity": "rate.cli.commands.lmeeeg_similarity",
     "lmeeeg-variance-partition-fit": "rate.cli.commands.lmeeeg_variance_partition_fit",
