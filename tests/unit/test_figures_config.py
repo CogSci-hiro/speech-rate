@@ -1,4 +1,4 @@
-from rate.cli.commands.figures_glm import _normalize_regressors
+from rate.legacy.cli.commands.figures_glm import _normalize_regressors
 
 
 def test_normalize_regressors_canonicalizes_interactions() -> None:

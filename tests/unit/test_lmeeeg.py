@@ -1909,3 +1909,27 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
     assert variance_partition_plot["plot_name"] == "variance_partition_summary"
     assert all(Path(path).parent == out_dir / "figures" / "main_figures" for path in map(Path, variance_partition_plot["files"]))
     assert all(Path(path).exists() for path in variance_partition_plot["files"])
+
+
+def test_lmeeeg_group_stats_cluster_threshold_interprets_alpha_values() -> None:
+    from scipy.stats import t
+
+    threshold = lmeeeg_group_stats._resolve_threshold(
+        {"stats": {"cluster_threshold": 0.01}},
+        n_observations=32,
+        correction="cluster",
+        tail=0,
+    )
+
+    assert threshold == pytest.approx(float(t.ppf(1.0 - (0.01 / 2.0), df=31)))
+
+
+def test_lmeeeg_group_stats_cluster_threshold_preserves_statistic_cutoffs() -> None:
+    threshold = lmeeeg_group_stats._resolve_threshold(
+        {"stats": {"cluster_threshold": 2.5}},
+        n_observations=32,
+        correction="cluster",
+        tail=0,
+    )
+
+    assert threshold == pytest.approx(2.5)

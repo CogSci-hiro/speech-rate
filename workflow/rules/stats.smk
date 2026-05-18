@@ -101,6 +101,7 @@ rule lmeeeg_group_stats:
     input:
         stats_config="config/stats.yaml",
         dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        epochs_stage=EPOCHS_STAGE,
         trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
     output:
         LMEEEG_STATS_OUTPUT,

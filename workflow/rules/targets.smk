@@ -26,12 +26,6 @@ rule lmeeeg_all:
         LMEEEG_STATS_OUTPUT
 
 
-# Source-space lmeEEG experimental extension
-rule lmeeeg_source_all:
-    input:
-        LMEEEG_SOURCE_STAGE
-
-
 rule similarity_all:
     input:
         SIMILARITY_STATS_OUTPUT
@@ -42,17 +36,6 @@ rule lmeeeg_variance_partition_all:
         LMEEEG_VARIANCE_PARTITION_STAGE,
         LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT
 
-
-rule decoding_all:
-    input:
-        DECODING_STAGE
-
-
-rule decoding_stats_all:
-    input:
-        DECODING_STATS_STAGE
-
-
 rule r_analysis_all:
     input:
         R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
@@ -62,8 +45,6 @@ rule r_analysis_all:
 
 _figures_all_inputs = [
     BEHAVIOURAL_FIGURES_OUTPUT,
-    DECODING_FIGURES_OUTPUT,
-    DECODING_RESULTS_FIGURES_OUTPUT,
     SIMILARITY_FIGURES_OUTPUT,
     LMEEEG_QC_FIGURES_OUTPUT,
     LMEEEG_INFERENCE_FIGURES_OUTPUT,
@@ -80,17 +61,6 @@ rule figures_all:
 rule behavioural_figures_all:
     input:
         BEHAVIOURAL_FIGURES_OUTPUT
-
-
-rule decoding_figures_all:
-    input:
-        DECODING_FIGURES_OUTPUT
-
-
-rule decoding_results_figures_all:
-    input:
-        DECODING_RESULTS_FIGURES_OUTPUT
-
 
 rule similarity_figures_all:
     input:
@@ -111,10 +81,6 @@ rule qc_lmeeeg_plots_all:
     input:
         LMEEEG_QC_FIGURES_OUTPUT
 
-rule qc_lmeeeg_source_plots_all:
-    input:
-        LMEEEG_SOURCE_QC_FIGURES_OUTPUT
-
 rule inference_lmeeeg_plots_all:
     input:
         LMEEEG_INFERENCE_FIGURES_OUTPUT
@@ -126,7 +92,11 @@ rule all:
         EVENTS_STAGE,
         EPOCHS_STAGE,
         MARGIN_EPOCHS_STAGE,
+        LMEEEG_STAGE,
         LMEEEG_STATS_OUTPUT,
+        SIMILARITY_STATS_OUTPUT,
+        LMEEEG_VARIANCE_PARTITION_STAGE,
+        LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT,
         R_ANALYSIS_PREPROCESS_SUMMARY_OUTPUT,
         R_ANALYSIS_RESULTS_OUTPUT,
         R_ANALYSIS_STAGE

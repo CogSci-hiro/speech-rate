@@ -1,5 +1,5 @@
 stats:
-  method: "cluster"
+  method: "tfce"
   n_permutations: 100
   tail: 0
   adjacency: "mne_default"

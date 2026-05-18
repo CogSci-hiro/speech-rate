@@ -41,15 +41,6 @@ viz:
         marginalised_scatter_color: "#1F4E79"
         marginalised_scatter_alpha: 0.35
         marginalised_scatter_size: 20
-    decoding:
-      diag_auto: true
-      diag_pad_fraction: 0.02
-      diag_min_half_range: 0.015
-      matrix_limit_percentile: 98.5
-      contour_linewidth: 1.5
-      p_threshold: 0.05
-    decoding_results:
-      p_threshold: 0.05
     variance_partition:
       use_proportions: false
       epsilon: 1.0e-12

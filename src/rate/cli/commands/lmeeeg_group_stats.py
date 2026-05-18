@@ -18,6 +18,7 @@ from rate.design import get_predictor_column_indices, list_model_names
 from rate.lmeeeg.mass_model import fit_lmeeeg_backend_result
 from rate.lmeeeg.pooling import load_pooled_lmeeeg_trial_data, select_lmeeeg_rows
 from rate.lmeeeg.targets import resolve_target_names, section_supports_targets
+from rate.lmeeeg.trial_data import resolve_random_effect_group
 from rate.paths import ensure_parent_dir, resolve_out_dir
 
 LOGGER = logging.getLogger(__name__)
@@ -147,7 +148,14 @@ def _run_one_analysis(
     correction = _resolve_correction_name(stats_cfg)
     tail = int((stats_cfg.get("stats") or {}).get("tail", 0))
     n_permutations = int((stats_cfg.get("stats") or {}).get("n_permutations", 1024))
-    threshold = _resolve_threshold(stats_cfg, n_observations=int(trial_data.eeg_data.shape[0]), correction=correction, tail=tail)
+    group_column = resolve_random_effect_group(config, config_section=config_section, model_name=model_name)
+    n_group_observations = int(trial_data.trial_metadata[group_column].nunique(dropna=True))
+    threshold = _resolve_threshold(
+        stats_cfg,
+        n_observations=n_group_observations,
+        correction=correction,
+        tail=tail,
+    )
     adjacency = _resolve_adjacency(config, stats_cfg, trial_data.channel_names)
     effect_specs = _resolve_effects(trial_data)
 
@@ -242,7 +250,15 @@ def _resolve_threshold(
     section = stats_cfg.get("stats") or {}
     if correction == "cluster":
         if "cluster_threshold" in section:
-            return float(section["cluster_threshold"])
+            threshold_value = float(section["cluster_threshold"])
+            if 0.0 < threshold_value < 1.0:
+                from scipy.stats import t
+
+                dof = max(1, n_observations - 1)
+                if tail == 0:
+                    return float(t.ppf(1.0 - (threshold_value / 2.0), df=dof))
+                return float(t.ppf(1.0 - threshold_value, df=dof))
+            return threshold_value
         alpha = section.get("cluster_forming_alpha")
         if alpha is None:
             return None
