@@ -164,7 +164,7 @@ def build_variance_partition_manifest(
         colors=palette,
         theme_config=theme,
         font_scale=font_scale,
-        ylabel_scale=float(figure_config.get("ylabel_font_scale", 0.45)),
+        ylabel_scale=float(figure_config.get("ylabel_font_scale", 0.45)) * 1.5,
     )
     _plot_stacked_area(
         posterior_axis,
@@ -174,7 +174,7 @@ def build_variance_partition_manifest(
         colors=palette,
         theme_config=theme,
         font_scale=font_scale,
-        ylabel_scale=float(figure_config.get("ylabel_font_scale", 0.45)),
+        ylabel_scale=float(figure_config.get("ylabel_font_scale", 0.45)) * 1.5,
     )
     _add_roi_inset(
         anterior_axis,
@@ -336,7 +336,7 @@ def _plot_stacked_area(
         timecourse_df["unique_self"].to_numpy(dtype=float),
         timecourse_df["shared"].to_numpy(dtype=float),
         timecourse_df["unique_other"].to_numpy(dtype=float),
-        labels=["Unique self", "Shared", "Unique other"],
+        labels=["Production", "Shared", "Perception"],
         colors=[colors["self"], colors["shared"], colors["other"]],
         alpha=0.9,
     )
@@ -482,7 +482,7 @@ def _draw_weighted_venn_with_matplotlib_venn(
 ) -> None:
     venn_object = venn2(
         subsets=(unique_self_value, unique_other_value, shared_value),
-        set_labels=("Self", "Other"),
+        set_labels=("Production", "Perception"),
         ax=axis,
     )
     patch_styles = {"10": colors["self"], "01": colors["other"], "11": colors["shared"]}
@@ -495,8 +495,8 @@ def _draw_weighted_venn_with_matplotlib_venn(
             patch.set_linewidth(1.25)
 
     label_map = {
-        "10": f"Unique self\n{_format_scientific_mathtext(unique_self_value, precision=1)}",
-        "01": f"Unique other\n{_format_scientific_mathtext(unique_other_value, precision=1)}",
+        "10": f"Unique\nproduction\n{_format_scientific_mathtext(unique_self_value, precision=1)}",
+        "01": f"Unique\nperception\n{_format_scientific_mathtext(unique_other_value, precision=1)}",
         "11": f"Shared\n{_format_scientific_mathtext(shared_value, precision=1)}",
     }
     for region_id, region_text in label_map.items():
@@ -506,11 +506,11 @@ def _draw_weighted_venn_with_matplotlib_venn(
             label.set_fontsize(_scaled_fontsize(8, font_scale * label_scale))
             label.set_fontweight("semibold")
             label.set_color("white")
-
-    shared_label = venn_object.get_label_by_id("11")
-    if shared_label is not None:
-        x_position, y_position = shared_label.get_position()
-        shared_label.set_position((x_position, y_position - 0.06))
+            x_position, y_position = label.get_position()
+            if region_id == "11":
+                label.set_position((x_position, y_position - 0.08))
+            else:
+                label.set_position((x_position, y_position + 0.08))
 
     for set_id in ("A", "B"):
         set_label = venn_object.get_label_by_id(set_id)
@@ -545,11 +545,11 @@ def _draw_weighted_venn_fallback(
     right_center = (0.35, 0.0)
     axis.add_patch(Circle(left_center, self_radius, facecolor=colors["self"], edgecolor=edge_color, linewidth=1.25, alpha=0.35))
     axis.add_patch(Circle(right_center, other_radius, facecolor=colors["other"], edgecolor=edge_color, linewidth=1.25, alpha=0.35))
-    axis.text(left_center[0] - 0.12, 0.0, f"Unique self\n{_format_scientific_mathtext(unique_self_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color="white")
-    axis.text(right_center[0] + 0.12, 0.0, f"Unique other\n{_format_scientific_mathtext(unique_other_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color="white")
-    axis.text(0.0, -0.02, f"Shared\n{_format_scientific_mathtext(shared_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color=colors["shared"])
-    axis.text(left_center[0], self_radius + 0.16, "Self", ha="center", va="bottom", fontsize=_scaled_fontsize(9, font_scale * label_scale), fontweight="semibold", color="white")
-    axis.text(right_center[0], other_radius + 0.16, "Other", ha="center", va="bottom", fontsize=_scaled_fontsize(9, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.text(left_center[0] - 0.12, 0.10, f"Unique\nproduction\n{_format_scientific_mathtext(unique_self_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.text(right_center[0] + 0.12, 0.10, f"Unique\nperception\n{_format_scientific_mathtext(unique_other_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.text(0.0, -0.08, f"Shared\n{_format_scientific_mathtext(shared_value, 1)}", ha="center", va="center", fontsize=_scaled_fontsize(8, font_scale * label_scale), fontweight="semibold", color=colors["shared"])
+    axis.text(left_center[0], self_radius + 0.16, "Production", ha="center", va="bottom", fontsize=_scaled_fontsize(9, font_scale * label_scale), fontweight="semibold", color="white")
+    axis.text(right_center[0], other_radius + 0.16, "Perception", ha="center", va="bottom", fontsize=_scaled_fontsize(9, font_scale * label_scale), fontweight="semibold", color="white")
     axis.set_title(title, fontsize=_scaled_fontsize(11, font_scale * title_scale), pad=12)
     axis.set_xlim(-1.35, 1.35)
     axis.set_ylim(-1.0, 1.1)

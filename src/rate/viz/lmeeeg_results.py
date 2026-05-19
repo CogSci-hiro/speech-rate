@@ -141,19 +141,13 @@ def build_lmeeeg_main_results_manifest(
     line_axis.spines["right"].set_visible(False)
     line_axis.tick_params(axis="both", labelsize=_scaled_fontsize(9, font_scale))
     line_axis.legend(frameon=False, loc="upper right", fontsize=_scaled_fontsize(9, font_scale))
-    figure.suptitle(
-        str(figure_config.get("line_title", "Spatial extent of significant effects over time")),
-        fontsize=_scaled_fontsize(13, font_scale),
-        y=float(figure_config.get("title_y", 1.01)),
-    )
-
     marker_size = float(figure_config.get("significant_marker_size", 40.0))
     marker_facecolor = str(figure_config.get("significant_marker_facecolor", shared_label_color))
     marker_edgecolor = str(figure_config.get("significant_marker_edgecolor", get_theme_color("background", theme)))
     marker_linewidth = float(figure_config.get("significant_marker_linewidth", 1.2))
     topomap_cmap = str(figure_config.get("topomap_cmap", "RdBu_r"))
     top_title_pad = float(figure_config.get("topomap_title_pad", 2.0))
-    bottom_title_pad = float(figure_config.get("bottom_topomap_title_pad", -18.0))
+    bottom_title_y = float(figure_config.get("bottom_topomap_title_y", -0.12))
     topomap_title_fontsize = _scaled_fontsize(11, font_scale)
     lower_panel_link_target_y = float(figure_config.get("lower_panel_link_target_y", 0.88))
     last_image = None
@@ -166,7 +160,7 @@ def build_lmeeeg_main_results_manifest(
             mne_info=info,
             values=np.asarray(self_payload["observed_map"], dtype=float)[:, time_index],
             significance_mask=sig_self_matrix[:, time_index],
-            title=f"{str(self_spec.get('label', 'Self'))}\n{selected_time_ms:.0f} ms",
+            title=f"{str(self_spec.get('label', 'Production'))}\n{selected_time_ms:.0f} ms",
             vmin=shared_vmin,
             vmax=shared_vmax,
             cmap=topomap_cmap,
@@ -176,6 +170,7 @@ def build_lmeeeg_main_results_manifest(
             marker_linewidth=marker_linewidth,
             title_pad=top_title_pad,
             title_fontsize=topomap_title_fontsize,
+            title_position="top",
         )
         _add_time_link(
             figure=figure,
@@ -197,7 +192,7 @@ def build_lmeeeg_main_results_manifest(
             mne_info=info,
             values=np.asarray(other_payload["observed_map"], dtype=float)[:, time_index],
             significance_mask=sig_other_matrix[:, time_index],
-            title=f"{str(other_spec.get('label', 'Other'))}\n{selected_time_ms:.0f} ms",
+            title=f"{str(other_spec.get('label', 'Perception'))}\n{selected_time_ms:.0f} ms",
             vmin=shared_vmin,
             vmax=shared_vmax,
             cmap=topomap_cmap,
@@ -205,8 +200,9 @@ def build_lmeeeg_main_results_manifest(
             marker_facecolor=marker_facecolor,
             marker_edgecolor=marker_edgecolor,
             marker_linewidth=marker_linewidth,
-            title_pad=bottom_title_pad,
+            title_pad=bottom_title_y,
             title_fontsize=topomap_title_fontsize,
+            title_position="bottom",
         )
         _add_time_link(
             figure=figure,
@@ -489,6 +485,7 @@ def _draw_topomap_with_significant_markers(
     marker_linewidth: float,
     title_pad: float,
     title_fontsize: float,
+    title_position: str = "top",
 ):
     image, _ = mne.viz.plot_topomap(
         values,
@@ -514,7 +511,18 @@ def _draw_topomap_with_significant_markers(
             linewidths=marker_linewidth,
             zorder=10,
         )
-    axis.set_title(title, fontsize=title_fontsize, pad=title_pad)
+    if title_position == "bottom":
+        axis.text(
+            0.5,
+            title_pad,
+            title,
+            transform=axis.transAxes,
+            ha="center",
+            va="top",
+            fontsize=title_fontsize,
+        )
+    else:
+        axis.set_title(title, fontsize=title_fontsize, pad=title_pad)
     return image
 
 

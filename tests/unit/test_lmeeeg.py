@@ -1170,6 +1170,106 @@ def test_similarity_summary_figure_manifest_writes_outputs(tmp_path: Path, monke
     assert Path(plot["files"][0]).exists()
 
 
+def test_similarity_summary_figure_manifest_hides_topomaps(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    output_paths = build_similarity_output_paths(config)
+    output_paths.root_dir.mkdir(parents=True, exist_ok=True)
+    other_paths = build_lmeeeg_model_output_paths(config, model_name="other_rate_effect")
+    self_paths = build_lmeeeg_model_output_paths(config, model_name="self_rate_effect")
+    other_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+    self_paths.summary_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    difference_map = np.asarray(
+        [
+            [0.2, 0.8, 1.2, 0.6, 0.1],
+            [-0.1, 0.4, 0.9, 0.5, 0.0],
+            [0.0, 0.3, 0.6, 0.4, -0.1],
+            [-0.2, 0.2, 0.7, 0.3, -0.2],
+        ],
+        dtype=float,
+    )
+    times = np.asarray([-0.2, -0.1, 0.0, 0.1, 0.2], dtype=float)
+    other_map = np.asarray(
+        [
+            [0.4, 1.1, 1.6, 0.9, 0.2],
+            [0.1, 0.7, 1.2, 0.8, 0.3],
+            [0.2, 0.5, 0.9, 0.6, 0.1],
+            [0.0, 0.4, 0.8, 0.5, 0.0],
+        ],
+        dtype=float,
+    )
+    self_map = other_map - difference_map
+    observed_curve = np.asarray([0.01, 0.18, 0.62, 0.25, 0.05], dtype=float)
+    corrected_p = np.asarray([0.20, 0.03, 0.01, 0.20, 0.60], dtype=float)
+
+    np.save(output_paths.difference_map_output_path, difference_map)
+    np.save(output_paths.times_output_path, times)
+    np.save(output_paths.time_resolved_curve_output_path, observed_curve)
+    np.save(output_paths.time_resolved_p_values_output_path, corrected_p)
+    output_paths.channel_names_output_path.write_text(json.dumps(["Fz", "Cz", "Pz", "Oz"]) + "\n", encoding="utf-8")
+    for model_paths, predictor_name, values in (
+        (other_paths, "other_rate", other_map),
+        (self_paths, "self_rate", self_map),
+    ):
+        betas = np.stack([np.zeros_like(values), values], axis=0)
+        np.save(model_paths.betas_output_path, betas)
+        np.save(model_paths.t_values_output_path, betas * 2.0)
+        np.save(model_paths.times_output_path, times)
+        model_paths.channel_names_output_path.write_text(json.dumps(["Fz", "Cz", "Pz", "Oz"]) + "\n", encoding="utf-8")
+        model_paths.column_names_output_path.write_text(json.dumps(["Intercept", predictor_name]) + "\n", encoding="utf-8")
+        model_paths.test_predictors_output_path.write_text(json.dumps([predictor_name]) + "\n", encoding="utf-8")
+        model_paths.summary_output_path.write_text(
+            json.dumps({"status": "ok", "predictor_of_interest": predictor_name}) + "\n",
+            encoding="utf-8",
+        )
+    output_paths.summary_output_path.write_text(
+        json.dumps(
+            {
+                "analysis_name": "other_vs_self",
+                "input": {"predictor_a": "other_rate", "predictor_b": "self_rate"},
+                "time_resolved_topography": {
+                    "curve_path": str(output_paths.time_resolved_curve_output_path),
+                    "corrected_p_values_path": str(output_paths.time_resolved_p_values_output_path),
+                    "null_curves_path": None,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fail_draw_similarity_topomap(**_kwargs):
+        raise AssertionError("Topomaps should not be drawn when hide_topomaps is enabled.")
+
+    monkeypatch.setattr(lmeeeg_similarity_viz, "_draw_similarity_topomap", fail_draw_similarity_topomap)
+
+    manifest = lmeeeg_similarity_viz.build_similarity_summary_figure_manifest(
+        config=config,
+        out_dir=out_dir,
+        manifest_path=output_paths.figure_manifest_output_path,
+        figure_config={
+            "hide_topomaps": True,
+            "predictor_a_label": "Production",
+            "predictor_b_label": "Perception",
+            "legend_anchor_x": 0.0,
+            "legend_anchor_y": 0.92,
+        },
+        theme_config={"colors": {"shared": "#2F6B3B", "neutral": "#4B5563", "reference": "#6B7280"}},
+        formats=("png",),
+        dpi=72,
+    )
+
+    plot = manifest["plots"][0]
+    assert plot["plot_name"] == "similarity_summary"
+    assert plot["hide_topomaps"] is True
+    assert plot["n_topomaps"] == 0
+    assert plot["topomap_color_limits"] is None
+    assert plot["topomap_predictors"] == ["Production", "Perception"]
+    assert len(plot["files"]) == 1
+    assert Path(plot["files"][0]).exists()
+
+
 def test_lmeeeg_similarity_refit_permutation_writes_null_shapes(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)

@@ -118,26 +118,26 @@ viz:
       hspace: 0.20
       bottom_row_spacer_height: 0.45
       bottom_right_topomap_extra_offset: 0.0
-      title_y: 1.01
       topomap_title_pad: 2
-      bottom_topomap_title_pad: -18
+      bottom_topomap_title_y: -0.12
       topomap_cmap: "RdBu_r"
       colorbar_label: "Observed t value"
       font_scale: 3.0
       lower_panel_link_target_y: 0.88
       models:
         self:
-          label: "Self"
+          label: "Production"
           model_name: "self_rate_effect"
           effect_name: "self_rate"
           topomap_times_s: [-0.8, -0.4, 0.0]
         other:
-          label: "Other"
+          label: "Perception"
           model_name: "other_rate_effect"
           effect_name: "other_rate"
           topomap_times_s: [-0.7, -0.5]
     similarity_summary:
       enabled: true
+      hide_topomaps: true
       n_topomaps: 4
       window_radius_ms: 50
       topomap_selection: "automatic"
@@ -146,7 +146,10 @@ viz:
       significance_threshold: 0.05
       topomap_cmap: "RdBu_r"
       colorbar_label: "Beta coefficient"
-      line_title: "Time-resolved topographic similarity"
+      predictor_a_label: "Production"
+      predictor_b_label: "Perception"
+      legend_anchor_x: 0.0
+      legend_anchor_y: 0.92
       font_scale: 3.0
       null_envelope_percentiles: [2.5, 97.5]
     glm:

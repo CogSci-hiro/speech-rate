@@ -115,7 +115,6 @@ def plot_similarity_summary_figure(
     reference_color = str(figure_config.get("reference_color", get_theme_color("reference", theme)))
     topomap_cmap = str(figure_config.get("topomap_cmap", "RdBu_r"))
     topomap_title_pad = float(figure_config.get("topomap_title_pad", 6.0))
-    line_title = str(figure_config.get("line_title", "Time-resolved topographic similarity"))
     colorbar_label = str(figure_config.get("colorbar_label", "Beta coefficient"))
     significance_threshold = float(figure_config.get("significance_threshold", 0.05))
     window_radius_ms = float(figure_config.get("window_radius_ms", 50.0))
@@ -123,10 +122,12 @@ def plot_similarity_summary_figure(
     topomap_row_label_xpad = float(figure_config.get("topomap_row_label_xpad", 0.015))
     legend_headroom_fraction = float(figure_config.get("legend_headroom_fraction", 0.35))
     lower_padding_fraction = float(figure_config.get("lower_padding_fraction", 0.18))
-    legend_anchor_y = float(figure_config.get("legend_anchor_y", 1.10))
+    legend_anchor_x = float(figure_config.get("legend_anchor_x", 0.0))
+    legend_anchor_y = float(figure_config.get("legend_anchor_y", 1.0))
     significance_inset_bottom = float(figure_config.get("significance_inset_bottom", 0.08))
     significance_inset_height = float(figure_config.get("significance_inset_height", 0.10))
-    requested_topomaps = max(1, int(figure_config.get("n_topomaps", 4)))
+    hide_topomaps = bool(figure_config.get("hide_topomaps", False))
+    requested_topomaps = 0 if hide_topomaps else max(1, int(figure_config.get("n_topomaps", 4)))
     selection_mode = str(figure_config.get("topomap_selection", "automatic")).lower()
     if selection_mode != "automatic":
         raise ValueError(f"Unsupported similarity topomap selection mode `{selection_mode}`.")
@@ -140,15 +141,17 @@ def plot_similarity_summary_figure(
     corrected_p_values = None if payload.corrected_p_values is None else np.asarray(payload.corrected_p_values, dtype=float)
     significant_mask = np.zeros(times.shape, dtype=bool) if corrected_p_values is None else corrected_p_values < significance_threshold
 
-    n_topomaps = min(requested_topomaps, int(np.count_nonzero(time_mask)))
-    selected_indices = _select_topomap_indices(
-        times=times,
-        observed_curve=observed_curve,
-        significant_mask=significant_mask,
-        time_mask=time_mask,
-        n_topomaps=n_topomaps,
-        window_radius_ms=window_radius_ms,
-    )
+    selected_indices: list[int] = []
+    if requested_topomaps > 0:
+        n_topomaps = min(requested_topomaps, int(np.count_nonzero(time_mask)))
+        selected_indices = _select_topomap_indices(
+            times=times,
+            observed_curve=observed_curve,
+            significant_mask=significant_mask,
+            time_mask=time_mask,
+            n_topomaps=n_topomaps,
+            window_radius_ms=window_radius_ms,
+        )
     predictor_a_maps: list[np.ndarray] = []
     predictor_b_maps: list[np.ndarray] = []
     topomap_time_labels: list[str] = []
@@ -173,13 +176,16 @@ def plot_similarity_summary_figure(
         topomap_windows_ms.append([window_start_ms, window_end_ms])
         topomap_time_labels.append(_format_topomap_time_label(float(times[selected_index] * 1000.0)))
 
-    vmin, vmax = _compute_symmetric_topomap_limits(
-        [*predictor_a_maps, *predictor_b_maps],
-        requested_vlim=float(figure_config["manual_vlim"]) if figure_config.get("manual_vlim") is not None else None,
-    )
-    info = _build_topomap_info(list(payload.channel_names), config=config)
-    predictor_a_label = str(figure_config.get("predictor_a_label", payload.predictor_a))
-    predictor_b_label = str(figure_config.get("predictor_b_label", payload.predictor_b))
+    vmin = vmax = None
+    info = None
+    if selected_indices:
+        vmin, vmax = _compute_symmetric_topomap_limits(
+            [*predictor_a_maps, *predictor_b_maps],
+            requested_vlim=float(figure_config["manual_vlim"]) if figure_config.get("manual_vlim") is not None else None,
+        )
+        info = _build_topomap_info(list(payload.channel_names), config=config)
+    predictor_a_label = str(figure_config.get("predictor_a_label", "Production"))
+    predictor_b_label = str(figure_config.get("predictor_b_label", "Perception"))
 
     figure = plt.figure(
         figsize=(
@@ -187,28 +193,34 @@ def plot_similarity_summary_figure(
             float(figure_config.get("figure_height", 9.0)),
         )
     )
-    outer_grid = gridspec.GridSpec(
-        nrows=2,
-        ncols=2,
-        figure=figure,
-        width_ratios=[1.0, 0.045],
-        height_ratios=[1.5, 1.6],
-        hspace=float(figure_config.get("hspace", 0.28)),
-        wspace=float(figure_config.get("wspace", 0.12)),
-    )
-    top_grid = gridspec.GridSpecFromSubplotSpec(
-        2,
-        len(selected_indices),
-        subplot_spec=outer_grid[0, 0],
-        hspace=0.18,
-        wspace=0.35,
-    )
-    topomap_axes_a = [figure.add_subplot(top_grid[0, index]) for index in range(len(selected_indices))]
-    topomap_axes_b = [figure.add_subplot(top_grid[1, index]) for index in range(len(selected_indices))]
-    line_axis = figure.add_subplot(outer_grid[1, 0])
-    colorbar_host_axis = figure.add_subplot(outer_grid[:, 1])
-    colorbar_host_axis.axis("off")
-    colorbar_axis = colorbar_host_axis.inset_axes([0.25, 0.25, 0.5, 0.5])
+    if selected_indices:
+        outer_grid = gridspec.GridSpec(
+            nrows=2,
+            ncols=2,
+            figure=figure,
+            width_ratios=[1.0, 0.045],
+            height_ratios=[1.5, 1.6],
+            hspace=float(figure_config.get("hspace", 0.28)),
+            wspace=float(figure_config.get("wspace", 0.12)),
+        )
+        top_grid = gridspec.GridSpecFromSubplotSpec(
+            2,
+            len(selected_indices),
+            subplot_spec=outer_grid[0, 0],
+            hspace=0.18,
+            wspace=0.35,
+        )
+        topomap_axes_a = [figure.add_subplot(top_grid[0, index]) for index in range(len(selected_indices))]
+        topomap_axes_b = [figure.add_subplot(top_grid[1, index]) for index in range(len(selected_indices))]
+        line_axis = figure.add_subplot(outer_grid[1, 0])
+        colorbar_host_axis = figure.add_subplot(outer_grid[:, 1])
+        colorbar_host_axis.axis("off")
+        colorbar_axis = colorbar_host_axis.inset_axes([0.25, 0.25, 0.5, 0.5])
+    else:
+        topomap_axes_a = []
+        topomap_axes_b = []
+        line_axis = figure.add_subplot(111)
+        colorbar_axis = None
 
     times_window_ms = times[time_mask] * 1000.0
     observed_window = observed_curve[time_mask]
@@ -256,69 +268,69 @@ def plot_similarity_summary_figure(
     if payload.null_curves is not None:
         line_axis.legend(
             frameon=False,
-            loc="upper right",
-            bbox_to_anchor=(1.0, legend_anchor_y),
+            loc="upper left",
+            bbox_to_anchor=(legend_anchor_x, legend_anchor_y),
             borderaxespad=0.0,
             fontsize=_scaled_fontsize(9, font_scale),
         )
 
-    last_image = None
-    for top_axis, bottom_axis, predictor_a_map, predictor_b_map, label, selected_index in zip(
-        topomap_axes_a,
-        topomap_axes_b,
-        predictor_a_maps,
-        predictor_b_maps,
-        topomap_time_labels,
-        selected_indices,
-        strict=True,
-    ):
-        last_image = _draw_similarity_topomap(
-            axis=top_axis,
-            mne_info=info,
-            values=predictor_a_map,
-            title=label,
-            vmin=vmin,
-            vmax=vmax,
-            cmap=topomap_cmap,
-            title_pad=topomap_title_pad,
-            title_fontsize=_scaled_fontsize(11, font_scale),
-        )
-        _draw_similarity_topomap(
-            axis=bottom_axis,
-            mne_info=info,
-            values=predictor_b_map,
-            title="",
-            vmin=vmin,
-            vmax=vmax,
-            cmap=topomap_cmap,
-            title_pad=topomap_title_pad,
-            title_fontsize=_scaled_fontsize(11, font_scale),
-        )
-        _add_similarity_time_link(
+    sig_label = str(figure_config.get("significance_label", "TFCE-corrected p < 0.05"))
+    if selected_indices:
+        last_image = None
+        for top_axis, bottom_axis, predictor_a_map, predictor_b_map, label, selected_index in zip(
+            topomap_axes_a,
+            topomap_axes_b,
+            predictor_a_maps,
+            predictor_b_maps,
+            topomap_time_labels,
+            selected_indices,
+            strict=True,
+        ):
+            last_image = _draw_similarity_topomap(
+                axis=top_axis,
+                mne_info=info,
+                values=predictor_a_map,
+                title=label,
+                vmin=vmin,
+                vmax=vmax,
+                cmap=topomap_cmap,
+                title_pad=topomap_title_pad,
+                title_fontsize=_scaled_fontsize(11, font_scale),
+            )
+            _draw_similarity_topomap(
+                axis=bottom_axis,
+                mne_info=info,
+                values=predictor_b_map,
+                title="",
+                vmin=vmin,
+                vmax=vmax,
+                cmap=topomap_cmap,
+                title_pad=topomap_title_pad,
+                title_fontsize=_scaled_fontsize(11, font_scale),
+            )
+            _add_similarity_time_link(
+                figure=figure,
+                line_axis=line_axis,
+                topomap_axis=bottom_axis,
+                center_time_ms=float(times[selected_index] * 1000.0),
+                y_value=float(observed_curve[selected_index]),
+                color=get_theme_color("neutral", theme),
+            )
+        if last_image is None:
+            raise ValueError("No similarity topomaps were drawn.")
+        _add_topomap_row_labels(
             figure=figure,
-            line_axis=line_axis,
-            topomap_axis=bottom_axis,
-            center_time_ms=float(times[selected_index] * 1000.0),
-            y_value=float(observed_curve[selected_index]),
-            color=get_theme_color("neutral", theme),
+            top_axes=topomap_axes_a,
+            bottom_axes=topomap_axes_b,
+            top_label=predictor_a_label,
+            bottom_label=predictor_b_label,
+            xpad=topomap_row_label_xpad,
+            fontsize=_scaled_fontsize(11, font_scale),
         )
-    if last_image is None:
-        raise ValueError("No similarity topomaps were drawn.")
-    _add_topomap_row_labels(
-        figure=figure,
-        top_axes=topomap_axes_a,
-        bottom_axes=topomap_axes_b,
-        top_label=predictor_a_label,
-        bottom_label=predictor_b_label,
-        xpad=topomap_row_label_xpad,
-        fontsize=_scaled_fontsize(11, font_scale),
-    )
-
-    colorbar = figure.colorbar(last_image, cax=colorbar_axis)
-    colorbar.set_label(colorbar_label, rotation=90, fontsize=_scaled_fontsize(11, font_scale))
-    colorbar.ax.tick_params(labelsize=_scaled_fontsize(9, font_scale))
-    colorbar.ax.yaxis.get_offset_text().set_size(_scaled_fontsize(9, font_scale))
-
+        colorbar = figure.colorbar(last_image, cax=colorbar_axis)
+        colorbar.set_label(colorbar_label, rotation=90, fontsize=_scaled_fontsize(11, font_scale))
+        colorbar.ax.tick_params(labelsize=_scaled_fontsize(9, font_scale))
+        colorbar.ax.yaxis.get_offset_text().set_size(_scaled_fontsize(9, font_scale))
     sig_mesh = None
     if corrected_p_values is not None:
         significance_axis = line_axis.inset_axes(
@@ -330,14 +342,14 @@ def plot_similarity_summary_figure(
             times_ms=times_window_ms,
             significant_mask=significant_mask[time_mask],
             color=line_color,
-            label=str(figure_config.get("significance_label", "TFCE-corrected p < 0.05")),
+            label=sig_label,
             fontsize=_scaled_fontsize(9, font_scale),
         )
     line_axis.set_xlabel("Time (ms)", fontsize=_scaled_fontsize(11, font_scale))
-    figure.suptitle(line_title, fontsize=_scaled_fontsize(13, font_scale), y=float(figure_config.get("title_y", 0.98)))
 
     plot_metadata = {
         "n_topomaps": len(selected_indices),
+        "hide_topomaps": hide_topomaps,
         "window_radius_ms": window_radius_ms,
         "topomap_windows_ms": topomap_windows_ms,
         "topomap_centers_s": [float(times[index]) for index in selected_indices],
@@ -347,10 +359,10 @@ def plot_similarity_summary_figure(
         "null_envelope_percentiles": [lower_percentile, upper_percentile] if payload.null_curves is not None else None,
         "has_corrected_p_values": corrected_p_values is not None,
         "has_null_envelope": payload.null_curves is not None,
-        "topomap_color_limits": [vmin, vmax],
+        "topomap_color_limits": ([vmin, vmax] if vmin is not None and vmax is not None else None),
         "significance_timepoints": (int(np.count_nonzero(significant_mask[time_mask])) if corrected_p_values is not None else 0),
         "significance_artist": sig_mesh is not None,
-        "topomap_predictors": [payload.predictor_a, payload.predictor_b],
+        "topomap_predictors": [predictor_a_label, predictor_b_label],
     }
     return figure, plot_metadata
 
