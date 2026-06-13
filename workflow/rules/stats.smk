@@ -7,6 +7,7 @@ R_ANALYSIS_RESULTS_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_results.csv"
 R_ANALYSIS_MODEL_SUMMARY_TXT_OUTPUT = f"{R_ANALYSIS_DIR}/analysis_model_summaries.txt"
 R_ANALYSIS_STAGE = f"{OUT_DIR}/_stage/r_analysis_all.done.json"
 LMEEEG_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_group_stats.json"
+LMEEEG_NESTED_GROUP_STATS_OUTPUT = LMEEEG_NESTED_STATS_OUTPUT
 SIMILARITY_STATS_OUTPUT = str(build_similarity_output_paths(RESOLVED_CONFIG).summary_output_path)
 LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT = f"{OUT_DIR}/stats/lmeeeg_variance_partition_group_stats.json"
 LMEEEG_VARIANCE_PARTITION_GROUP_DIR = str(build_variance_partition_group_output_paths(RESOLVED_CONFIG).group_dir)
@@ -109,6 +110,21 @@ rule lmeeeg_group_stats:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
         "--config config/config.yaml --schema config/schema.json "
         "--stats-config {input.stats_config} --dataset-index {input.dataset_index} "
+        "--trial-regressors-csv {input.trial_regressors} --output {output}"
+
+
+rule lmeeeg_nested_group_stats:
+    input:
+        nested_config="config/lmeeeg_nested.yaml",
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        epochs_stage=EPOCHS_STAGE,
+        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
+    output:
+        LMEEEG_NESTED_GROUP_STATS_OUTPUT,
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main lmeeeg-nested-group-stats "
+        "--config config/config.yaml --schema config/schema.json "
+        "--dataset-index {input.dataset_index} "
         "--trial-regressors-csv {input.trial_regressors} --output {output}"
 
 

@@ -18,6 +18,7 @@ from rate.config import load_and_validate_config
 from rate.design import ModelSpecError, list_model_names
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths
+from rate.lmeeeg.nested import build_lmeeeg_nested_group_output_paths
 from rate.lmeeeg.similarity import build_similarity_output_paths
 from rate.lmeeeg.targets import resolve_target_names
 from rate.lmeeeg.variance_partition import (
@@ -57,6 +58,7 @@ def _safe_list_model_names(config, *, section: str) -> tuple[str, ...]:
 
 
 LMEEEG_MODEL_NAMES = _safe_list_model_names(RESOLVED_CONFIG, section="lmeeeg")
+LMEEEG_NESTED_STATS_OUTPUT = str(build_lmeeeg_nested_group_output_paths(RESOLVED_CONFIG).summary_output_path)
 BEHAVIOURAL_RESIDUALS_DIR = f"{OUT_DIR}/stats/behavioural_residuals"
 BEHAVIOURAL_RESIDUALS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/trialwise_residuals.csv"
 BEHAVIOURAL_RANDOM_EFFECTS_OUTPUT = f"{BEHAVIOURAL_RESIDUALS_DIR}/random_effects.csv"

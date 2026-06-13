@@ -14,6 +14,7 @@ def test_build_arg_parser_registers_mass_univariate_commands() -> None:
     assert "glm-group-stats" in commands
     assert "lmeeeg-subject" in commands
     assert "lmeeeg-group-stats" in commands
+    assert "lmeeeg-nested-group-stats" in commands
     assert "lmeeeg-similarity" in commands
     assert "lmeeeg-variance-partition-fit" in commands
     assert "lmeeeg-variance-partition-group-stats" in commands

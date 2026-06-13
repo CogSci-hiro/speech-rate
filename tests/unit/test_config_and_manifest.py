@@ -92,6 +92,7 @@ def test_modular_compute_files_attach_mass_univariate_sections(tmp_path: Path) -
     _write_yaml(tmp_path / "margin_epochs.yaml", {"margin_epochs": {"tmin_s": -0.6, "tmax_s": 0.7}})
     _write_yaml(tmp_path / "glm.yaml", {"glm": {"regressors": ["speech_rate"]}})
     _write_yaml(tmp_path / "lmeeeg.yaml", {"lmeeeg": {"enabled": False}})
+    _write_yaml(tmp_path / "lmeeeg_nested.yaml", {"lmeeeg_nested": {"enabled": True, "full_model": "both_effect", "analyses": {"drop_self_rate": {"reduced_formula": "~ other_rate"}}}})
     _write_yaml(tmp_path / "similarity.yaml", {"similarity": {"enabled": True, "analysis_name": "other_vs_self"}})
 
     resolved = load_and_validate_config(cfg_path, schema_path=Path("config/schema.json"))
@@ -100,6 +101,7 @@ def test_modular_compute_files_attach_mass_univariate_sections(tmp_path: Path) -
     assert resolved["glm"]["regressors"] == ["speech_rate"]
     assert resolved["margin_epochs"]["tmin_s"] == pytest.approx(-0.6)
     assert resolved["lmeeeg"]["enabled"] is False
+    assert resolved["lmeeeg_nested"]["enabled"] is True
     assert resolved["similarity"]["analysis_name"] == "other_vs_self"
 
 

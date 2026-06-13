@@ -7,7 +7,7 @@ The subject-level `lmeEEG` fitting stage is backed by the external [`lmeeeg`](ht
 ## Active Workflow
 
 - Main config entry point: `config/config.yaml`
-- Modular analysis configs: `config/dataset.yaml`, `config/preprocessing.yaml`, `config/epochs.yaml`, `config/margin_epochs.yaml`, `config/lmeeeg.yaml`, `config/similarity.yaml`, `config/stats.yaml`, `config/viz.yaml`
+- Modular analysis configs: `config/dataset.yaml`, `config/preprocessing.yaml`, `config/epochs.yaml`, `config/margin_epochs.yaml`, `config/lmeeeg.yaml`, `config/lmeeeg_nested.yaml`, `config/similarity.yaml`, `config/stats.yaml`, `config/viz.yaml`
 - CLI entry point: `src/rate/cli/main.py`
 - Snakemake entry point: `workflow/Snakefile`
 
@@ -17,6 +17,7 @@ The cleanup goal is to keep only the active paper-facing branches and remove unu
 
 - Behavioural analysis and behavioural figures
 - Sensor-space `lmeEEG` fit, group inference, QC, and main-result figures
+- Nested-block `lmeEEG` inference comparing the full `self_rate + other_rate` model against drop-one-predictor reduced models
 - Topographic similarity analysis and summary figures
 - Variance partitioning fit, descriptive group summaries, and figures
 
@@ -106,6 +107,10 @@ graph TB
     RESIDUALS --> lmeeeg_group
     lmeeeg_group --> LMEEEG_STATS["stats/lmeeeg_group_stats.json"]
 
+    dataset_index --> lmeeeg_nested["lmeeeg_nested_group_stats"]
+    RESIDUALS --> lmeeeg_nested
+    lmeeeg_nested --> LMEEEG_NESTED_STATS["stats/lmeeeg_nested_group_stats.json"]
+
     LMEEEG_STAGE --> similarity["lmeeeg_similarity"]
     cfg --> similarity
     similarity --> SIMILARITY_STATS["similarity/<analysis>/summary.json"]
@@ -161,6 +166,7 @@ graph TB
     margin_outputs --> margin_epochs_all["margin_epochs_all"]
     LMEEEG_STAGE --> lmeeeg_all["lmeeeg_all"]
     LMEEEG_STATS --> lmeeeg_all
+    LMEEEG_NESTED_STATS --> lmeeeg_nested_all["lmeeeg_nested_all"]
     SIMILARITY_STATS --> similarity_all["similarity_all"]
     VP_STAGE --> lmeeeg_variance_partition_all["lmeeeg_variance_partition_all"]
     VP_STATS --> lmeeeg_variance_partition_all
@@ -174,6 +180,7 @@ graph TB
     MARGIN_STAGE --> all
     LMEEEG_STAGE --> all
     LMEEEG_STATS --> all
+    LMEEEG_NESTED_STATS --> all
     SIMILARITY_STATS --> all
     VP_STAGE --> all
     VP_STATS --> all

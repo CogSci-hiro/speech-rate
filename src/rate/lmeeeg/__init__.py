@@ -10,6 +10,14 @@ from rate.lmeeeg.io import (
     save_lmeeeg_result,
 )
 from rate.lmeeeg.mass_model import LMEEEGResult, fit_lmeeeg_backend_result, fit_lmeeeg_mass_model
+from rate.lmeeeg.nested import (
+    DEFAULT_LMEEEG_NESTED_SECTION,
+    LMEEEGNestedAnalysisSpec,
+    LMEEEGNestedGroupPaths,
+    LMEEEGNestedStatsSettings,
+    build_lmeeeg_nested_group_output_paths,
+    resolve_lmeeeg_nested_settings,
+)
 from rate.lmeeeg.pooling import load_pooled_lmeeeg_trial_data, resolve_dataset_index_path, select_lmeeeg_rows
 from rate.lmeeeg.residualise import residualise_random_effects
 from rate.lmeeeg.trial_data import (
@@ -23,10 +31,15 @@ from rate.lmeeeg.trial_data import (
 
 __all__ = [
     "LMEEEGResult",
+    "DEFAULT_LMEEEG_NESTED_SECTION",
     "LMEEEGModelPaths",
+    "LMEEEGNestedAnalysisSpec",
+    "LMEEEGNestedGroupPaths",
+    "LMEEEGNestedStatsSettings",
     "LMEEEGRunPaths",
     "LMEEEGTrialData",
     "build_lmeeeg_model_output_paths",
+    "build_lmeeeg_nested_group_output_paths",
     "build_lmeeeg_trial_data_from_arrays",
     "build_lmeeeg_output_paths",
     "build_lmeeeg_trial_table",
@@ -38,6 +51,7 @@ __all__ = [
     "read_lmeeeg_outputs",
     "residualise_random_effects",
     "resolve_dataset_index_path",
+    "resolve_lmeeeg_nested_settings",
     "resolve_random_effect_group",
     "resolve_random_effect_structure",
     "select_lmeeeg_rows",

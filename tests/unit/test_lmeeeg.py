@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from rate.cli.commands import lmeeeg_group_stats
+from rate.cli.commands import lmeeeg_nested_group_stats
 from rate.cli.commands import lmeeeg_similarity
 from rate.cli.commands import lmeeeg_subject
 from rate.cli.commands import lmeeeg_variance_partition_fit
@@ -30,6 +31,7 @@ from rate.cli.commands import figures_lmeeeg_inference
 from rate.cli.commands import figures_similarity
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths, build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
+from rate.lmeeeg.nested import build_lmeeeg_nested_group_output_paths, resolve_lmeeeg_nested_settings
 from rate.lmeeeg.pooling import compute_lmeeeg_pooled_beta_map, load_pooled_lmeeeg_inputs
 from rate.lmeeeg.similarity import (
     SimilarityPermutationScheme,
@@ -120,6 +122,30 @@ def _lmeeeg_config(out_dir: Path) -> dict:
             "source_model": "both_effect",
             "output_dirname": "lmeeeg_variance_partition",
             "predictors": {"self": "self_rate", "other": "other_rate"},
+        },
+        "lmeeeg_nested": {
+            "enabled": True,
+            "source_section": "lmeeeg",
+            "full_model": "both_effect",
+            "output_dirname": "lmeeeg_nested",
+            "stats": {
+                "correction": "cluster",
+                "n_permutations": 8,
+                "seed": 7,
+                "tail": 1,
+                "adjacency": None,
+                "threshold": 4.0,
+            },
+            "analyses": {
+                "drop_self_rate": {
+                    "reduced_formula": "~ other_rate + latency + duration_s + time_within_run + run",
+                    "tested_predictor": "self_rate",
+                },
+                "drop_other_rate": {
+                    "reduced_formula": "~ self_rate + latency + duration_s + time_within_run + run",
+                    "tested_predictor": "other_rate",
+                },
+            },
         },
         "similarity": {
             "enabled": True,
@@ -408,6 +434,145 @@ def test_lmeeeg_group_stats_cli_writes_real_inference_outputs(tmp_path: Path) ->
     assert Path(effect_summary["observed_statistic"]).exists()
     assert Path(effect_summary["corrected_p_values"]).exists()
     assert Path(effect_summary["p_values_csv"]).exists()
+
+
+def test_resolve_lmeeeg_nested_settings_reads_drop_one_predictor_analyses(tmp_path: Path) -> None:
+    config = _lmeeeg_config(tmp_path / "out")
+
+    settings = resolve_lmeeeg_nested_settings(config)
+
+    assert settings.source_section == "lmeeeg"
+    assert settings.output_dirname == "lmeeeg_nested"
+    assert settings.correction == "cluster"
+    assert settings.threshold == pytest.approx(4.0)
+    assert [analysis.name for analysis in settings.analyses] == ["drop_self_rate", "drop_other_rate"]
+    assert settings.analyses[0].tested_predictor == "self_rate"
+    assert settings.analyses[1].tested_predictor == "other_rate"
+
+
+def test_lmeeeg_nested_group_stats_cli_writes_nested_block_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    rows = [
+        {
+            "dyad_id": "dyad-001",
+            "subject_id": "sub-001",
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / "placeholder_raw_1.fif"),
+        },
+        {
+            "dyad_id": "dyad-001",
+            "subject_id": "sub-002",
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / "placeholder_raw_2.fif"),
+        },
+    ]
+    metadata_by_subject = {
+        "sub-001": pd.DataFrame(
+            {
+                "self_rate": [0.0, 0.6, 1.2, 1.8],
+                "other_rate": [0.3, 0.9, 1.1, 1.7],
+                "latency": [0.10, 0.12, 0.14, 0.16],
+                "duration_s": [0.60, 0.62, 0.64, 0.66],
+                "time_within_run": [0.1, 0.2, 0.3, 0.4],
+                "run": ["1", "1", "1", "1"],
+                "subject_id": ["sub-001"] * 4,
+                "self_n_syllables": [4, 4, 4, 4],
+                "other_n_syllables": [4, 4, 4, 4],
+                "self_ipu_duration": [0.20, 0.22, 0.24, 0.26],
+                "other_ipu_duration": [0.21, 0.23, 0.25, 0.27],
+            }
+        ),
+        "sub-002": pd.DataFrame(
+            {
+                "self_rate": [0.2, 0.8, 1.4, 2.0],
+                "other_rate": [0.4, 1.0, 1.3, 1.9],
+                "latency": [0.11, 0.13, 0.15, 0.17],
+                "duration_s": [0.61, 0.63, 0.65, 0.67],
+                "time_within_run": [0.1, 0.2, 0.3, 0.4],
+                "run": ["1", "1", "1", "1"],
+                "subject_id": ["sub-002"] * 4,
+                "self_n_syllables": [4, 4, 4, 4],
+                "other_n_syllables": [4, 4, 4, 4],
+                "self_ipu_duration": [0.21, 0.23, 0.25, 0.27],
+                "other_ipu_duration": [0.22, 0.24, 0.26, 0.28],
+            }
+        ),
+    }
+    data_by_subject: dict[str, np.ndarray] = {}
+    slope_self = np.array([[1.0, 0.4], [0.2, 0.8]])
+    slope_other = np.array([[0.5, 0.7], [0.6, 0.3]])
+    intercept_map = np.array([[2.0, 1.5], [1.0, 0.5]])
+    subject_offsets = {"sub-001": 1.0, "sub-002": -0.5}
+    for subject_id, metadata in metadata_by_subject.items():
+        data = np.zeros((len(metadata), 2, 2), dtype=float)
+        for index, row_values in metadata.iterrows():
+            data[index] = (
+                intercept_map
+                + (float(row_values["self_rate"]) * slope_self)
+                + (float(row_values["other_rate"]) * slope_other)
+                + subject_offsets[subject_id]
+            )
+        data_by_subject[subject_id] = data
+
+    dataset_index_path = _write_variance_partition_epochs(tmp_path, config, rows, metadata_by_subject, data_by_subject)
+    observed_map = np.array([[4.0, 3.0], [2.0, 1.0]], dtype=float)
+    corrected_p_values = np.array([[0.01, 0.20], [0.04, 0.80]], dtype=float)
+    null_distribution = np.array([0.5, 1.0, 1.5], dtype=float)
+    permute_calls: list[dict[str, object]] = []
+
+    def _fake_permute_fixed_block(**kwargs):
+        permute_calls.append(kwargs)
+        return SimpleNamespace(
+            observed_statistic=observed_map,
+            corrected_p_values=corrected_p_values,
+            null_distribution=null_distribution,
+            cluster_p_values=None,
+            correction=str(kwargs["correction"]),
+            backend_metadata={"statistic": "partial_f"},
+        )
+
+    monkeypatch.setattr(lmeeeg_nested_group_stats, "fit_lmeeeg_backend_result", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(lmeeeg_nested_group_stats, "_resolve_permute_fixed_block", lambda: _fake_permute_fixed_block)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        dataset_index=str(dataset_index_path),
+        subject_id=None,
+        task=None,
+        run=None,
+        target=None,
+        trial_regressors_csv=None,
+        output=None,
+        config_section="lmeeeg_nested",
+    )
+    exit_code = lmeeeg_nested_group_stats.run(args, config=config)
+    assert exit_code == 0
+
+    output_paths = build_lmeeeg_nested_group_output_paths(config)
+    summary = json.loads(output_paths.summary_output_path.read_text(encoding="utf-8"))
+
+    assert summary["status"] == "ok"
+    assert summary["config_section"] == "lmeeeg_nested"
+    assert summary["n_nested_tests"] == 2
+    assert len(permute_calls) == 2
+    assert permute_calls[0]["reduced_formula"] == "y ~ other_rate + latency + duration_s + time_within_run + run"
+    assert permute_calls[1]["reduced_formula"] == "y ~ self_rate + latency + duration_s + time_within_run + run"
+    first_test = summary["analyses"][0]["nested_tests"][0]
+    second_test = summary["analyses"][0]["nested_tests"][1]
+    assert first_test["tested_predictor"] == "self_rate"
+    assert second_test["tested_predictor"] == "other_rate"
+    assert Path(first_test["observed_statistic"]).exists()
+    assert Path(first_test["corrected_p_values"]).exists()
+    assert Path(first_test["p_values_csv"]).exists()
 
 
 def test_lmeeeg_variance_partition_fit_cli_writes_outputs(tmp_path: Path) -> None:

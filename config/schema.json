@@ -38,6 +38,7 @@
     "epochs": {"type": "object"},
     "glm": {"type": "object"},
     "lmeeeg": {"type": "object"},
+    "lmeeeg_nested": {"type": "object"},
     "lmeeeg_variance_partition": {"type": "object"},
     "similarity": {
       "type": "object",

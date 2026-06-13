@@ -24,6 +24,7 @@ _COMMANDS = {
     "glm-group-stats": "rate.legacy.cli.commands.glm_group_stats",
     "lmeeeg-subject": "rate.cli.commands.lmeeeg_subject",
     "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
+    "lmeeeg-nested-group-stats": "rate.cli.commands.lmeeeg_nested_group_stats",
     "lmeeeg-similarity": "rate.cli.commands.lmeeeg_similarity",
     "lmeeeg-variance-partition-fit": "rate.cli.commands.lmeeeg_variance_partition_fit",
     "lmeeeg-variance-partition-group-stats": "rate.cli.commands.lmeeeg_variance_partition_group_stats",
