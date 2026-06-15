@@ -31,6 +31,12 @@ rule lmeeeg_nested_all:
         LMEEEG_NESTED_GROUP_STATS_OUTPUT
 
 
+rule lmeeeg_commonality_all:
+    input:
+        LMEEEG_COMMONALITY_STAGE,
+        LMEEEG_COMMONALITY_STATS_OUTPUT
+
+
 rule similarity_all:
     input:
         SIMILARITY_STATS_OUTPUT
@@ -100,6 +106,8 @@ rule all:
         LMEEEG_STAGE,
         LMEEEG_STATS_OUTPUT,
         LMEEEG_NESTED_GROUP_STATS_OUTPUT,
+        LMEEEG_COMMONALITY_STAGE,
+        LMEEEG_COMMONALITY_STATS_OUTPUT,
         SIMILARITY_STATS_OUTPUT,
         LMEEEG_VARIANCE_PARTITION_STAGE,
         LMEEEG_VARIANCE_PARTITION_STATS_OUTPUT,

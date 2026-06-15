@@ -1,5 +1,7 @@
 LMEEEG_STAGE = f"{OUT_DIR}/_stage/lmeeeg_all.done.json"
+LMEEEG_COMMONALITY_STAGE = f"{OUT_DIR}/_stage/lmeeeg_commonality_all.done.json"
 LMEEEG_VARIANCE_PARTITION_STAGE = f"{OUT_DIR}/_stage/lmeeeg_variance_partition_all.done.json"
+LMEEEG_COMMONALITY_ROOT = str(build_lmeeeg_commonality_output_paths(RESOLVED_CONFIG).root_dir)
 LMEEEG_VARIANCE_PARTITION_ROOT = str(build_variance_partition_fit_output_paths(RESOLVED_CONFIG).root_dir)
 
 
@@ -38,6 +40,46 @@ rule lmeeeg_stage:
         lmeeeg_stage_inputs,
     output:
         LMEEEG_STAGE,
+    shell:
+        "python -c \"from pathlib import Path; "
+        "path = Path(r'{output}'); "
+        "path.parent.mkdir(parents=True, exist_ok=True); "
+        "path.write_text('ok\\n', encoding='utf-8')\""
+
+
+rule lmeeeg_commonality:
+    input:
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        config_path="config/config.yaml",
+        schema_path="config/schema.json",
+        commonality_config="config/lmeeeg_commonality.yaml",
+        epochs_stage=EPOCHS_STAGE,
+        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
+    output:
+        point_estimate=f"{LMEEEG_COMMONALITY_ROOT}/point_estimate_commonality.npy",
+        roi_mask=f"{LMEEEG_COMMONALITY_ROOT}/roi_mask.npy",
+        bca_lower=f"{LMEEEG_COMMONALITY_ROOT}/bca_lower.npy",
+        bca_upper=f"{LMEEEG_COMMONALITY_ROOT}/bca_upper.npy",
+        bootstrap_p=f"{LMEEEG_COMMONALITY_ROOT}/bootstrap_p.npy",
+        calibration_floor=f"{LMEEEG_COMMONALITY_ROOT}/calibration_floor.npy",
+        map_wide_p=f"{LMEEEG_COMMONALITY_ROOT}/map_wide_p.npy",
+        roi_table=f"{LMEEEG_COMMONALITY_ROOT}/roi_feature_summary.parquet",
+        bootstrap_roi=f"{LMEEEG_COMMONALITY_ROOT}/bootstrap_roi_distribution.npy",
+        metadata=f"{LMEEEG_COMMONALITY_ROOT}/run_metadata.json",
+        summary=str(build_lmeeeg_commonality_output_paths(RESOLVED_CONFIG).summary_output_path),
+    threads:
+        max(1, int((RESOLVED_CONFIG.get("lmeeeg_commonality") or {}).get("n_jobs", 1))),
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main lmeeeg-commonality "
+        "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
+        "--trial-regressors-csv {input.trial_regressors} --n-jobs {threads}"
+
+
+rule lmeeeg_commonality_stage:
+    input:
+        lmeeeg_commonality_stage_inputs,
+    output:
+        LMEEEG_COMMONALITY_STAGE,
     shell:
         "python -c \"from pathlib import Path; "
         "path = Path(r'{output}'); "

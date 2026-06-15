@@ -1,0 +1,22 @@
+lmeeeg_nested:
+  enabled: true
+  source_section: "lmeeeg"
+  full_model: "both_effect"
+  output_dirname: "lmeeeg_nested"
+  stats:
+    correction: "tfce"
+    n_permutations: 200
+    seed: 1234
+    tail: 1
+    adjacency: "mne_default"
+    threshold: 4.0
+    tfce_threshold:
+      start: 0.0
+      step: 0.01
+  analyses:
+    drop_self_rate:
+      reduced_formula: "~ other_rate + latency + duration_s + time_within_run + run"
+      tested_predictor: "self_rate"
+    drop_other_rate:
+      reduced_formula: "~ self_rate + latency + duration_s + time_within_run + run"
+      tested_predictor: "other_rate"

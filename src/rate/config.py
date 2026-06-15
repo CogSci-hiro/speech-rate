@@ -26,6 +26,7 @@ MODULAR_COMPUTE_FILES = {
     "glm": "glm.yaml",
     "lmeeeg": "lmeeeg.yaml",
     "lmeeeg_nested": "lmeeeg_nested.yaml",
+    "lmeeeg_commonality": "lmeeeg_commonality.yaml",
     "lmeeeg_variance_partition": "lmeeeg.yaml",
     "similarity": "similarity.yaml",
 }
@@ -121,6 +122,7 @@ def apply_config_defaults(config: Mapping[str, Any]) -> dict[str, Any]:
         "glm",
         "lmeeeg",
         "lmeeeg_nested",
+        "lmeeeg_commonality",
         "lmeeeg_variance_partition",
         "similarity",
     ):

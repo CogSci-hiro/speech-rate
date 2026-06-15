@@ -31,6 +31,8 @@ from rate.cli.commands import figures_lmeeeg_inference
 from rate.cli.commands import figures_similarity
 from rate.epochs.io import build_epoch_output_paths
 from rate.lmeeeg.io import build_lmeeeg_model_output_paths, build_lmeeeg_output_paths, merge_trial_regressors_into_metadata
+from rate.lmeeeg import commonality as commonality_module
+from rate.lmeeeg.commonality import build_lmeeeg_commonality_output_paths, resolve_lmeeeg_commonality_settings
 from rate.lmeeeg.nested import build_lmeeeg_nested_group_output_paths, resolve_lmeeeg_nested_settings
 from rate.lmeeeg.pooling import compute_lmeeeg_pooled_beta_map, load_pooled_lmeeeg_inputs
 from rate.lmeeeg.similarity import (
@@ -44,6 +46,7 @@ from rate.lmeeeg.similarity import (
     resolve_similarity_settings,
 )
 from rate.lmeeeg.mass_model import fit_lmeeeg_mass_model
+from rate.lmeeeg.mass_model import LMEEEGResult
 from rate.lmeeeg.trial_data import build_lmeeeg_trial_table
 from rate.lmeeeg.variance_partition import (
     build_variance_partition_fit_output_paths,
@@ -146,6 +149,22 @@ def _lmeeeg_config(out_dir: Path) -> dict:
                     "tested_predictor": "other_rate",
                 },
             },
+        },
+        "lmeeeg_commonality": {
+            "enabled": True,
+            "source_section": "lmeeeg",
+            "source_model": "both_effect",
+            "output_dirname": "lmeeeg_commonality",
+            "formulas": {
+                "self_reduced": "~ other_rate + latency + duration_s + time_within_run + run",
+                "other_reduced": "~ self_rate + latency + duration_s + time_within_run + run",
+                "covariate_reduced": "~ self_rate + other_rate",
+            },
+            "bootstrap": {"n_boot": 8, "alpha": 0.05, "seed": 7},
+            "roi": {"source": "map_wide"},
+            "adjusted_r2": True,
+            "calibration": {"n_permutations": 4},
+            "n_jobs": 1,
         },
         "similarity": {
             "enabled": True,
@@ -482,7 +501,7 @@ def test_lmeeeg_nested_group_stats_cli_writes_nested_block_outputs(
                 "latency": [0.10, 0.12, 0.14, 0.16],
                 "duration_s": [0.60, 0.62, 0.64, 0.66],
                 "time_within_run": [0.1, 0.2, 0.3, 0.4],
-                "run": ["1", "1", "1", "1"],
+                "run": ["1", "2", "1", "2"],
                 "subject_id": ["sub-001"] * 4,
                 "self_n_syllables": [4, 4, 4, 4],
                 "other_n_syllables": [4, 4, 4, 4],
@@ -497,7 +516,7 @@ def test_lmeeeg_nested_group_stats_cli_writes_nested_block_outputs(
                 "latency": [0.11, 0.13, 0.15, 0.17],
                 "duration_s": [0.61, 0.63, 0.65, 0.67],
                 "time_within_run": [0.1, 0.2, 0.3, 0.4],
-                "run": ["1", "1", "1", "1"],
+                "run": ["1", "2", "1", "2"],
                 "subject_id": ["sub-002"] * 4,
                 "self_n_syllables": [4, 4, 4, 4],
                 "other_n_syllables": [4, 4, 4, 4],
@@ -575,6 +594,41 @@ def test_lmeeeg_nested_group_stats_cli_writes_nested_block_outputs(
     assert Path(first_test["p_values_csv"]).exists()
 
 
+def test_lmeeeg_nested_group_stats_cli_fails_fast_when_permute_fixed_block_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _lmeeeg_config(tmp_path / "out")
+    calls: list[str] = []
+
+    def _missing_permute():
+        calls.append("checked")
+        raise ImportError("missing permute_fixed_block")
+
+    def _unexpected_select_rows(*args, **kwargs):
+        raise AssertionError("Row selection should not run when nested-block support is unavailable.")
+
+    monkeypatch.setattr(lmeeeg_nested_group_stats, "_resolve_permute_fixed_block", _missing_permute)
+    monkeypatch.setattr(lmeeeg_nested_group_stats, "select_lmeeeg_rows", _unexpected_select_rows)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        dataset_index=None,
+        subject_id=None,
+        task=None,
+        run=None,
+        target=None,
+        trial_regressors_csv=None,
+        output=None,
+        config_section="lmeeeg_nested",
+    )
+    exit_code = lmeeeg_nested_group_stats.run(args, config=config)
+
+    assert exit_code == 1
+    assert calls == ["checked"]
+
+
 def test_lmeeeg_variance_partition_fit_cli_writes_outputs(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     config = _lmeeeg_config(out_dir)
@@ -604,7 +658,7 @@ def test_lmeeeg_variance_partition_fit_cli_writes_outputs(tmp_path: Path) -> Non
                 "latency": [0.10, 0.12, 0.14, 0.16],
                 "duration_s": [0.60, 0.62, 0.64, 0.66],
                 "time_within_run": [0.1, 0.2, 0.3, 0.4],
-                "run": ["1", "1", "1", "1"],
+                "run": ["1", "2", "1", "2"],
                 "subject_id": ["sub-001"] * 4,
                 "self_n_syllables": [4, 4, 4, 4],
                 "other_n_syllables": [4, 4, 4, 4],
@@ -619,7 +673,7 @@ def test_lmeeeg_variance_partition_fit_cli_writes_outputs(tmp_path: Path) -> Non
                 "latency": [0.11, 0.13, 0.15, 0.17],
                 "duration_s": [0.61, 0.63, 0.65, 0.67],
                 "time_within_run": [0.1, 0.2, 0.3, 0.4],
-                "run": ["1", "1", "1", "1"],
+                "run": ["1", "2", "1", "2"],
                 "subject_id": ["sub-002"] * 4,
                 "self_n_syllables": [4, 4, 4, 4],
                 "other_n_syllables": [4, 4, 4, 4],
@@ -742,6 +796,171 @@ def test_lmeeeg_variance_partition_group_stats_cli_writes_descriptive_maps(tmp_p
     total_map = np.load(group_paths.total_map_output_path)
     assert total_map.shape == (2, 2)
     assert np.isclose(total_map[0, 0], 0.16)
+
+
+def test_resolve_lmeeeg_commonality_settings_reads_bootstrap_and_roi_defaults(tmp_path: Path) -> None:
+    config = _lmeeeg_config(tmp_path / "out")
+    settings = resolve_lmeeeg_commonality_settings(config)
+    assert settings.source_model == "both_effect"
+    assert settings.n_boot == 8
+    assert settings.alpha == pytest.approx(0.05)
+    assert settings.roi_source == "map_wide"
+
+
+def test_lmeeeg_commonality_analysis_writes_outputs_deterministically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+    mask_path = tmp_path / "roi_mask.npy"
+    np.save(mask_path, np.ones((2, 2), dtype=bool))
+    config["lmeeeg_commonality"]["roi"] = {"source": "explicit_mask_path", "mask_path": str(mask_path)}
+    config["lmeeeg_commonality"]["bootstrap"]["n_boot"] = 4
+    config["lmeeeg_commonality"]["calibration"]["n_permutations"] = 2
+    config["lmeeeg"]["models"]["commonality_test"] = {
+        "formula": "~ self_rate + other_rate + nuisance",
+        "eligibility": {
+            "not_null": ["self_rate", "other_rate", "nuisance"],
+            "min_values": {
+                "self_n_syllables": 3,
+                "other_n_syllables": 3,
+                "self_ipu_duration": 0.10,
+                "other_ipu_duration": 0.10,
+            },
+        },
+        "test_predictors": ["self_rate", "other_rate"],
+        "standardize": ["self_rate", "other_rate", "nuisance"],
+        "random_effect_group": "subject_id",
+        "random_effect_structure": "random_intercept",
+    }
+    config["lmeeeg_commonality"]["source_model"] = "commonality_test"
+    config["lmeeeg_commonality"]["formulas"] = {
+        "self_reduced": "~ other_rate + nuisance",
+        "other_reduced": "~ self_rate + nuisance",
+        "covariate_reduced": "~ self_rate + other_rate",
+    }
+
+    rows = [
+        {
+            "dyad_id": "dyad-001",
+            "subject_id": "sub-001",
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / "placeholder_raw_1.fif"),
+        },
+        {
+            "dyad_id": "dyad-001",
+            "subject_id": "sub-002",
+            "task": "conversation",
+            "run": "1",
+            "status": "ok",
+            "eeg_path": str(tmp_path / "placeholder_raw_2.fif"),
+        },
+    ]
+    metadata_by_subject = {
+        "sub-001": pd.DataFrame(
+            {
+                "self_rate": [0.0, 0.6, 1.2, 1.8],
+                "other_rate": [0.1, 0.5, 1.1, 1.5],
+                "latency": [0.10, 0.18, 0.11, 0.16],
+                "duration_s": [0.60, 0.67, 0.63, 0.71],
+                "time_within_run": [0.3, 0.1, 0.4, 0.2],
+                "run": ["1", "2", "1", "2"],
+                "nuisance": [0.2, 1.1, -0.3, 0.7],
+                "subject_id": ["sub-001"] * 4,
+                "self_n_syllables": [4, 4, 4, 4],
+                "other_n_syllables": [4, 4, 4, 4],
+                "self_ipu_duration": [0.20, 0.22, 0.24, 0.26],
+                "other_ipu_duration": [0.21, 0.23, 0.25, 0.27],
+            }
+        ),
+        "sub-002": pd.DataFrame(
+            {
+                "self_rate": [0.2, 0.8, 1.4, 2.0],
+                "other_rate": [0.2, 0.9, 1.2, 1.8],
+                "latency": [0.12, 0.17, 0.10, 0.19],
+                "duration_s": [0.62, 0.70, 0.65, 0.69],
+                "time_within_run": [0.4, 0.2, 0.1, 0.3],
+                "run": ["1", "2", "1", "2"],
+                "nuisance": [0.5, -0.2, 1.3, 0.1],
+                "subject_id": ["sub-002"] * 4,
+                "self_n_syllables": [4, 4, 4, 4],
+                "other_n_syllables": [4, 4, 4, 4],
+                "self_ipu_duration": [0.21, 0.23, 0.25, 0.27],
+                "other_ipu_duration": [0.22, 0.24, 0.26, 0.28],
+            }
+        ),
+    }
+    data_by_subject: dict[str, np.ndarray] = {}
+    shared_map = np.array([[0.8, 0.5], [0.4, 0.7]])
+    unique_self = np.array([[0.3, 0.1], [0.2, 0.3]])
+    unique_other = np.array([[0.2, 0.3], [0.1, 0.2]])
+    intercept_map = np.array([[2.0, 1.5], [1.0, 0.5]])
+    for subject_id, metadata in metadata_by_subject.items():
+        data = np.zeros((len(metadata), 2, 2), dtype=float)
+        for index, row_values in metadata.iterrows():
+            self_rate = float(row_values["self_rate"])
+            other_rate = float(row_values["other_rate"])
+            data[index] = (
+                intercept_map
+                + (self_rate * unique_self)
+                + (other_rate * unique_other)
+                + ((self_rate + other_rate) * shared_map)
+            )
+        data_by_subject[subject_id] = data
+
+    dataset_index_path = _write_variance_partition_epochs(tmp_path, config, rows, metadata_by_subject, data_by_subject)
+
+    def _fake_fit(trial_data, config, *, config_section="lmeeeg", model_name=None):
+        column_names = list(trial_data.design_result.column_names)
+        zero_maps = np.zeros((len(column_names), len(trial_data.channel_names), len(trial_data.times)), dtype=float)
+        return LMEEEGResult(
+            residualised_data=np.asarray(trial_data.eeg_data, dtype=float),
+            random_effects_contribution=np.zeros_like(trial_data.eeg_data, dtype=float),
+            betas=zero_maps,
+            standard_errors=None,
+            t_values=None,
+            residual_variance=np.zeros((len(trial_data.channel_names), len(trial_data.times)), dtype=float),
+            column_names=column_names,
+            test_predictors=list(trial_data.design_result.test_predictors),
+            row_index=np.asarray(trial_data.row_index, dtype=int),
+            channel_names=list(trial_data.channel_names),
+            times=np.asarray(trial_data.times, dtype=float),
+            backend="test",
+            group_column=str(trial_data.group_column),
+            random_effect_structure="random_intercept",
+            n_trials_input=int(len(trial_data.design_result.row_mask)),
+            n_trials_used=int(trial_data.eeg_data.shape[0]),
+            n_targets=int(trial_data.eeg_data.shape[1] * trial_data.eeg_data.shape[2]),
+            n_lmm_attempted=int(trial_data.eeg_data.shape[1] * trial_data.eeg_data.shape[2]),
+            n_lmm_failed=0,
+            failed_target_indices=[],
+            lmm_diagnostics={"converged_targets": int(trial_data.eeg_data.shape[1] * trial_data.eeg_data.shape[2])},
+            design_result=trial_data.design_result,
+            ols_degrees_of_freedom=int(trial_data.eeg_data.shape[0] - trial_data.design_result.design_matrix.shape[1]),
+            ols_rank=int(trial_data.design_result.design_matrix.shape[1]),
+            metadata_provenance=trial_data.metadata_provenance,
+        )
+
+    monkeypatch.setattr(commonality_module, "fit_lmeeeg_mass_model", _fake_fit)
+
+    summary_one = commonality_module.run_commonality_analysis(config, rows)
+    paths = build_lmeeeg_commonality_output_paths(config)
+    point_one = np.load(paths.point_estimate_output_path)
+    boot_one = np.load(paths.bootstrap_roi_output_path)
+
+    summary_two = commonality_module.run_commonality_analysis(config, rows)
+    point_two = np.load(paths.point_estimate_output_path)
+    boot_two = np.load(paths.bootstrap_roi_output_path)
+
+    assert summary_one["status"] == "ok"
+    assert summary_two["status"] == "ok"
+    assert np.allclose(point_one, point_two, equal_nan=True)
+    assert np.allclose(boot_one, boot_two, equal_nan=True)
+    assert paths.roi_table_output_path.exists()
+    assert paths.metadata_output_path.exists()
 
 
 def test_lmeeeg_similarity_cli_writes_outputs(tmp_path: Path) -> None:
@@ -1645,6 +1864,8 @@ def test_variance_partition_workflow_rules_are_present() -> None:
 
     assert "rule lmeeeg_variance_partition_fit" in lmeeeg_rules
     assert "rule lmeeeg_variance_partition_stage" in lmeeeg_rules
+    assert "rule lmeeeg_commonality" in lmeeeg_rules
+    assert "rule lmeeeg_commonality_stage" in lmeeeg_rules
     assert "rule lmeeeg_variance_partition_group_stats" in stats_rules
     assert "rule lmeeeg_similarity" in stats_rules
     assert "rule figures_lmeeeg_main_results" in figures_rules
@@ -1653,6 +1874,7 @@ def test_variance_partition_workflow_rules_are_present() -> None:
     assert "rule similarity_all" in targets_rules
     assert "rule similarity_figures_all" in targets_rules
     assert "SIMILARITY_FIGURES_OUTPUT" in targets_rules
+    assert "rule lmeeeg_commonality_all" in targets_rules
     assert "rule lmeeeg_variance_partition_all" in targets_rules
     assert "rule lmeeeg_main_results_figures_all" in targets_rules
     assert "LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT" in targets_rules
