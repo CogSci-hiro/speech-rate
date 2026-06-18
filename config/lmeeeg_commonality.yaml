@@ -1,0 +1,20 @@
+lmeeeg_commonality:
+  enabled: true
+  source_section: "lmeeeg"
+  source_model: "both_effect"
+  output_dirname: "lmeeeg_commonality"
+  formulas:
+    self_reduced: "~ other_rate + latency + duration_s + time_within_run + run"
+    other_reduced: "~ self_rate + latency + duration_s + time_within_run + run"
+    covariate_reduced: "~ self_rate + other_rate"
+  bootstrap:
+    n_boot: 30
+    alpha: 0.05
+    seed: 1234
+  roi:
+    source: "self_rate_significant"
+  adjusted_r2: true
+  calibration:
+    n_permutations: 32
+  n_jobs: 5
+  chunk_size: 256

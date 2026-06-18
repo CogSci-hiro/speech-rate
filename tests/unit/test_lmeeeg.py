@@ -26,6 +26,7 @@ from rate.cli.commands import lmeeeg_variance_partition_fit
 from rate.cli.commands import lmeeeg_variance_partition_group_stats
 from rate.cli.commands import figures_lmeeeg_variance_partition
 from rate.cli.commands import figures_lmeeeg_main_results
+from rate.cli.commands import figures_lmeeeg_nested_supplement
 from rate.cli.commands import figures_lmeeeg
 from rate.cli.commands import figures_lmeeeg_inference
 from rate.cli.commands import figures_similarity
@@ -2396,6 +2397,145 @@ def test_figures_lmeeeg_main_results_writes_manifest(tmp_path: Path, monkeypatch
     assert variance_partition_plot["plot_name"] == "variance_partition_summary"
     assert all(Path(path).parent == out_dir / "figures" / "main_figures" for path in map(Path, variance_partition_plot["files"]))
     assert all(Path(path).exists() for path in variance_partition_plot["files"])
+
+
+def test_figures_lmeeeg_nested_supplement_writes_manifest(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+    config = _lmeeeg_config(out_dir)
+
+    lmeeeg_model_dir = out_dir / "lmeeeg" / "both_effect"
+    lmeeeg_model_dir.mkdir(parents=True, exist_ok=True)
+    np.save(lmeeeg_model_dir / "times.npy", np.asarray([-0.2, 0.0, 0.2], dtype=float))
+    (lmeeeg_model_dir / "channel_names.json").write_text(json.dumps(["Fz", "Cz"]) + "\n", encoding="utf-8")
+    (lmeeeg_model_dir / "column_names.json").write_text(
+        json.dumps(["Intercept", "self_rate", "other_rate"]) + "\n",
+        encoding="utf-8",
+    )
+    np.save(
+        lmeeeg_model_dir / "t_values.npy",
+        np.asarray(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                [[1.0, 2.0, 3.0], [1.5, 2.5, 3.5]],
+                [[4.0, 5.0, 6.0], [4.5, 5.5, 6.5]],
+            ],
+            dtype=float,
+        ),
+    )
+
+    for analysis_name, tested_predictor, corrected_p in (
+        ("drop_self_rate", "self_rate", np.asarray([[0.01, 0.20, 0.30], [0.02, 0.50, 0.80]], dtype=float)),
+        ("drop_other_rate", "other_rate", np.asarray([[0.30, 0.20, 0.30], [0.20, 0.50, 0.80]], dtype=float)),
+    ):
+        effect_dir = out_dir / "stats" / "lmeeeg_nested" / analysis_name
+        effect_dir.mkdir(parents=True, exist_ok=True)
+        observed_path = effect_dir / "observed_statistic.npy"
+        corrected_p_path = effect_dir / "corrected_p_values.npy"
+        np.save(observed_path, np.asarray([[1.0, 2.0, 3.0], [1.5, 2.5, 3.5]], dtype=float))
+        np.save(corrected_p_path, corrected_p)
+        (effect_dir / "summary.json").write_text(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "analysis_name": analysis_name,
+                    "full_model": "both_effect",
+                    "tested_predictor": tested_predictor,
+                    "correction": "tfce",
+                    "observed_statistic": str(observed_path),
+                    "corrected_p_values": str(corrected_p_path),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    viz_config_path = tmp_path / "viz.yaml"
+    viz_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "viz": {
+                    "formats": ["png"],
+                    "dpi": 72,
+                    "figures": {
+                        "lmeeeg_nested_supplement": {
+                            "significance_threshold": 0.05,
+                            "figures": [
+                                {
+                                    "figure_label": "S1",
+                                    "analysis_name": "drop_self_rate",
+                                    "title": "Nested lmeEEG | unique self-rate effect",
+                                },
+                                {
+                                    "figure_label": "S2",
+                                    "analysis_name": "drop_other_rate",
+                                    "title": "Nested lmeEEG | unique other-rate effect",
+                                },
+                            ],
+                        }
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured_calls: list[dict[str, object]] = []
+
+    def fake_plot_joint_model_weights(
+        beta_map,
+        *,
+        times,
+        channel_names,
+        output_stem: Path,
+        title=None,
+        formats=("png",),
+        dpi=300,
+        line_width=2.5,
+        significance_mask=None,
+        **kwargs,
+    ) -> list[Path]:
+        captured_calls.append(
+            {
+                "beta_map": np.asarray(beta_map, dtype=float).copy(),
+                "output_stem": output_stem,
+                "title": title,
+                "significance_mask": None if significance_mask is None else np.asarray(significance_mask, dtype=bool).copy(),
+            }
+        )
+        output_stem.parent.mkdir(parents=True, exist_ok=True)
+        written_path = output_stem.with_suffix(".png")
+        written_path.write_text("stub\n", encoding="utf-8")
+        return [written_path]
+
+    monkeypatch.setattr(lmeeeg_viz, "plot_joint_model_weights", fake_plot_joint_model_weights)
+
+    args = Namespace(
+        config="config/config.yaml",
+        schema="config/schema.json",
+        config_section="lmeeeg_nested",
+        viz_config=str(viz_config_path),
+        output=None,
+    )
+    exit_code = figures_lmeeeg_nested_supplement.run(args, config=config)
+
+    assert exit_code == 0
+    manifest_path = out_dir / "figures" / "supplement" / "figure_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["plot_count"] == 2
+    assert [plot["figure_label"] for plot in manifest["plots"]] == ["S1", "S2"]
+    assert [plot["analysis_name"] for plot in manifest["plots"]] == ["drop_self_rate", "drop_other_rate"]
+    assert [plot["value_kind"] for plot in manifest["plots"]] == ["t_value", "t_value"]
+    assert [plot["effect_name"] for plot in manifest["plots"]] == ["self_rate", "other_rate"]
+    assert manifest["plots"][0]["has_significant_samples"] is True
+    assert manifest["plots"][1]["has_significant_samples"] is False
+    assert captured_calls[0]["output_stem"] == out_dir / "figures" / "supplement" / "S1_drop_self_rate"
+    assert captured_calls[1]["output_stem"] == out_dir / "figures" / "supplement" / "S2_drop_other_rate"
+    assert np.allclose(captured_calls[0]["beta_map"], np.asarray([[1.0, 2.0, 3.0], [1.5, 2.5, 3.5]], dtype=float))
+    assert np.allclose(captured_calls[1]["beta_map"], np.asarray([[4.0, 5.0, 6.0], [4.5, 5.5, 6.5]], dtype=float))
+    assert bool(np.any(captured_calls[0]["significance_mask"]))
+    assert not bool(np.any(captured_calls[1]["significance_mask"]))
+    assert all(Path(path).exists() for plot in manifest["plots"] for path in plot["files"])
 
 
 def test_lmeeeg_group_stats_cluster_threshold_interprets_alpha_values() -> None:

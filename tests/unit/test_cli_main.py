@@ -21,6 +21,7 @@ def test_build_arg_parser_registers_mass_univariate_commands() -> None:
     assert "figures-behavioural" in commands
     assert "figures-glm" in commands
     assert "figures-lmeeeg" in commands
+    assert "figures-lmeeeg-nested-supplement" in commands
     assert "figures-lmeeeg-inference" in commands
     assert "figures-lmeeeg-main-results" in commands
     assert "figures-lmeeeg-variance-partition" in commands

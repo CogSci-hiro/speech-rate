@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
 from rate.legacy.viz.glm import _sanitize_token, plot_joint_model_weights
+from rate.lmeeeg.nested import resolve_lmeeeg_nested_settings
 
 
 def _has_lmeeeg_fit_outputs(model_dir: Path) -> bool:
@@ -259,6 +260,136 @@ def build_lmeeeg_inference_manifest(
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
+
+
+def build_lmeeeg_nested_supplement_manifest(
+    *,
+    config: Mapping[str, Any],
+    out_dir: Path,
+    manifest_path: Path,
+    figure_config: Mapping[str, Any] | None = None,
+    config_section: str = "lmeeeg_nested",
+    figure_subdir: str = "supplement",
+    formats: Sequence[str] = ("png", "pdf"),
+    dpi: int = 300,
+    line_width: float = 2.5,
+) -> dict:
+    """Render supplement-ready joint plots for configured nested lmeEEG analyses."""
+    settings = resolve_lmeeeg_nested_settings(config, config_section=config_section)
+    section_cfg = dict(config.get(config_section) or {})
+    figure_config = dict(figure_config or {})
+    stats_root = out_dir / "stats" / settings.output_dirname
+    lmeeeg_root = out_dir / settings.source_section
+    significance_threshold = float(figure_config.get("significance_threshold", 0.05))
+    configured_figures = list((figure_config.get("figures") or []))
+
+    plots: list[dict[str, object]] = []
+    default_analyses = list(settings.analyses)
+    if configured_figures:
+        figure_specs = configured_figures
+    else:
+        figure_specs = [
+            {
+                "figure_label": f"S{index}",
+                "analysis_name": analysis.name,
+                "title": f"Nested lmeEEG | {analysis.name}",
+            }
+            for index, analysis in enumerate(default_analyses, start=1)
+        ]
+
+    analysis_lookup = {analysis.name: analysis for analysis in default_analyses}
+    for figure_spec in figure_specs:
+        analysis_name = str(figure_spec["analysis_name"])
+        figure_label = str(figure_spec["figure_label"])
+        title = str(figure_spec.get("title", f"Nested lmeEEG | {analysis_name}"))
+        figure_threshold = float(
+            figure_spec.get(
+                "significance_threshold",
+                figure_spec.get("alpha_threshold", significance_threshold),
+            )
+        )
+        joint_times = figure_spec.get("topomap_times_s", "peaks")
+        analysis = analysis_lookup.get(analysis_name)
+        if analysis is None:
+            raise ValueError(f"Unknown nested analysis `{analysis_name}` in viz.figures.lmeeeg_nested_supplement.")
+
+        effect_dir = stats_root / _sanitize_token(analysis_name)
+        summary_path = effect_dir / "summary.json"
+        if not summary_path.exists():
+            raise FileNotFoundError(f"Nested lmeEEG summary not found for analysis `{analysis_name}`: {summary_path}")
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+        full_model = str(summary.get("full_model", analysis.full_model))
+        fit_model_dir = lmeeeg_root / _sanitize_token(full_model)
+        times_path = fit_model_dir / "times.npy"
+        channel_names_path = fit_model_dir / "channel_names.json"
+        t_values_path = fit_model_dir / "t_values.npy"
+        column_names_path = fit_model_dir / "column_names.json"
+        observed_path = Path(str(summary["observed_statistic"]))
+        corrected_p_path = Path(str(summary["corrected_p_values"]))
+        if not all(path.exists() for path in (times_path, channel_names_path, t_values_path, column_names_path, observed_path, corrected_p_path)):
+            missing = [
+                str(path)
+                for path in (times_path, channel_names_path, t_values_path, column_names_path, observed_path, corrected_p_path)
+                if not path.exists()
+            ]
+            raise FileNotFoundError(f"Missing nested supplement figure inputs for `{analysis_name}`: {', '.join(missing)}")
+
+        times = np.asarray(np.load(times_path), dtype=float)
+        channel_names = json.loads(channel_names_path.read_text(encoding="utf-8"))
+        column_names = json.loads(column_names_path.read_text(encoding="utf-8"))
+        t_values = np.asarray(np.load(t_values_path), dtype=float)
+        tested_predictor = str(summary.get("tested_predictor") or analysis.tested_predictor or "")
+        effect_name = _resolve_saved_effect_name(column_names, predictor_name=tested_predictor)
+        effect_index = int(column_names.index(effect_name))
+        plotted_map = np.asarray(t_values[effect_index], dtype=float)
+        corrected_p_map = np.asarray(np.load(corrected_p_path), dtype=float)
+        significance_mask = corrected_p_map < figure_threshold
+
+        output_stem = out_dir / "figures" / figure_subdir / f"{_sanitize_token(figure_label)}_{_sanitize_token(analysis_name)}"
+        written_paths = plot_joint_model_weights(
+            plotted_map,
+            times=times,
+            channel_names=channel_names,
+            output_stem=output_stem,
+            title=title,
+            formats=formats,
+            dpi=dpi,
+            line_width=line_width,
+            joint_times=joint_times,
+            significance_mask=significance_mask,
+        )
+        plots.append(
+            {
+                "plot_name": "lmeeeg_nested_supplement",
+                "figure_label": figure_label,
+                "analysis_name": analysis_name,
+                "tested_predictor": tested_predictor,
+                "full_model": full_model,
+                "effect_name": effect_name,
+                "value_kind": "t_value",
+                "correction": summary.get("correction"),
+                "significance_threshold": figure_threshold,
+                "joint_times_s": joint_times,
+                "has_significant_samples": bool(np.any(significance_mask)),
+                "n_significant_p_lt_threshold": int(np.count_nonzero(significance_mask)),
+                "files": [str(path) for path in written_paths],
+            }
+        )
+
+    manifest = {"status": "ok", "plot_count": len(plots), "plots": plots}
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest
+
+
+def _resolve_saved_effect_name(column_names: list[str], *, predictor_name: str) -> str:
+    for column_name in column_names:
+        if str(column_name) == predictor_name:
+            return str(column_name)
+    raise ValueError(
+        f"Predictor `{predictor_name}` did not resolve to a saved fixed-effect column. Available columns: {column_names}"
+    )
 
 
 def build_lmeeeg_qc_manifest_from_stats(

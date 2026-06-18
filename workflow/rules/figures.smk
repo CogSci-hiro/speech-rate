@@ -3,6 +3,7 @@ SIMILARITY_FIGURES_OUTPUT = str(build_similarity_output_paths(RESOLVED_CONFIG).f
 LMEEEG_QC_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg/figure_manifest.json"
 LMEEEG_INFERENCE_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_inference/figure_manifest.json"
 LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT = f"{OUT_DIR}/figures/main_figures/figure_manifest.json"
+LMEEEG_NESTED_SUPPLEMENT_FIGURES_OUTPUT = f"{OUT_DIR}/figures/supplement/figure_manifest.json"
 LMEEEG_VARIANCE_PARTITION_FIGURES_OUTPUT = f"{OUT_DIR}/figures/lmeeeg_variance_partition/figure_manifest.json"
 
 
@@ -58,6 +59,18 @@ rule figures_lmeeeg_main_results:
         LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT,
     shell:
         "PYTHONPATH=src python -m rate.cli.main figures-lmeeeg-main-results "
+        "--config config/config.yaml --schema config/schema.json "
+        "--viz-config {input.viz_config} --output {output}"
+
+
+rule figures_lmeeeg_nested_supplement:
+    input:
+        nested_stats=LMEEEG_NESTED_GROUP_STATS_OUTPUT,
+        viz_config="config/viz.yaml",
+    output:
+        LMEEEG_NESTED_SUPPLEMENT_FIGURES_OUTPUT,
+    shell:
+        "PYTHONPATH=src python -m rate.cli.main figures-lmeeeg-nested-supplement "
         "--config config/config.yaml --schema config/schema.json "
         "--viz-config {input.viz_config} --output {output}"
 

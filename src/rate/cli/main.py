@@ -32,6 +32,7 @@ _COMMANDS = {
     "figures-behavioural": "rate.cli.commands.figures_behavioural",
     "figures-glm": "rate.legacy.cli.commands.figures_glm",
     "figures-lmeeeg": "rate.cli.commands.figures_lmeeeg",
+    "figures-lmeeeg-nested-supplement": "rate.cli.commands.figures_lmeeeg_nested_supplement",
     "figures-similarity": "rate.cli.commands.figures_similarity",
     "figures-lmeeeg-main-results": "rate.cli.commands.figures_lmeeeg_main_results",
     "figures-lmeeeg-variance-partition": "rate.cli.commands.figures_lmeeeg_variance_partition",

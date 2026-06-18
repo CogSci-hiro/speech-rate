@@ -60,6 +60,7 @@ _figures_all_inputs = [
     LMEEEG_QC_FIGURES_OUTPUT,
     LMEEEG_INFERENCE_FIGURES_OUTPUT,
     LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT,
+    LMEEEG_NESTED_SUPPLEMENT_FIGURES_OUTPUT,
     LMEEEG_VARIANCE_PARTITION_FIGURES_OUTPUT,
 ]
 
@@ -81,6 +82,11 @@ rule similarity_figures_all:
 rule lmeeeg_main_results_figures_all:
     input:
         LMEEEG_MAIN_RESULTS_FIGURES_OUTPUT
+
+
+rule supplement_figures_all:
+    input:
+        LMEEEG_NESTED_SUPPLEMENT_FIGURES_OUTPUT
 
 
 rule lmeeeg_variance_partition_figures_all:

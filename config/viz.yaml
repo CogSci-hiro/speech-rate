@@ -135,6 +135,19 @@ viz:
           model_name: "other_rate_effect"
           effect_name: "other_rate"
           topomap_times_s: [-0.7, -0.5]
+    lmeeeg_nested_supplement:
+      significance_threshold: 0.05
+      figures:
+        - figure_label: "S1"
+          analysis_name: "drop_self_rate"
+          title: "Nested lmeEEG | unique self-rate effect"
+          topomap_times_s: [-0.8, -0.5, 0.0]
+          alpha_threshold: 0.05
+        - figure_label: "S2"
+          analysis_name: "drop_other_rate"
+          title: "Nested lmeEEG | unique other-rate effect"
+          topomap_times_s: [-1.0, -0.7, -0.5]
+          alpha_threshold: 0.13
     similarity_summary:
       enabled: true
       hide_topomaps: true
