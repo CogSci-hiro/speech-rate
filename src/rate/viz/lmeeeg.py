@@ -8,8 +8,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from rate.legacy.viz.glm import _sanitize_token, plot_joint_model_weights
 from rate.lmeeeg.nested import resolve_lmeeeg_nested_settings
+from rate.viz.joint_weights import plot_joint_model_weights, sanitize_token
 
 
 def _has_lmeeeg_fit_outputs(model_dir: Path) -> bool:
@@ -70,7 +70,7 @@ def build_lmeeeg_qc_manifest(
             kernel_map = np.asarray(t_values[kernel_index], dtype=float)
             if kernel_map.ndim != 2 or not np.isfinite(kernel_map).any():
                 continue
-            output_stem = out_dir / "figures" / figure_subdir / "t_values" / model_name / _sanitize_token(kernel_name)
+            output_stem = out_dir / "figures" / figure_subdir / "t_values" / model_name / sanitize_token(kernel_name)
             written_paths = plot_joint_model_weights(
                 kernel_map,
                 times=times,
@@ -132,7 +132,7 @@ def build_lmeeeg_qc_manifest_from_model_payloads(
                 if column_map.ndim != 2 or not np.isfinite(column_map).any():
                     continue
                 significance_mask = significance_masks.get(model_name, {}).get(column_name)
-                output_stem = out_dir / "figures" / figure_subdir / measure_dirname / model_name / _sanitize_token(column_name)
+                output_stem = out_dir / "figures" / figure_subdir / measure_dirname / model_name / sanitize_token(column_name)
                 written_paths = plot_joint_model_weights(
                     column_map,
                     times=times,
@@ -204,7 +204,7 @@ def build_lmeeeg_inference_manifest(
         significance_mask = corrected_p_array < 0.05
         significance_map = np.where(significance_mask, observed_map, 0.0)
 
-        observed_stem = out_dir / "figures" / figure_subdir / model_name / f"{_sanitize_token(effect_name)}_observed"
+        observed_stem = out_dir / "figures" / figure_subdir / model_name / f"{sanitize_token(effect_name)}_observed"
         observed_paths = plot_joint_model_weights(
             np.asarray(observed_map, dtype=float),
             times=times,
@@ -216,7 +216,7 @@ def build_lmeeeg_inference_manifest(
             line_width=line_width,
             significance_mask=significance_mask,
         )
-        corrected_p_stem = out_dir / "figures" / figure_subdir / model_name / f"{_sanitize_token(effect_name)}_corrected_p"
+        corrected_p_stem = out_dir / "figures" / figure_subdir / model_name / f"{sanitize_token(effect_name)}_corrected_p"
         corrected_p_paths = plot_joint_model_weights(
             1.0 - corrected_p_array,
             times=times,
@@ -227,7 +227,7 @@ def build_lmeeeg_inference_manifest(
             dpi=dpi,
             line_width=line_width,
         )
-        pvalue_stem = out_dir / "figures" / figure_subdir / model_name / f"{_sanitize_token(effect_name)}_p005_masked"
+        pvalue_stem = out_dir / "figures" / figure_subdir / model_name / f"{sanitize_token(effect_name)}_p005_masked"
         pvalue_paths = plot_joint_model_weights(
             significance_map,
             times=times,
@@ -313,14 +313,14 @@ def build_lmeeeg_nested_supplement_manifest(
         if analysis is None:
             raise ValueError(f"Unknown nested analysis `{analysis_name}` in viz.figures.lmeeeg_nested_supplement.")
 
-        effect_dir = stats_root / _sanitize_token(analysis_name)
+        effect_dir = stats_root / sanitize_token(analysis_name)
         summary_path = effect_dir / "summary.json"
         if not summary_path.exists():
             raise FileNotFoundError(f"Nested lmeEEG summary not found for analysis `{analysis_name}`: {summary_path}")
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
         full_model = str(summary.get("full_model", analysis.full_model))
-        fit_model_dir = lmeeeg_root / _sanitize_token(full_model)
+        fit_model_dir = lmeeeg_root / sanitize_token(full_model)
         times_path = fit_model_dir / "times.npy"
         channel_names_path = fit_model_dir / "channel_names.json"
         t_values_path = fit_model_dir / "t_values.npy"
@@ -346,7 +346,7 @@ def build_lmeeeg_nested_supplement_manifest(
         corrected_p_map = np.asarray(np.load(corrected_p_path), dtype=float)
         significance_mask = corrected_p_map < figure_threshold
 
-        output_stem = out_dir / "figures" / figure_subdir / f"{_sanitize_token(figure_label)}_{_sanitize_token(analysis_name)}"
+        output_stem = out_dir / "figures" / figure_subdir / f"{sanitize_token(figure_label)}_{sanitize_token(analysis_name)}"
         written_paths = plot_joint_model_weights(
             plotted_map,
             times=times,
@@ -435,7 +435,7 @@ def build_lmeeeg_qc_manifest_from_stats(
             continue
         significance_mask = corrected_p_map < 0.05
 
-        output_stem = out_dir / "figures" / figure_subdir / "statistics" / model_name / _sanitize_token(effect_name)
+        output_stem = out_dir / "figures" / figure_subdir / "statistics" / model_name / sanitize_token(effect_name)
         written_paths = plot_joint_model_weights(
             observed_map,
             times=times,

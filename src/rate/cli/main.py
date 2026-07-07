@@ -20,8 +20,6 @@ _COMMANDS = {
     "build-events": "rate.cli.commands.build_events",
     "preprocess-subject": "rate.cli.commands.preprocess_subject",
     "epoch-subject": "rate.cli.commands.epoch_subject",
-    "glm-subject": "rate.legacy.cli.commands.glm_subject",
-    "glm-group-stats": "rate.legacy.cli.commands.glm_group_stats",
     "lmeeeg-subject": "rate.cli.commands.lmeeeg_subject",
     "lmeeeg-group-stats": "rate.cli.commands.lmeeeg_group_stats",
     "lmeeeg-nested-group-stats": "rate.cli.commands.lmeeeg_nested_group_stats",
@@ -30,14 +28,12 @@ _COMMANDS = {
     "lmeeeg-variance-partition-fit": "rate.cli.commands.lmeeeg_variance_partition_fit",
     "lmeeeg-variance-partition-group-stats": "rate.cli.commands.lmeeeg_variance_partition_group_stats",
     "figures-behavioural": "rate.cli.commands.figures_behavioural",
-    "figures-glm": "rate.legacy.cli.commands.figures_glm",
     "figures-lmeeeg": "rate.cli.commands.figures_lmeeeg",
     "figures-lmeeeg-nested-supplement": "rate.cli.commands.figures_lmeeeg_nested_supplement",
     "figures-similarity": "rate.cli.commands.figures_similarity",
     "figures-lmeeeg-main-results": "rate.cli.commands.figures_lmeeeg_main_results",
     "figures-lmeeeg-variance-partition": "rate.cli.commands.figures_lmeeeg_variance_partition",
     "figures-lmeeeg-inference": "rate.cli.commands.figures_lmeeeg_inference",
-    "model-weights-glm": "rate.legacy.cli.commands.model_weights_glm",
 }
 
 
