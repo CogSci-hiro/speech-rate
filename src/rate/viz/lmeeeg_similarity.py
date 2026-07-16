@@ -262,6 +262,7 @@ def plot_similarity_summary_figure(
     ymin, ymax = _resolve_similarity_ylim(observed_window, envelope_lower, envelope_upper, time_mask=time_mask)
     ymin -= (ymax - ymin) * lower_padding_fraction
     ymax += (ymax - ymin) * legend_headroom_fraction
+    ymax = min(1.0, ymax)
     line_axis.set_ylim(ymin, ymax)
     line_axis.set_xlim(float(times_window_ms[0]), float(times_window_ms[-1]))
 
@@ -270,6 +271,7 @@ def plot_similarity_summary_figure(
             frameon=False,
             loc="upper left",
             bbox_to_anchor=(legend_anchor_x, legend_anchor_y),
+            bbox_transform=figure.transFigure,
             borderaxespad=0.0,
             fontsize=_scaled_fontsize(9, font_scale),
         )

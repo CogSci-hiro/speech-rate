@@ -107,6 +107,7 @@ rule lmeeeg_group_stats:
         trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
     output:
         LMEEEG_STATS_OUTPUT,
+    threads: 5
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-group-stats "
         "--config config/config.yaml --schema config/schema.json "
@@ -117,16 +118,17 @@ rule lmeeeg_group_stats:
 rule lmeeeg_nested_group_stats:
     input:
         nested_config="config/lmeeeg_nested.yaml",
+        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
+        epochs_stage=EPOCHS_STAGE,
+        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
     output:
         LMEEEG_NESTED_GROUP_STATS_OUTPUT,
-    params:
-        dataset_index=f"{OUT_DIR}/dataset/index.parquet",
-        trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
+    threads: 5
     shell:
         "PYTHONPATH=src {PYTHON_BIN} -m rate.cli.main lmeeeg-nested-group-stats "
         "--config config/config.yaml --schema config/schema.json "
-        "--dataset-index {params.dataset_index} "
-        "--trial-regressors-csv {params.trial_regressors} --output {output}"
+        "--dataset-index {input.dataset_index} "
+        "--trial-regressors-csv {input.trial_regressors} --output {output}"
 
 
 rule lmeeeg_similarity:

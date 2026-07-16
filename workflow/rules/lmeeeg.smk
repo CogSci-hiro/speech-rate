@@ -29,6 +29,7 @@ rule lmeeeg_fit:
         summary=f"{OUT_DIR}/lmeeeg/{{model_name}}/summary.json",
     params:
         model_name=lambda wildcards: str(wildcards.model_name),
+    threads: 5
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-subject "
         "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
@@ -55,6 +56,7 @@ rule lmeeeg_commonality:
         commonality_config="config/lmeeeg_commonality.yaml",
         epochs_stage=EPOCHS_STAGE,
         trial_regressors=BEHAVIOURAL_RESIDUALS_OUTPUT,
+        roi_summary=f"{OUT_DIR}/stats/lmeeeg_group_stats.json",
     output:
         point_estimate=f"{LMEEEG_COMMONALITY_ROOT}/point_estimate_commonality.npy",
         roi_mask=f"{LMEEEG_COMMONALITY_ROOT}/roi_mask.npy",
@@ -68,7 +70,7 @@ rule lmeeeg_commonality:
         metadata=f"{LMEEEG_COMMONALITY_ROOT}/run_metadata.json",
         summary=str(build_lmeeeg_commonality_output_paths(RESOLVED_CONFIG).summary_output_path),
     threads:
-        max(1, int((RESOLVED_CONFIG.get("lmeeeg_commonality") or {}).get("n_jobs", 1))),
+        max(1, int((RESOLVED_CONFIG.get("lmeeeg_commonality") or {}).get("n_jobs", 1)) * 2),
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-commonality "
         "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
@@ -98,6 +100,7 @@ rule lmeeeg_variance_partition_fit:
         channel_names=f"{LMEEEG_VARIANCE_PARTITION_ROOT}/channel_names.json",
         times=f"{LMEEEG_VARIANCE_PARTITION_ROOT}/times.npy",
         summary=f"{LMEEEG_VARIANCE_PARTITION_ROOT}/summary.json",
+    threads: 5
     shell:
         "PYTHONPATH=src python -m rate.cli.main lmeeeg-variance-partition-fit "
         "--config {input.config_path} --schema {input.schema_path} --dataset-index {input.dataset_index} "
