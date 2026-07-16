@@ -8,7 +8,7 @@ debug:
   max_files: 2
 
 paths:
-  out_dir: "/Users/hiro/Datasets/working/speech-rate-refactoring"
+  out_dir: "/Users/hiro/Datasets/working/speech-rate-finalising"
   bids_dir: "/Users/hiro/Datasets/hyperscanning-bids"
-  ica_dir: "/Users/hiro/Datasets/working/duet-extra-data/precomputed_ica"
+  ica_dir: "/Users/hiro/Datasets/Miscellaneous/hyperscanning-testing/derived/precomputed_ica"
   annotations_dir: "/Users/hiro/Projects/active/hyperscanning-working/data/annotations"
