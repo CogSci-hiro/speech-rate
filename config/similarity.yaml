@@ -22,7 +22,7 @@ similarity:
     # betas.npy maps. In this repository that means rerunning the standard
     # lmeEEG approximation stage, not swapping in a different null-map estimator.
     method: "refit_permutation"
-    n_permutations: 100
+    n_permutations: 200
     tail: "two-sided"
     tfce:
       enabled: true

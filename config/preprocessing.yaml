@@ -17,7 +17,7 @@ preprocessing:
     sfreq_hz: 64.0
   filter:
     l_freq_hz: 0.1
-    h_freq_hz: 30.0
+    h_freq_hz: 15.0
   bad_channels:
     path_pattern: null
   ica:

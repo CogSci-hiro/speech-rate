@@ -5,7 +5,7 @@ lmeeeg_nested:
   output_dirname: "lmeeeg_nested"
   stats:
     correction: "tfce"
-    n_permutations: 200
+    n_permutations: 1000
     seed: 1234
     tail: 1
     adjacency: "mne_default"
